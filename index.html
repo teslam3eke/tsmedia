@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+
+    <!-- PWA essentials -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#1e293b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="tsMedia" />
+
+    <!-- Icons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <!-- SEO & Social -->
+    <meta name="description" content="專為台積電與聯發科工程師設計的高質感交友平台，在矽晶圓之外找到屬於你的另一半。" />
+    <meta name="keywords" content="台積電, 聯發科, TSMC, MediaTek, 交友, 工程師, 半導體" />
+    <meta property="og:title" content="tsMedia — 半導體菁英交友" />
+    <meta property="og:description" content="在矽晶圓之外找到屬於你的另一半" />
+    <meta property="og:type" content="website" />
+
+    <!-- Fonts: system default (no external font load, MacBook-style) -->
+    <style>
+      * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+      html { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+             "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif; }
+    </style>
+
+    <title>tsMedia — 半導體菁英交友</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
