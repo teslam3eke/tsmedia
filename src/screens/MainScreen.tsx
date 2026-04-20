@@ -251,7 +251,7 @@ function DiscoverTab() {
               className="relative w-full flex-shrink-0"
               style={{
                 background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})`,
-                paddingBottom: '72%',
+                paddingBottom: '144%',
               }}
             >
               {/* Noise overlay */}
@@ -361,46 +361,47 @@ function DiscoverTab() {
                 </div>
               </div>
 
-              {/* Spacer for action buttons */}
-              <div className="h-4" />
+              {/* ── Action buttons — 看完才出現，在卡片最底部 ── */}
+              <div className="pt-2 pb-10">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex-1 h-px bg-slate-100" />
+                  <span className="text-[10px] font-semibold text-slate-300 uppercase tracking-widest">你的決定</span>
+                  <div className="flex-1 h-px bg-slate-100" />
+                </div>
+
+                <div className="flex items-center justify-center gap-8">
+                  {index > 0 && (
+                    <motion.button
+                      whileTap={{ scale: 0.88 }}
+                      onClick={goPrev}
+                      className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-sm"
+                    >
+                      <ChevronLeft className="w-5 h-5 text-slate-400" />
+                    </motion.button>
+                  )}
+
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={handlePass}
+                    className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-md"
+                  >
+                    <X className="w-7 h-7 text-slate-400" />
+                  </motion.button>
+
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={handleLike}
+                    className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center shadow-lg shadow-slate-900/25"
+                  >
+                    <Heart className="w-7 h-7 text-white" />
+                  </motion.button>
+
+                  {index > 0 && <div className="w-12 h-12" />}
+                </div>
+              </div>
             </div>
           </motion.div>
         </AnimatePresence>
-      </div>
-
-      {/* ── Action buttons ────────────────────────────────────── */}
-      <div className="flex-shrink-0 px-6 py-4 flex items-center justify-center gap-8">
-        {/* Back (prev) */}
-        {index > 0 && (
-          <motion.button
-            whileTap={{ scale: 0.88 }}
-            onClick={goPrev}
-            className="w-12 h-12 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-sm"
-          >
-            <ChevronLeft className="w-5 h-5 text-slate-400" />
-          </motion.button>
-        )}
-
-        {/* Pass */}
-        <motion.button
-          whileTap={{ scale: 0.88 }}
-          onClick={handlePass}
-          className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-md hover:border-red-200 hover:text-red-400 transition-colors"
-        >
-          <X className="w-7 h-7 text-slate-400" />
-        </motion.button>
-
-        {/* Like */}
-        <motion.button
-          whileTap={{ scale: 0.88 }}
-          onClick={handleLike}
-          className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center shadow-lg shadow-slate-900/25"
-        >
-          <Heart className="w-7 h-7 text-white" />
-        </motion.button>
-
-        {/* Spacer mirror */}
-        {index > 0 && <div className="w-12 h-12" />}
       </div>
     </div>
   )
