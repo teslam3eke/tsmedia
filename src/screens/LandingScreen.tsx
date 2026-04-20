@@ -1,20 +1,10 @@
 import { motion } from 'framer-motion'
 import { ChevronRight, Cpu, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
-import BlurredAvatar from '@/components/BlurredAvatar'
 
 interface Props {
   onStart: () => void
   onSkip: () => void
 }
-
-const AVATARS = [
-  { from: '#667eea', to: '#764ba2' },
-  { from: '#f093fb', to: '#f5576c' },
-  { from: '#4facfe', to: '#00f2fe' },
-  { from: '#43e97b', to: '#38f9d7' },
-  { from: '#fa709a', to: '#fee140' },
-  { from: '#a18cd1', to: '#fbc2eb' },
-]
 
 const FEATURES = [
   {
@@ -43,7 +33,7 @@ export default function LandingScreen({ onStart, onSkip }: Props) {
 
       {/* ── Dark hero (no image) ──────────────────────────────────── */}
       <div
-        className="relative overflow-hidden px-5 pt-12 pb-10 flex-shrink-0"
+        className="relative overflow-hidden px-5 pt-safe pb-10 flex-shrink-0"
         style={{ background: 'linear-gradient(145deg, #0a0f1e 0%, #111827 50%, #0f1c2e 100%)' }}
       >
         {/* Dot grid */}
@@ -111,41 +101,51 @@ export default function LandingScreen({ onStart, onSkip }: Props) {
           transition={{ delay: 0.12, duration: 0.5 }}
           className="relative z-10"
         >
-          <p className="text-white/40 text-[11px] font-semibold tracking-[0.2em] uppercase mb-3">
+          <p className="text-white/38 text-[11px] font-semibold tracking-[0.22em] uppercase mb-3">
             台積電 × 聯發科・菁英專屬
           </p>
           <h1
-            className="text-white font-black leading-[1.08]"
-            style={{ fontSize: 'clamp(2rem, 8vw, 2.6rem)', letterSpacing: '-0.04em' }}
+            className="text-white font-medium leading-[1.04]"
+            style={{
+              fontSize: 'clamp(1.72rem, 6.4vw, 2.55rem)',
+              letterSpacing: '-0.07em',
+              fontFamily: '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif',
+            }}
           >
-            在矽晶圓之外，<br />找到屬於你的<br />那個人
+            <span className="block whitespace-nowrap text-white">在矽晶圓之外，</span>
+            <span className="block whitespace-nowrap text-white/92">找到屬於你的那個人</span>
           </h1>
+          <p className="max-w-xs mt-3 text-sm text-white/50 leading-relaxed">
+            為重視隱私、品質與真實連結的工程師，打造更克制也更有溫度的相遇方式。
+          </p>
         </motion.div>
 
-        {/* Avatar row */}
+        {/* Photo hero */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.4 }}
-          className="relative z-10 mt-8 flex items-center gap-3"
+          className="relative z-10 mt-8"
         >
-          <div className="flex -space-x-2.5">
-            {AVATARS.map((a, i) => (
-              <div
-                key={i}
-                className="ring-[2.5px] ring-[#0f1c2e] rounded-full"
-                style={{ zIndex: AVATARS.length - i }}
-              >
-                <BlurredAvatar gradientFrom={a.from} gradientTo={a.to} size="sm" />
+          <div className="relative overflow-hidden rounded-[28px] ring-1 ring-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+            <img
+              src="/landing-photo.png"
+              alt="TsMedia hero"
+              className="block w-full h-[260px] object-cover scale-[1.02]"
+              style={{ filter: 'blur(4px)' }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 p-4">
+              <div className="inline-flex items-center gap-1.5 bg-white/14 backdrop-blur-md rounded-full px-3 py-1.5 ring-1 ring-white/15">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                <span className="text-white/90 text-xs font-semibold">隱私保護模式展示</span>
               </div>
-            ))}
+            </div>
           </div>
-          <div>
+
+          <div className="mt-3 flex items-center justify-between px-1">
             <p className="text-sm font-bold text-white">2,400+ 位工程師</p>
-            <p className="text-xs text-white/45 flex items-center gap-1.5 mt-0.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-              頭像受隱私加密保護
-            </p>
+            <p className="text-xs text-white/55">單張主視覺 · 輕霧化處理</p>
           </div>
         </motion.div>
 

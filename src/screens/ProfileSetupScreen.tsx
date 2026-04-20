@@ -65,7 +65,7 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
   return (
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
-      <div className="px-5 pt-12 pb-6 border-b border-slate-100">
+      <div className="px-5 pt-safe pb-6 border-b border-slate-100">
         <div className="flex items-center gap-2 mb-1">
           <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
             <Cpu className="w-3.5 h-3.5 text-white" />

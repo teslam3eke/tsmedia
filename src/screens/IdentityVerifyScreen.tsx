@@ -10,6 +10,7 @@ import type { DocType } from '@/lib/types'
 
 interface Props {
   userId?: string
+  gender?: 'male' | 'female'
   onComplete: () => void
   onSkip: () => void
 }
@@ -28,9 +29,9 @@ interface ProofItem {
   file: File
 }
 
-const STEPS = ['生活照上傳', '身份驗證文件']
+const STEPS = ['生活照上傳', '職業驗證文件']
 
-export default function IdentityVerifyScreen({ userId, onComplete, onSkip }: Props) {
+export default function IdentityVerifyScreen({ userId, gender = 'male', onComplete, onSkip }: Props) {
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [proofs, setProofs] = useState<ProofItem[]>([])
@@ -112,10 +113,83 @@ export default function IdentityVerifyScreen({ userId, onComplete, onSkip }: Pro
     onComplete()
   }
 
+  // 女生不需要職業驗證，只需上傳生活照即可
+  if (gender === 'female') {
+    return (
+      <div className="min-h-dvh max-w-md mx-auto bg-[#fafafa] flex flex-col">
+        <div className="px-5 pt-safe pb-5">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
+              <Camera className="w-5 h-5 text-violet-600" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-slate-900 leading-tight">上傳生活照</h1>
+              <p className="text-xs text-slate-400">讓對方更了解你的日常</p>
+            </div>
+          </div>
+
+          <div className="bg-violet-50 rounded-2xl p-4 mb-6 flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-violet-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-violet-700 leading-relaxed">
+              TsMedia 對女性會員不要求職業驗證。上傳 1–5 張生活照，即可完成設定。
+            </p>
+          </div>
+
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => addPhotos(e.target.files)}
+          />
+
+          {/* Photo grid */}
+          <div className="grid grid-cols-3 gap-2 mb-6">
+            {photos.map((p) => (
+              <div key={p.id} className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
+                <img src={p.url} alt="" className="w-full h-full object-cover scale-110" style={{ filter: 'blur(6px)' }} />
+                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                  <span className="text-white text-[10px] font-semibold">隱私預覽</span>
+                </div>
+                <button
+                  onClick={() => removePhoto(p.id)}
+                  className="absolute top-1 right-1 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center"
+                >
+                  <Trash2 className="w-2.5 h-2.5 text-white" />
+                </button>
+              </div>
+            ))}
+            {photos.length < 5 && (
+              <button
+                onClick={() => photoInputRef.current?.click()}
+                className="aspect-square rounded-xl bg-white ring-1 ring-dashed ring-slate-300 flex flex-col items-center justify-center gap-1"
+              >
+                <ImageIcon className="w-5 h-5 text-slate-300" />
+                <span className="text-[10px] text-slate-400">新增</span>
+              </button>
+            )}
+          </div>
+
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={onComplete}
+            className="w-full py-4 bg-slate-900 text-white font-semibold rounded-2xl text-sm"
+          >
+            完成設定，進入配對
+          </motion.button>
+          <button onClick={onSkip} className="w-full mt-3 py-2 text-sm text-slate-400">
+            跳過，稍後上傳
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
-      <div className="px-5 pt-12 pb-5">
+      <div className="px-5 pt-safe pb-5">
         <div className="flex items-center gap-3 mb-5">
           {step > 0 && (
             <button
@@ -211,8 +285,15 @@ export default function IdentityVerifyScreen({ userId, onComplete, onSkip }: Pro
                         <img
                           src={photo.url}
                           alt={photo.name}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover scale-110"
+                          style={{ filter: 'blur(6px)' }}
                         />
+                        <div className="absolute inset-0 bg-black/10" />
+                        <div className="absolute left-2 right-2 bottom-2 rounded-xl bg-white/80 backdrop-blur-sm px-2.5 py-1.5">
+                          <p className="text-[10px] font-semibold text-slate-700 text-center tracking-wide">
+                            隱私保護預覽
+                          </p>
+                        </div>
                         <button
                           onClick={() => removePhoto(photo.id)}
                           className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center"
@@ -284,6 +365,10 @@ export default function IdentityVerifyScreen({ userId, onComplete, onSkip }: Pro
                       <p className="text-xs text-slate-500">{tip}</p>
                     </div>
                   ))}
+                  <div className="flex items-start gap-2 pt-1">
+                    <div className="w-1 h-1 rounded-full bg-slate-400 mt-1.5 flex-shrink-0" />
+                    <p className="text-xs text-slate-500">上傳預覽會先做霧化處理，正式審核仍使用原始檔案。</p>
+                  </div>
                 </div>
               </>
             )}

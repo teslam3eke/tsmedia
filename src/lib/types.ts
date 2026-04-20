@@ -15,6 +15,7 @@ export interface QuestionnaireEntry {
 export interface ProfileRow {
   id: string                          // uuid — matches auth.users.id
   name: string | null
+  gender: 'male' | 'female' | null
   age: number | null
   company: Company | null
   job_title: string | null

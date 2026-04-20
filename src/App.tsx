@@ -67,12 +67,20 @@ export default function App() {
 
   const [, setQuestionnaireEntries] = useState<QuestionnaireEntry[]>([])
   const [, setProfileSetupData] = useState<ProfileSetupData | null>(null)
+  const [userGender, setUserGender] = useState<'male' | 'female'>('male')
+
+  const getActiveUser = async () => {
+    if (user) return user
+    const { data } = await supabase.auth.getUser()
+    return data.user ?? null
+  }
 
   // Determine which screen to show based on saved progress.
   // 'pending' is the DB default for verification_status — it does NOT mean
   // the user hasn't verified. Identity verification is optional after onboarding.
   const routeByProfile = (profile: import('@/lib/types').ProfileRow | null) => {
-    if (!profile?.name)                                                     return go('security-check')
+    if (!profile?.name) return go('security-check')
+    if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
     go('main') // identity-verify is optional — accessible from profile settings
   }
@@ -95,16 +103,11 @@ export default function App() {
       }
     })
 
-    // Step 2: listen for subsequent sign-in / sign-out events
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // Step 2: keep user state in sync; routing is handled in onSuccess / getSession
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return
-      const u = session?.user ?? null
-      setUser(u)
-      if (event === 'SIGNED_OUT') { go('landing'); return }
-      if (event === 'SIGNED_IN' && u) {
-        const profile = await getProfile(u.id)
-        routeByProfile(profile)
-      }
+      setUser(session?.user ?? null)
+      if (event === 'SIGNED_OUT') go('landing')
     })
 
     return () => { cancelled = true; subscription.unsubscribe() }
@@ -117,14 +120,21 @@ export default function App() {
 
   const direction = SCREEN_ORDER.indexOf(screen) >= SCREEN_ORDER.indexOf(prevScreen) ? 'forward' : 'back'
   const anim = SLIDE[direction]
+  const isMainScreen = screen === 'main'
+  const motionInitial: TargetAndTransition = isMainScreen ? { opacity: 0 } : anim.initial
+  const motionAnimate: TargetAndTransition = isMainScreen ? { opacity: 1 } : { opacity: 1, x: 0 }
+  const motionExit: TargetAndTransition = isMainScreen ? { opacity: 0 } : anim.exit
 
   // ── ProfileSetup complete → save basic profile ───────────────
   const handleProfileSetupComplete = async (data: ProfileSetupData) => {
     setProfileSetupData(data)
-    if (user) {
+    setUserGender(data.gender)
+    const activeUser = await getActiveUser()
+    if (activeUser) {
       await upsertProfile({
-        userId: user.id,
+        userId: activeUser.id,
         name: data.name,
+        gender: data.gender,
         interests: data.interests,
         bio: data.bio,
       })
@@ -144,10 +154,16 @@ export default function App() {
       answer: answers[q.id] ?? '',
     }))
     setQuestionnaireEntries(entries)
-    if (user) {
-      await saveQuestionnaire(user.id, entries)
+    const activeUser = await getActiveUser()
+    if (activeUser) {
+      await saveQuestionnaire(activeUser.id, entries)
     }
-    go('identity-verify')
+    // 女生不需要職業驗證，直接進主畫面
+    if (userGender === 'female') {
+      go('main')
+    } else {
+      go('identity-verify')
+    }
   }
 
   if (!authReady) return <SplashScreen />
@@ -156,9 +172,9 @@ export default function App() {
     <AnimatePresence mode="wait">
       <motion.div
         key={screen}
-        initial={anim.initial}
-        animate={{ opacity: 1, x: 0 }}
-        exit={anim.exit}
+        initial={motionInitial}
+        animate={motionAnimate}
+        exit={motionExit}
         transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
         style={{ minHeight: '100dvh' }}
       >
@@ -171,7 +187,13 @@ export default function App() {
 
         {screen === 'auth' && (
           <AuthScreen
-            onSuccess={() => go('security-check')}
+            onSuccess={async (signedInUser) => {
+              // Use the authenticated user returned by Supabase directly to avoid
+              // getSession timing races right after login.
+              setUser(signedInUser)
+              const profile = await getProfile(signedInUser.id)
+              routeByProfile(profile)
+            }}
             onBack={() => go('landing')}
           />
         )}
@@ -193,22 +215,26 @@ export default function App() {
           <QuestionnaireScreen
             onComplete={handleQuestionnaireComplete}
             onSkip={() => go('identity-verify')}
+            gender={userGender}
           />
         )}
 
         {screen === 'identity-verify' && (
           <IdentityVerifyScreen
             userId={user?.id}
+            gender={userGender}
             onComplete={() => go('main')}
             onSkip={() => go('main')}
           />
         )}
 
         {screen === 'main' && (
-          <MainScreen
-            user={user}
-            onSignOut={() => go('landing')}
-          />
+          <div className="h-[100dvh] flex flex-col overflow-hidden w-full bg-white min-h-0">
+            <MainScreen
+              user={user}
+              onSignOut={() => go('landing')}
+            />
+          </div>
         )}
       </motion.div>
     </AnimatePresence>

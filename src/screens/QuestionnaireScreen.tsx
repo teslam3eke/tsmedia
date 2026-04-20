@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, MessageSquare, Cpu } from 'lucide-react'
-import { getRandomQuestions, type Question, type QuestionCategory } from '@/utils/questions'
+import { getRandomQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
 import { cn } from '@/lib/utils'
 
 interface Props {
   onComplete: (answers: Record<number, string>, questions: Question[]) => void
   onSkip: () => void
+  gender?: Gender
 }
 
 const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot: string }> = {
@@ -17,8 +18,8 @@ const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot:
 
 const MIN_CHARS = 20
 
-export default function QuestionnaireScreen({ onComplete, onSkip }: Props) {
-  const questions = useMemo(() => getRandomQuestions(5), [])
+export default function QuestionnaireScreen({ onComplete, onSkip, gender = 'male' }: Props) {
+  const questions = useMemo(() => getRandomQuestions(5, gender), [gender])
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
 
@@ -46,7 +47,7 @@ export default function QuestionnaireScreen({ onComplete, onSkip }: Props) {
   return (
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
-      <div className="px-5 pt-12 pb-4">
+      <div className="px-5 pt-safe pb-4">
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}

@@ -7,13 +7,14 @@
 create table if not exists public.profiles (
   id                  uuid references auth.users on delete cascade primary key,
   name                text,
+  gender              text check (gender in ('male', 'female')),
   age                 int check (age between 18 and 80),
   company             text check (company in ('TSMC', 'MediaTek')),
   job_title           text,
   department          text,
   bio                 text,
   interests           text[],
-  -- 隨機抽取的 10 題問題 + 作答，格式：[{id, category, text, answer}]
+  -- 隨機抽取的問題 + 作答，格式：[{id, category, text, answer}]
   questionnaire       jsonb,
   -- 生活照的 Supabase Storage 路徑陣列
   photo_urls          text[],
@@ -23,6 +24,10 @@ create table if not exists public.profiles (
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
+
+-- ── Migration: add gender column if table already exists ─────────────────────
+-- 在 Supabase Dashboard > SQL Editor 執行此段來新增 gender 欄位：
+-- alter table public.profiles add column if not exists gender text check (gender in ('male', 'female'));
 
 -- 自動更新 updated_at
 create or replace function public.handle_updated_at()

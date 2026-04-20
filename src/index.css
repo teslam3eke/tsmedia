@@ -44,23 +44,37 @@
   }
 
   html {
-    height: 100dvh;
+    /* iOS PWA golden combo: fill-available ensures safe-area is resolved on cold start */
+    height: 100%;
+    min-height: -webkit-fill-available;
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
   }
 
   body {
-    height: 100dvh;
+    height: 100%;
+    min-height: -webkit-fill-available;
     background-color: var(--color-background);
-    overflow-x: hidden;
-    /* Smooth scrolling on iOS */
+    overflow: hidden;
     -webkit-overflow-scrolling: touch;
   }
 
-  /* dvh = Dynamic Viewport Height — auto-adjusts when keyboard / toolbars appear */
   #root {
-    min-height: 100dvh;
+    height: 100%;
+    min-height: -webkit-fill-available;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-layout-container {
+    display: flex;
+    flex-direction: column;
+    /* Fill parent (#root). Do NOT cap with 100svh — on iOS installed PWA the
+       small viewport can be shorter than the real chromeless window, leaving
+       a visible gap (~1cm) under the tab bar. */
+    height: 100%;
+    min-height: 0;
   }
 }
 
@@ -80,8 +94,21 @@
     text-wrap: balance;
   }
 
+  /* Only add real home-indicator inset — never fall back to 1rem or the tab
+     bar floats visibly above the physical bottom on many devices. */
   .safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 1rem);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* For full-height screen headers — ensures content clears notch/Dynamic Island.
+     Falls back to 3.75rem (60px) on non-notched devices. */
+  .pt-safe {
+    padding-top: max(3.75rem, calc(env(safe-area-inset-top, 0px) + 1rem));
+  }
+
+  /* For compact nav/brand bars at the very top of the screen */
+  .pt-safe-bar {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
   }
 
   /* iOS-safe scrollable container — use on any h-full overflow-y-auto div */

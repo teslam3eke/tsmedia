@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, ChevronRight, Cpu, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { signIn, signUp } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
 interface Props {
-  onSuccess: () => void
+  onSuccess: (user: User) => void | Promise<void>
   onBack: () => void
 }
 
@@ -44,7 +45,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
       return
     }
 
-    onSuccess()
+    await onSuccess(result.user)
   }
 
   return (
@@ -52,7 +53,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
 
       {/* Header */}
       <div
-        className="px-5 pt-12 pb-10"
+        className="px-5 pt-safe pb-10"
         style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1e293b 100%)' }}
       >
         <motion.button

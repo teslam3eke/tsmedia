@@ -62,7 +62,7 @@ export default function OnboardingScreen({ onComplete, onSkip }: Props) {
   return (
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa]">
       {/* Header */}
-      <div className="px-5 pt-12 pb-6">
+      <div className="px-5 pt-safe pb-6">
         <div className="flex items-center gap-3 mb-6">
           {step > 0 && (
             <button

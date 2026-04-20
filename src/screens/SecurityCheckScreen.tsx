@@ -100,7 +100,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa]">
       {/* Header */}
       <div
-        className="px-5 pt-12 pb-8"
+        className="px-5 pt-safe pb-8"
         style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1e293b 100%)' }}
       >
         <motion.div
