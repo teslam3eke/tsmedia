@@ -126,6 +126,10 @@ export default function QuestionnaireScreen({ onComplete, onSkip }: Props) {
                 onChange={(e) =>
                   setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
                 }
+                onFocus={(e) => {
+                  const el = e.currentTarget
+                  setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)
+                }}
                 placeholder="請以開放式文字作答，說明你的真實想法與做法⋯"
                 rows={6}
                 className={cn(

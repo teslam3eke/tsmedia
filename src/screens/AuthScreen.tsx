@@ -59,9 +59,9 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
           onClick={onBack}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center gap-1.5 text-white/50 text-sm mb-7 hover:text-white/80 transition-colors"
+          className="flex items-center gap-2 text-white/70 text-base font-medium mb-7 hover:text-white transition-colors active:opacity-70 py-1 pr-3"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowLeft className="w-5 h-5" />
           返回
         </motion.button>
 
@@ -155,6 +155,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
                   type="email"
                   value={email}
                   onChange={(e) => { setEmail(e.target.value); setError('') }}
+                  onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
                   placeholder="your@email.com"
                   autoComplete="email"
                   className="flex-1 text-sm text-slate-900 placeholder:text-slate-300 outline-none bg-transparent"
@@ -168,6 +169,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
                   type={showPw ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError('') }}
+                  onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
                   placeholder={mode === 'signup' ? '設定密碼（至少 6 碼）' : '輸入密碼'}
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}

@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react'
-import { motion, AnimatePresence, useMotionValue, useTransform } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Heart, X, MessageCircle, Compass, User,
   Sparkles, MapPin, Briefcase, GraduationCap,
-  ChevronLeft, Send, MoreHorizontal, Bell,
-  Cpu, Zap, BookOpen, Coffee,
+  ChevronLeft, Send, Bell,
+  Cpu, Zap, BookOpen, Coffee, Search, LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { signOut } from '@/lib/auth'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -112,6 +113,22 @@ const PROFILES: Profile[] = [
     gradientTo: '#1e40af',
     compatScore: 88,
   },
+  {
+    id: 6,
+    name: '黃盈潔',
+    age: 27,
+    company: 'MediaTek',
+    role: '射頻 IC 設計',
+    department: '無線通訊研發',
+    location: '新竹',
+    education: '台大電信所',
+    bio: '在頻率與訊號之間找靈感。空閒時嘗試烘焙、游泳，還有看一些沒有人看過的冷門電影。',
+    interests: ['烘焙', '游泳', '電影', '清酒'],
+    initials: '黃',
+    gradientFrom: '#92400e',
+    gradientTo: '#b45309',
+    compatScore: 86,
+  },
 ]
 
 const MATCHES = [
@@ -153,173 +170,78 @@ function CompatBar({ score }: { score: number }) {
   )
 }
 
-// ─── Swipe Card ───────────────────────────────────────────────────────────────
+// ─── Pinterest Profile Card ───────────────────────────────────────────────────
 
-function SwipeCard({
+function ProfileCard({
   profile,
-  onLike,
-  onPass,
-  onExpand,
-  isTop,
-  stackIndex,
+  onTap,
+  delay = 0,
 }: {
   profile: Profile
-  onLike: () => void
-  onPass: () => void
-  onExpand: () => void
-  isTop: boolean
-  stackIndex: number
+  onTap: () => void
+  delay?: number
 }) {
-  const x = useMotionValue(0)
-  const rotate = useTransform(x, [-200, 200], [-18, 18])
-  const likeOpacity = useTransform(x, [30, 100], [0, 1])
-  const passOpacity = useTransform(x, [-100, -30], [1, 0])
-
-  const handleDragEnd = (_: unknown, info: { offset: { x: number } }) => {
-    if (info.offset.x > 100) onLike()
-    else if (info.offset.x < -100) onPass()
-  }
-
-  const scale = 1 - stackIndex * 0.04
-  const yOffset = stackIndex * 12
-
-  if (!isTop) {
-    return (
-      <motion.div
-        className="absolute inset-0 rounded-3xl overflow-hidden"
-        style={{ scale, y: yOffset, zIndex: 10 - stackIndex }}
-        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      >
-        <div
-          className="w-full h-full rounded-3xl"
-          style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-        />
-      </motion.div>
-    )
-  }
-
   return (
     <motion.div
-      className="absolute inset-0 rounded-3xl overflow-hidden cursor-grab active:cursor-grabbing select-none"
-      style={{ x, rotate, zIndex: 20 }}
-      drag="x"
-      dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.9}
-      onDragEnd={handleDragEnd}
-      whileTap={{ scale: 0.98 }}
+      onClick={onTap}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut', delay }}
+      whileTap={{ scale: 0.97 }}
+      className="rounded-3xl overflow-hidden bg-white shadow-sm ring-1 ring-slate-100/80 cursor-pointer"
     >
-      {/* Card background */}
+      {/* Gradient header */}
       <div
-        className="absolute inset-0"
-        style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-      />
-
-      {/* Like / Pass overlays */}
-      <motion.div
-        className="absolute top-8 left-8 z-10 rotate-[-20deg]"
-        style={{ opacity: likeOpacity }}
+        className="relative"
+        style={{
+          background: `linear-gradient(145deg, ${profile.gradientFrom}, ${profile.gradientTo})`,
+          paddingTop: '70%',
+        }}
       >
-        <div className="border-2 border-emerald-400 text-emerald-400 rounded-xl px-3 py-1 font-bold text-xl tracking-widest">
-          LIKE
+        {/* Compat badge */}
+        <div className="absolute top-2.5 right-2.5 bg-black/30 backdrop-blur-md rounded-full px-2 py-0.5 flex items-center gap-1">
+          <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+          <span className="text-[11px] font-bold text-white">{profile.compatScore}%</span>
         </div>
-      </motion.div>
-      <motion.div
-        className="absolute top-8 right-8 z-10 rotate-[20deg]"
-        style={{ opacity: passOpacity }}
-      >
-        <div className="border-2 border-red-400 text-red-400 rounded-xl px-3 py-1 font-bold text-xl tracking-widest">
-          PASS
+
+        {/* Avatar */}
+        <div className="absolute bottom-3 left-3 w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center text-white font-bold text-xl ring-2 ring-white/30">
+          {profile.initials}
         </div>
-      </motion.div>
 
-      {/* Content */}
-      <div className="absolute inset-0 flex flex-col justify-end">
-        {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-
-        {/* Info section */}
-        <div className="relative z-10 p-6 pb-8">
-          <div className="flex items-start justify-between mb-3">
-            <div>
-              <div className="flex items-baseline gap-2">
-                <h2 className="text-3xl font-bold text-white tracking-tight">{profile.name}</h2>
-                <span className="text-xl font-light text-white/80">{profile.age}</span>
-              </div>
-              <p className="text-sm text-white/70 mt-0.5 font-medium">{profile.role}</p>
-            </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); onExpand() }}
-              className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
-            >
-              <MoreHorizontal className="w-4 h-4 text-white" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap mb-3">
-            <CompanyBadge company={profile.company} />
-            <span className="flex items-center gap-1 text-xs text-white/60">
-              <MapPin className="w-3 h-3" />{profile.location}
-            </span>
-            <span className="flex items-center gap-1 text-xs text-white/60">
-              <GraduationCap className="w-3 h-3" />{profile.education}
-            </span>
-          </div>
-
-          <div className="flex gap-1.5 flex-wrap">
-            {profile.interests.slice(0, 3).map((tag) => (
-              <span key={tag} className="px-2.5 py-1 bg-white/15 backdrop-blur-sm rounded-full text-xs text-white font-medium">
-                {tag}
-              </span>
-            ))}
-          </div>
+        {/* Company */}
+        <div className="absolute bottom-3 right-3">
+          <span className={cn(
+            'text-[9px] font-bold px-1.5 py-0.5 rounded-full tracking-wide',
+            profile.company === 'TSMC'
+              ? 'bg-blue-500/80 text-white'
+              : 'bg-indigo-500/80 text-white',
+          )}>
+            {profile.company}
+          </span>
         </div>
       </div>
 
-      {/* Compat score strip */}
-      <div className="absolute top-5 right-5 z-10">
-        <div className="bg-white/20 backdrop-blur-md rounded-2xl px-3 py-1.5 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-          <span className="text-sm font-bold text-white">{profile.compatScore}%</span>
+      {/* Info */}
+      <div className="p-3 pb-3.5">
+        <div className="flex items-baseline gap-1.5 mb-0.5">
+          <span className="font-bold text-[13px] text-slate-900 leading-tight">{profile.name}</span>
+          <span className="text-xs text-slate-400">{profile.age}</span>
+        </div>
+        <p className="text-[11px] text-slate-500 font-medium mb-1.5 leading-tight">{profile.role}</p>
+        <p className="text-[11px] text-slate-400 leading-snug line-clamp-2 mb-2">{profile.bio}</p>
+        <div className="flex flex-wrap gap-1">
+          {profile.interests.slice(0, 2).map((tag) => (
+            <span
+              key={tag}
+              className="px-2 py-0.5 bg-slate-50 ring-1 ring-slate-200 rounded-full text-[10px] font-medium text-slate-500"
+            >
+              {tag}
+            </span>
+          ))}
         </div>
       </div>
     </motion.div>
-  )
-}
-
-// ─── Action Buttons ───────────────────────────────────────────────────────────
-
-function ActionButton({
-  icon: Icon,
-  onClick,
-  variant,
-  size = 'md',
-}: {
-  icon: React.ElementType
-  onClick: () => void
-  variant: 'pass' | 'like' | 'super'
-  size?: 'sm' | 'md' | 'lg'
-}) {
-  const sizeMap = { sm: 'w-12 h-12', md: 'w-14 h-14', lg: 'w-16 h-16' }
-  const iconSizeMap = { sm: 'w-5 h-5', md: 'w-6 h-6', lg: 'w-7 h-7' }
-  const variantMap = {
-    pass: 'border-slate-200 bg-white text-slate-400 hover:border-red-300 hover:text-red-400',
-    like: 'border-slate-200 bg-white text-slate-400 hover:border-emerald-300 hover:text-emerald-500',
-    super: 'border-slate-200 bg-white text-slate-400 hover:border-amber-300 hover:text-amber-400',
-  }
-
-  return (
-    <motion.button
-      onClick={onClick}
-      whileTap={{ scale: 0.88 }}
-      whileHover={{ scale: 1.06 }}
-      className={cn(
-        'rounded-full border-2 flex items-center justify-center shadow-sm transition-colors',
-        sizeMap[size],
-        variantMap[variant],
-      )}
-    >
-      <Icon className={iconSizeMap[size]} />
-    </motion.button>
   )
 }
 
@@ -339,17 +261,13 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
       exit={{ y: '100%' }}
       transition={{ type: 'spring', stiffness: 300, damping: 35 }}
     >
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
-      {/* Sheet */}
       <div className="relative mt-auto bg-[#fafafa] rounded-t-3xl overflow-hidden max-h-[92dvh] flex flex-col">
-        {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div className="w-10 h-1 bg-slate-200 rounded-full" />
         </div>
 
-        {/* Header card */}
         <div className="mx-4 mb-4 rounded-2xl overflow-hidden h-52 relative flex-shrink-0"
           style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
         >
@@ -371,15 +289,13 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
           </div>
           <button
             onClick={onClose}
-            className="absolute top-3 right-3 w-8 h-8 bg-black/30 backdrop-blur-sm rounded-full flex items-center justify-center"
+            className="absolute top-3 right-3 w-9 h-9 bg-black/30 backdrop-blur-sm rounded-full flex items-center justify-center"
           >
-            <ChevronLeft className="w-4 h-4 text-white rotate-90" />
+            <ChevronLeft className="w-5 h-5 text-white rotate-90" />
           </button>
         </div>
 
-        {/* Scrollable content */}
-        <div className="overflow-y-auto px-4 pb-6 flex-1">
-          {/* Meta row */}
+        <div className="overflow-y-auto px-4 pb-6 flex-1 -webkit-overflow-scrolling-touch">
           <div className="grid grid-cols-3 gap-3 mb-5">
             {[
               { icon: Briefcase, label: profile.role },
@@ -393,7 +309,6 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
             ))}
           </div>
 
-          {/* Department */}
           <div className="bg-white rounded-2xl p-4 mb-3 shadow-sm ring-1 ring-slate-100">
             <div className="flex items-center gap-2 mb-1">
               <Cpu className="w-3.5 h-3.5 text-slate-400" />
@@ -402,7 +317,6 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
             <p className="text-sm text-slate-800 font-medium">{profile.department}</p>
           </div>
 
-          {/* Bio */}
           <div className="bg-white rounded-2xl p-4 mb-3 shadow-sm ring-1 ring-slate-100">
             <div className="flex items-center gap-2 mb-2">
               <BookOpen className="w-3.5 h-3.5 text-slate-400" />
@@ -411,7 +325,6 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
             <p className="text-sm text-slate-700 leading-relaxed">{profile.bio}</p>
           </div>
 
-          {/* Interests */}
           <div className="bg-white rounded-2xl p-4 mb-3 shadow-sm ring-1 ring-slate-100">
             <div className="flex items-center gap-2 mb-3">
               <Coffee className="w-3.5 h-3.5 text-slate-400" />
@@ -426,7 +339,6 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
             </div>
           </div>
 
-          {/* Compat */}
           <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
             <div className="flex items-center gap-2 mb-3">
               <Zap className="w-3.5 h-3.5 text-slate-400" />
@@ -436,131 +348,136 @@ function ProfileDrawer({ profile, onClose, onLike, onPass }: {
           </div>
         </div>
 
-        {/* Action buttons */}
         <div className="flex justify-center gap-6 px-6 py-4 border-t border-slate-100 bg-[#fafafa] safe-bottom">
-          <ActionButton icon={X} onClick={onPass} variant="pass" size="lg" />
-          <ActionButton icon={Heart} onClick={onLike} variant="like" size="lg" />
+          <motion.button
+            whileTap={{ scale: 0.88 }}
+            onClick={onPass}
+            className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-sm hover:border-red-300 hover:text-red-400 transition-colors"
+          >
+            <X className="w-7 h-7 text-slate-400" />
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.88 }}
+            onClick={onLike}
+            className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-sm hover:border-emerald-300 hover:text-emerald-500 transition-colors"
+          >
+            <Heart className="w-7 h-7 text-slate-400" />
+          </motion.button>
         </div>
       </div>
     </motion.div>
   )
 }
 
-// ─── Discover Tab ─────────────────────────────────────────────────────────────
+// ─── Discover Tab — Pinterest Masonry ─────────────────────────────────────────
 
 function DiscoverTab() {
-  const [stack, setStack] = useState<Profile[]>(PROFILES)
-  const [expandedProfile, setExpandedProfile] = useState<Profile | null>(null)
-  const [lastAction, setLastAction] = useState<'like' | 'pass' | null>(null)
+  const [profiles, setProfiles] = useState<Profile[]>(PROFILES)
+  const [selected, setSelected] = useState<Profile | null>(null)
+  const [liked, setLiked] = useState<Set<number>>(new Set())
 
-  const handleLike = () => {
-    setLastAction('like')
-    setTimeout(() => setLastAction(null), 1200)
-    setStack((prev) => prev.slice(1))
-    setExpandedProfile(null)
+  const handleLike = (p: Profile) => {
+    setLiked((prev) => new Set([...prev, p.id]))
+    setSelected(null)
+    setProfiles((prev) => prev.filter((x) => x.id !== p.id))
   }
 
-  const handlePass = () => {
-    setLastAction('pass')
-    setTimeout(() => setLastAction(null), 1200)
-    setStack((prev) => prev.slice(1))
-    setExpandedProfile(null)
+  const handlePass = (p: Profile) => {
+    setSelected(null)
+    setProfiles((prev) => prev.filter((x) => x.id !== p.id))
   }
 
-  const visibleStack = stack.slice(0, 3)
-  const current = stack[0]
+  // 2-column masonry: alternate left/right
+  const leftCol = profiles.filter((_, i) => i % 2 === 0)
+  const rightCol = profiles.filter((_, i) => i % 2 === 1)
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 pt-4 pb-2">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">探索</h1>
-          <p className="text-xs text-slate-400">為你推薦的工程師</p>
+      <div className="px-4 pt-3 pb-2 flex-shrink-0">
+        <div className="flex items-center justify-between mb-2.5">
+          <div>
+            <h1 className="text-[22px] font-bold text-slate-900 tracking-tight leading-none">探索</h1>
+            <p className="text-xs text-slate-400 mt-0.5">為你推薦的菁英</p>
+          </div>
+          <button className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center relative">
+            <Bell className="w-4 h-4 text-slate-500" />
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-400 rounded-full" />
+          </button>
         </div>
-        <button className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center relative">
-          <Bell className="w-4 h-4 text-slate-500" />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-400 rounded-full" />
-        </button>
+
+        {/* Search bar */}
+        <div className="bg-white ring-1 ring-slate-100 rounded-2xl px-3.5 py-2.5 flex items-center gap-2 shadow-sm">
+          <Search className="w-3.5 h-3.5 text-slate-300 flex-shrink-0" />
+          <span className="text-sm text-slate-300">搜尋工程師、職稱⋯</span>
+        </div>
       </div>
 
-      {/* Card area */}
-      <div className="flex-1 relative mx-4 my-3">
-        <AnimatePresence>
-          {visibleStack.length > 0 ? (
-            [...visibleStack].reverse().map((profile, reversedIdx) => {
-              const stackIndex = visibleStack.length - 1 - reversedIdx
-              return (
-                <SwipeCard
-                  key={profile.id}
-                  profile={profile}
-                  isTop={stackIndex === 0}
-                  stackIndex={stackIndex}
-                  onLike={handleLike}
-                  onPass={handlePass}
-                  onExpand={() => setExpandedProfile(profile)}
+      {/* Masonry grid */}
+      <div className="flex-1 overflow-y-auto px-3 pt-1 pb-4" style={{ WebkitOverflowScrolling: 'touch' }}>
+        {profiles.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex flex-col items-center justify-center h-full text-center pt-20"
+          >
+            <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+              <Sparkles className="w-9 h-9 text-slate-300" />
+            </div>
+            <p className="text-slate-700 font-semibold text-lg">今日推薦已全部看完</p>
+            <p className="text-slate-400 text-sm mt-1">明天再來探索更多工程師</p>
+          </motion.div>
+        ) : (
+          <div className="flex gap-3">
+            {/* Left column */}
+            <div className="flex-1 flex flex-col gap-3">
+              {leftCol.map((p, i) => (
+                <ProfileCard
+                  key={p.id}
+                  profile={p}
+                  delay={i * 0.06}
+                  onTap={() => setSelected(p)}
                 />
-              )
-            })
-          ) : (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="absolute inset-0 flex flex-col items-center justify-center text-center"
-            >
-              <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4">
-                <Sparkles className="w-9 h-9 text-slate-300" />
-              </div>
-              <p className="text-slate-700 font-semibold text-lg">今日推薦已看完</p>
-              <p className="text-slate-400 text-sm mt-1">明天再來探索更多工程師</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Swipe hint */}
-        {stack.length > 0 && (
-          <div className="absolute -bottom-1 left-0 right-0 flex justify-center">
-            <p className="text-xs text-slate-300">← 左滑略過 · 右滑喜歡 →</p>
+              ))}
+            </div>
+            {/* Right column — offset for Pinterest stagger effect */}
+            <div className="flex-1 flex flex-col gap-3 mt-5">
+              {rightCol.map((p, i) => (
+                <ProfileCard
+                  key={p.id}
+                  profile={p}
+                  delay={i * 0.06 + 0.04}
+                  onTap={() => setSelected(p)}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Toast */}
+      {/* Liked toast */}
       <AnimatePresence>
-        {lastAction && (
+        {liked.size > 0 && (
           <motion.div
-            key={lastAction}
-            initial={{ opacity: 0, y: -20 }}
+            key="liked-count"
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className={cn(
-              'absolute top-16 left-1/2 -translate-x-1/2 z-30 px-5 py-2 rounded-full font-semibold text-sm shadow-lg',
-              lastAction === 'like' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-white',
-            )}
+            exit={{ opacity: 0 }}
+            className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg z-10"
           >
-            {lastAction === 'like' ? '❤️ 喜歡！' : '✕ 略過'}
+            ❤️ 已送出 {liked.size} 個喜歡
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Action row */}
-      {current && (
-        <div className="flex items-center justify-center gap-6 pb-4 pt-2">
-          <ActionButton icon={X} onClick={handlePass} variant="pass" />
-          <ActionButton icon={Sparkles} onClick={() => {}} variant="super" size="sm" />
-          <ActionButton icon={Heart} onClick={handleLike} variant="like" />
-        </div>
-      )}
-
-      {/* Profile Drawer */}
+      {/* Profile Detail Drawer */}
       <AnimatePresence>
-        {expandedProfile && (
+        {selected && (
           <ProfileDrawer
-            profile={expandedProfile}
-            onClose={() => setExpandedProfile(null)}
-            onLike={handleLike}
-            onPass={handlePass}
+            profile={selected}
+            onClose={() => setSelected(null)}
+            onLike={() => handleLike(selected)}
+            onPass={() => handlePass(selected)}
           />
         )}
       </AnimatePresence>
@@ -574,11 +491,11 @@ function MatchesTab() {
   return (
     <div className="flex flex-col h-full">
       <div className="px-5 pt-4 pb-2">
-        <h1 className="text-xl font-bold text-slate-900 tracking-tight">配對</h1>
-        <p className="text-xs text-slate-400">你的 {MATCHES.length} 個配對</p>
+        <h1 className="text-[22px] font-bold text-slate-900 tracking-tight">配對</h1>
+        <p className="text-xs text-slate-400 mt-0.5">你的 {MATCHES.length} 個配對</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pt-2 space-y-3 pb-4">
+      <div className="flex-1 overflow-y-auto px-4 pt-2 space-y-3 pb-4" style={{ WebkitOverflowScrolling: 'touch' }}>
         {MATCHES.map((match) => (
           <motion.div
             key={match.id}
@@ -640,7 +557,6 @@ function MessagesTab() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-slate-100">
         <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
           王
@@ -651,8 +567,7 @@ function MessagesTab() {
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" style={{ WebkitOverflowScrolling: 'touch' }}>
         {messages.map((msg) => (
           <motion.div
             key={msg.id}
@@ -678,12 +593,12 @@ function MessagesTab() {
         ))}
       </div>
 
-      {/* Input */}
       <div className="px-4 py-3 border-t border-slate-100 bg-[#fafafa] flex items-center gap-3 safe-bottom">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
+          onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300) }}
           placeholder="說點什麼..."
           className="flex-1 bg-white ring-1 ring-slate-200 rounded-full px-4 py-2.5 text-sm outline-none focus:ring-slate-400 transition-all"
         />
@@ -701,18 +616,16 @@ function MessagesTab() {
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
-function ProfileTab() {
+function ProfileTab({ onSignOut }: { onSignOut: () => void }) {
   const stats = [
     { label: '被喜歡', value: '142' },
     { label: '已配對', value: '23' },
     { label: '對話中', value: '8' },
   ]
-
   const badges = ['台大電機所', '3 年經驗', '新竹', 'TSMC N3']
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
-      {/* Hero */}
+    <div className="flex flex-col h-full overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
       <div className="mx-4 mt-4 rounded-3xl overflow-hidden relative h-44"
         style={{ background: 'linear-gradient(160deg, #1e293b, #334155)' }}
       >
@@ -729,7 +642,6 @@ function ProfileTab() {
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mx-4 mt-3">
         {stats.map(({ label, value }) => (
           <div key={label} className="bg-white rounded-2xl p-3.5 text-center shadow-sm ring-1 ring-slate-100">
@@ -739,7 +651,6 @@ function ProfileTab() {
         ))}
       </div>
 
-      {/* Identity */}
       <div className="mx-4 mt-3 bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">身份標籤</p>
@@ -754,7 +665,6 @@ function ProfileTab() {
         </div>
       </div>
 
-      {/* Settings list */}
       <div className="mx-4 mt-3 mb-6 bg-white rounded-2xl shadow-sm ring-1 ring-slate-100 overflow-hidden">
         {[
           { icon: User, label: '編輯個人資訊' },
@@ -774,6 +684,16 @@ function ProfileTab() {
             <span>{label}</span>
           </motion.button>
         ))}
+
+        {/* Sign out */}
+        <motion.button
+          whileTap={{ backgroundColor: '#fff1f2' }}
+          onClick={onSignOut}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-red-500 border-t border-slate-50"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>登出</span>
+        </motion.button>
       </div>
     </div>
   )
@@ -790,16 +710,20 @@ const NAV_ITEMS: { tab: Tab; icon: React.ElementType; label: string }[] = [
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export default function MainScreen(_props: { user?: import('@supabase/supabase-js').User | null; onSignOut?: () => void }) {
+export default function MainScreen({ onSignOut }: { user?: import('@supabase/supabase-js').User | null; onSignOut?: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('discover')
   const prevTab = useRef<Tab>('discover')
+
+  const handleSignOut = async () => {
+    await signOut()
+    onSignOut?.()
+  }
 
   const tabContent: Record<Tab, React.ReactNode> = {
     discover: <DiscoverTab />,
     matches: <MatchesTab />,
     messages: <MessagesTab />,
-    profile: <ProfileTab />,
+    profile: <ProfileTab onSignOut={handleSignOut} />,
   }
 
   const handleTabChange = (tab: Tab) => {
@@ -809,13 +733,24 @@ export default function MainScreen(_props: { user?: import('@supabase/supabase-j
 
   return (
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa] relative">
-      {/* Brand bar */}
-      <div className="flex items-center gap-1.5 px-5 py-2.5 border-b border-slate-100/80">
-        <div className="w-6 h-6 bg-slate-900 rounded-md flex items-center justify-center">
-          <Cpu className="w-3.5 h-3.5 text-white" />
+      {/* Brand bar — with back button on the left */}
+      <div className="flex items-center px-4 py-2.5 border-b border-slate-100/80">
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={handleSignOut}
+          className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center mr-3"
+          title="返回"
+        >
+          <ChevronLeft className="w-5 h-5 text-slate-600" />
+        </motion.button>
+
+        <div className="flex items-center gap-1.5 flex-1">
+          <div className="w-6 h-6 bg-slate-900 rounded-md flex items-center justify-center">
+            <Cpu className="w-3.5 h-3.5 text-white" />
+          </div>
+          <span className="font-bold text-slate-900 tracking-tight text-sm">tsMedia</span>
+          <span className="text-[10px] text-slate-400 ml-1">Silicon Hearts</span>
         </div>
-        <span className="font-bold text-slate-900 tracking-tight text-sm">tsMedia</span>
-        <span className="text-[10px] text-slate-400 ml-1">Silicon Hearts</span>
       </div>
 
       {/* Main content */}

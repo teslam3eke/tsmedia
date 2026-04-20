@@ -157,7 +157,7 @@ export default function App() {
         animate={{ opacity: 1, x: 0 }}
         exit={anim.exit}
         transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
-        style={{ minHeight: 'var(--app-height, 100svh)' }}
+        style={{ minHeight: '100dvh' }}
       >
         {screen === 'landing' && (
           <LandingScreen
