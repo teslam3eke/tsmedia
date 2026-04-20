@@ -1,13 +1,15 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Heart, X, MessageCircle, Compass, User,
   Sparkles, MapPin, Briefcase, GraduationCap,
   ChevronLeft, Send, Bell,
-  Cpu, Zap, LogOut, MessageSquare,
+  Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
+import { getProfile, upsertProfile } from '@/lib/db'
+import type { ProfileRow } from '@/lib/types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -533,83 +535,213 @@ function MessagesTab() {
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
-function ProfileTab({ onSignOut }: { onSignOut: () => void }) {
-  const stats = [
-    { label: '被喜歡', value: '142' },
-    { label: '已配對', value: '23' },
-    { label: '對話中', value: '8' },
-  ]
-  const badges = ['台大電機所', '3 年經驗', '新竹', 'TSMC N3']
+// ─── Edit Profile Sheet ───────────────────────────────────────────────────────
+
+function EditProfileSheet({
+  profile,
+  userId,
+  onClose,
+  onSaved,
+}: {
+  profile: ProfileRow
+  userId: string
+  onClose: () => void
+  onSaved: (updated: ProfileRow) => void
+}) {
+  const [name, setName] = useState(profile.name ?? '')
+  const [bio, setBio] = useState(profile.bio ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (!name.trim()) return
+    setSaving(true)
+    await upsertProfile({ userId, name: name.trim(), bio: bio.trim() })
+    setSaving(false)
+    onSaved({ ...profile, name: name.trim(), bio: bio.trim() })
+    onClose()
+  }
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex flex-col"
+      initial={{ y: '100%' }}
+      animate={{ y: 0 }}
+      exit={{ y: '100%' }}
+      transition={{ type: 'spring', stiffness: 300, damping: 35 }}
+    >
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative mt-auto bg-[#fafafa] rounded-t-3xl overflow-hidden max-h-[85dvh]">
+        {/* Handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 bg-slate-200 rounded-full" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <button onClick={onClose} className="text-sm text-slate-400 py-1 pr-3">取消</button>
+          <span className="text-sm font-bold text-slate-900">編輯個人資訊</span>
+          <button
+            onClick={save}
+            disabled={!name.trim() || saving}
+            className={cn(
+              'flex items-center gap-1 text-sm font-bold py-1 pl-3',
+              name.trim() ? 'text-slate-900' : 'text-slate-300',
+            )}
+          >
+            {saving ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}><Cpu className="w-4 h-4" /></motion.div> : <Check className="w-4 h-4" />}
+            儲存
+          </button>
+        </div>
+
+        {/* Form */}
+        <div className="px-5 py-5 space-y-4 overflow-y-auto">
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+              姓名 <span className="text-red-400">*</span>
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+              placeholder="你的名字"
+              className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+              自我介紹
+            </label>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+              placeholder="用幾句話介紹自己⋯"
+              rows={4}
+              className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none resize-none leading-relaxed"
+            />
+          </div>
+
+          <div className="pb-8">
+            <p className="text-xs text-slate-400 text-center">其他欄位（興趣、職稱）將在後續版本開放編輯</p>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+// ─── Profile Tab ──────────────────────────────────────────────────────────────
+
+function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => void }) {
+  const [profile, setProfile] = useState<ProfileRow | null>(null)
+  const [editing, setEditing] = useState(false)
+
+  useEffect(() => {
+    getProfile(userId).then(setProfile)
+  }, [userId])
+
+  const displayName = profile?.name ?? '—'
+  const initials = displayName !== '—' ? displayName.charAt(0) : '?'
+  const interests = profile?.interests ?? []
+  const bio = profile?.bio ?? ''
+  const verStatus = profile?.verification_status ?? 'pending'
 
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-      <div className="mx-4 mt-4 rounded-3xl overflow-hidden relative h-44"
-        style={{ background: 'linear-gradient(160deg, #1e293b, #334155)' }}
+      {/* Hero */}
+      <div className="mx-4 mt-4 rounded-3xl overflow-hidden relative"
+        style={{ background: 'linear-gradient(160deg, #1e293b, #334155)', minHeight: 160 }}
       >
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
         <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-white">我的個人檔案</h2>
-            <p className="text-xs text-white/60">上次更新 2 天前</p>
+          <div className="flex items-end gap-3">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-white font-black text-2xl ring-2 ring-white/25">
+              {initials}
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white leading-tight">{displayName}</h2>
+              <p className="text-xs text-white/50 mt-0.5">
+                {verStatus === 'approved' ? '✅ 已驗證' : verStatus === 'submitted' ? '審核中' : '待驗證'}
+              </p>
+            </div>
           </div>
-          <div className="bg-white/20 backdrop-blur-md rounded-xl px-2.5 py-1 flex items-center gap-1">
-            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="text-xs text-white font-medium">活躍中</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 mx-4 mt-3">
-        {stats.map(({ label, value }) => (
-          <div key={label} className="bg-white rounded-2xl p-3.5 text-center shadow-sm ring-1 ring-slate-100">
-            <p className="text-xl font-bold text-slate-900">{value}</p>
-            <p className="text-xs text-slate-400 mt-0.5">{label}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="mx-4 mt-3 bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">身份標籤</p>
-          <CompanyBadge company="TSMC" />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {badges.map((b) => (
-            <span key={b} className="px-3 py-1 bg-slate-50 ring-1 ring-slate-200 rounded-full text-xs text-slate-700 font-medium">
-              {b}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="mx-4 mt-3 mb-6 bg-white rounded-2xl shadow-sm ring-1 ring-slate-100 overflow-hidden">
-        {[
-          { icon: User, label: '編輯個人資訊' },
-          { icon: Heart, label: '配對偏好設定' },
-          { icon: Bell, label: '通知設定' },
-          { icon: Cpu, label: '公司認證' },
-        ].map(({ icon: Icon, label }, i, arr) => (
           <motion.button
-            key={label}
-            whileTap={{ backgroundColor: '#f8fafc' }}
-            className={cn(
-              'w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700',
-              i !== arr.length - 1 && 'border-b border-slate-50',
-            )}
+            whileTap={{ scale: 0.9 }}
+            onClick={() => setEditing(true)}
+            className="w-9 h-9 rounded-full bg-white/15 backdrop-blur flex items-center justify-center ring-1 ring-white/20"
           >
-            <Icon className="w-4 h-4 text-slate-400" />
-            <span>{label}</span>
+            <Pencil className="w-4 h-4 text-white" />
           </motion.button>
-        ))}
+        </div>
+      </div>
+
+      {/* Bio */}
+      {bio ? (
+        <div className="mx-4 mt-3 bg-white rounded-2xl px-4 py-3.5 shadow-sm ring-1 ring-slate-100">
+          <p className="text-sm text-slate-700 leading-relaxed">{bio}</p>
+        </div>
+      ) : null}
+
+      {/* Interests */}
+      {interests.length > 0 && (
+        <div className="mx-4 mt-3 bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">興趣</p>
+          <div className="flex flex-wrap gap-2">
+            {interests.map((b) => (
+              <span key={b} className="px-3 py-1 bg-slate-50 ring-1 ring-slate-200 rounded-full text-xs text-slate-700 font-medium">
+                {b}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="mx-4 mt-3 mb-6 bg-white rounded-2xl shadow-sm ring-1 ring-slate-100 overflow-hidden">
+        <motion.button
+          whileTap={{ backgroundColor: '#f8fafc' }}
+          onClick={() => setEditing(true)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
+        >
+          <User className="w-4 h-4 text-slate-400" />
+          <span>編輯個人資訊</span>
+        </motion.button>
+        <motion.button
+          whileTap={{ backgroundColor: '#f8fafc' }}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
+        >
+          <Bell className="w-4 h-4 text-slate-400" />
+          <span>通知設定</span>
+        </motion.button>
+        <motion.button
+          whileTap={{ backgroundColor: '#f8fafc' }}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
+        >
+          <Cpu className="w-4 h-4 text-slate-400" />
+          <span>公司認證</span>
+        </motion.button>
         <motion.button
           whileTap={{ backgroundColor: '#fff1f2' }}
           onClick={onSignOut}
-          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-red-500 border-t border-slate-50"
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-red-500"
         >
           <LogOut className="w-4 h-4" />
           <span>登出</span>
         </motion.button>
       </div>
+
+      {/* Edit sheet */}
+      <AnimatePresence>
+        {editing && profile && (
+          <EditProfileSheet
+            profile={profile}
+            userId={userId}
+            onClose={() => setEditing(false)}
+            onSaved={(updated) => setProfile(updated)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -625,7 +757,7 @@ const NAV_ITEMS: { tab: Tab; icon: React.ElementType; label: string }[] = [
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-export default function MainScreen({ onSignOut }: { user?: import('@supabase/supabase-js').User | null; onSignOut?: () => void }) {
+export default function MainScreen({ user, onSignOut }: { user?: import('@supabase/supabase-js').User | null; onSignOut?: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('discover')
   const prevTab = useRef<Tab>('discover')
 
@@ -638,7 +770,7 @@ export default function MainScreen({ onSignOut }: { user?: import('@supabase/sup
     discover: <DiscoverTab />,
     matches: <MatchesTab />,
     messages: <MessagesTab />,
-    profile: <ProfileTab onSignOut={handleSignOut} />,
+    profile: <ProfileTab userId={user?.id ?? ''} onSignOut={handleSignOut} />,
   }
 
   return (

@@ -68,6 +68,15 @@ export default function App() {
   const [, setQuestionnaireEntries] = useState<QuestionnaireEntry[]>([])
   const [, setProfileSetupData] = useState<ProfileSetupData | null>(null)
 
+  // Determine which screen to show based on saved progress.
+  // 'pending' is the DB default for verification_status — it does NOT mean
+  // the user hasn't verified. Identity verification is optional after onboarding.
+  const routeByProfile = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (!profile?.name)                                                     return go('security-check')
+    if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
+    go('main') // identity-verify is optional — accessible from profile settings
+  }
+
   // ── Auth init: read existing session first, then listen for changes ─────────
   useEffect(() => {
     let cancelled = false
@@ -80,10 +89,7 @@ export default function App() {
       setReady(true)
       if (u) {
         const profile = await getProfile(u.id)
-        if (!profile?.name)                                                      go('security-check')
-        else if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) go('questionnaire')
-        else if (profile.verification_status === 'pending')                      go('identity-verify')
-        else                                                                     go('main')
+        routeByProfile(profile)
       } else {
         go('landing')
       }
@@ -97,10 +103,7 @@ export default function App() {
       if (event === 'SIGNED_OUT') { go('landing'); return }
       if (event === 'SIGNED_IN' && u) {
         const profile = await getProfile(u.id)
-        if (!profile?.name)                                                      go('security-check')
-        else if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) go('questionnaire')
-        else if (profile.verification_status === 'pending')                      go('identity-verify')
-        else                                                                     go('main')
+        routeByProfile(profile)
       }
     })
 

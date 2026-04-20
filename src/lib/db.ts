@@ -33,19 +33,40 @@ export interface UpsertProfilePayload {
 export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok: boolean; error?: string }> {
   const { userId, jobTitle, photoUrls, ...rest } = payload
 
-  const { error } = await supabase
-    .from('profiles')
-    .upsert({
-      id: userId,
-      job_title: jobTitle,
-      photo_urls: photoUrls,
-      ...rest,
-    })
+  // Build a clean update object — only include fields that were actually provided
+  // (skip undefined so we never accidentally overwrite existing data with null)
+  const patch: Record<string, unknown> = {}
+  if (rest.name       !== undefined) patch.name       = rest.name
+  if (rest.bio        !== undefined) patch.bio        = rest.bio
+  if (rest.interests  !== undefined) patch.interests  = rest.interests
+  if (rest.age        !== undefined) patch.age        = rest.age
+  if (rest.company    !== undefined) patch.company    = rest.company
+  if (rest.questionnaire !== undefined) patch.questionnaire = rest.questionnaire
+  if (jobTitle        !== undefined) patch.job_title  = jobTitle
+  if (photoUrls       !== undefined) patch.photo_urls = photoUrls
 
-  if (error) {
-    console.error('[db] upsertProfile error:', error.message)
-    return { ok: false, error: error.message }
+  if (Object.keys(patch).length === 0) return { ok: true }
+
+  // Try UPDATE first (handle_new_user trigger should have pre-created the row)
+  const { error: updateErr } = await supabase
+    .from('profiles')
+    .update(patch)
+    .eq('id', userId)
+
+  if (updateErr) {
+    console.error('[db] upsertProfile update error:', updateErr.message)
+
+    // Fallback: INSERT (in case the trigger hasn't run yet)
+    const { error: insertErr } = await supabase
+      .from('profiles')
+      .insert({ id: userId, ...patch })
+
+    if (insertErr) {
+      console.error('[db] upsertProfile insert error:', insertErr.message)
+      return { ok: false, error: insertErr.message }
+    }
   }
+
   return { ok: true }
 }
 
