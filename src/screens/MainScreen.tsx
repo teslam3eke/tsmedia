@@ -5,11 +5,12 @@ import {
   Sparkles, MapPin, Briefcase, GraduationCap,
   ChevronLeft, Send, Bell,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
+  Camera, Trash2, ImageIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
-import { getProfile, upsertProfile } from '@/lib/db'
-import type { ProfileRow } from '@/lib/types'
+import { getProfile, upsertProfile, uploadPhoto } from '@/lib/db'
+import type { ProfileRow, QuestionnaireEntry } from '@/lib/types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -535,9 +536,16 @@ function MessagesTab() {
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
-// ─── Edit Profile Sheet ───────────────────────────────────────────────────────
+// ─── Edit Profile (Full Screen) ───────────────────────────────────────────────
 
-function EditProfileSheet({
+interface LocalPhoto {
+  id: string
+  previewUrl: string
+  storagePath?: string  // already uploaded
+  file?: File           // new, not yet uploaded
+}
+
+function EditProfileScreen({
   profile,
   userId,
   onClose,
@@ -548,86 +556,244 @@ function EditProfileSheet({
   onClose: () => void
   onSaved: (updated: ProfileRow) => void
 }) {
-  const [name, setName] = useState(profile.name ?? '')
-  const [bio, setBio] = useState(profile.bio ?? '')
+  const [name, setName]     = useState(profile.name ?? '')
+  const [bio, setBio]       = useState(profile.bio ?? '')
   const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState('')
+
+  // Photos
+  const [photos, setPhotos] = useState<LocalPhoto[]>(() =>
+    (profile.photo_urls ?? []).map((p, i) => ({ id: `existing-${i}`, previewUrl: p, storagePath: p })),
+  )
+  const photoInputRef = useRef<HTMLInputElement>(null)
+
+  // Questionnaire
+  const [qa, setQa] = useState<QuestionnaireEntry[]>(() =>
+    profile.questionnaire ?? [],
+  )
+
+  const addPhotos = (files: FileList | null) => {
+    if (!files) return
+    const newItems: LocalPhoto[] = Array.from(files)
+      .slice(0, 5 - photos.length)
+      .map((f) => ({
+        id: `new-${Date.now()}-${f.name}`,
+        previewUrl: URL.createObjectURL(f),
+        file: f,
+      }))
+    setPhotos((prev) => [...prev, ...newItems].slice(0, 5))
+  }
+
+  const removePhoto = (id: string) => {
+    setPhotos((prev) => {
+      const removed = prev.find((p) => p.id === id)
+      if (removed?.file) URL.revokeObjectURL(removed.previewUrl)
+      return prev.filter((p) => p.id !== id)
+    })
+  }
+
+  const updateAnswer = (index: number, answer: string) => {
+    setQa((prev) => prev.map((q, i) => i === index ? { ...q, answer } : q))
+  }
 
   const save = async () => {
     if (!name.trim()) return
     setSaving(true)
-    await upsertProfile({ userId, name: name.trim(), bio: bio.trim() })
+    setSaveMsg('')
+
+    // Upload new photos
+    const uploadedPaths: string[] = []
+    for (const photo of photos) {
+      if (photo.storagePath) {
+        uploadedPaths.push(photo.storagePath)
+      } else if (photo.file) {
+        const res = await uploadPhoto(userId, photo.file)
+        if (res.ok) uploadedPaths.push(res.path)
+      }
+    }
+
+    await upsertProfile({
+      userId,
+      name: name.trim(),
+      bio: bio.trim(),
+      questionnaire: qa.length > 0 ? qa : undefined,
+      photoUrls: uploadedPaths.length > 0 ? uploadedPaths : undefined,
+    })
+
     setSaving(false)
-    onSaved({ ...profile, name: name.trim(), bio: bio.trim() })
-    onClose()
+    setSaveMsg('已儲存 ✓')
+    setTimeout(() => setSaveMsg(''), 1800)
+
+    const updated: ProfileRow = {
+      ...profile,
+      name: name.trim(),
+      bio: bio.trim(),
+      questionnaire: qa.length > 0 ? qa : profile.questionnaire,
+      photo_urls: uploadedPaths.length > 0 ? uploadedPaths : profile.photo_urls,
+    }
+    onSaved(updated)
   }
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 flex flex-col"
-      initial={{ y: '100%' }}
-      animate={{ y: 0 }}
-      exit={{ y: '100%' }}
-      transition={{ type: 'spring', stiffness: 300, damping: 35 }}
+      className="fixed inset-0 z-50 bg-[#fafafa] flex flex-col"
+      initial={{ x: '100%' }}
+      animate={{ x: 0 }}
+      exit={{ x: '100%' }}
+      transition={{ type: 'spring', stiffness: 320, damping: 36 }}
     >
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative mt-auto bg-[#fafafa] rounded-t-3xl overflow-hidden max-h-[85dvh]">
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 bg-slate-200 rounded-full" />
-        </div>
+      {/* Sticky header */}
+      <div className="flex-shrink-0 flex items-center justify-between px-5 pt-12 pb-3 bg-[#fafafa] border-b border-slate-100">
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={onClose}
+          className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
+        >
+          <ChevronLeft className="w-5 h-5 text-slate-600" />
+        </motion.button>
 
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-          <button onClick={onClose} className="text-sm text-slate-400 py-1 pr-3">取消</button>
-          <span className="text-sm font-bold text-slate-900">編輯個人資訊</span>
-          <button
-            onClick={save}
-            disabled={!name.trim() || saving}
-            className={cn(
-              'flex items-center gap-1 text-sm font-bold py-1 pl-3',
-              name.trim() ? 'text-slate-900' : 'text-slate-300',
+        <span className="font-bold text-slate-900 text-[15px]">編輯個人資訊</span>
+
+        <motion.button
+          whileTap={{ scale: 0.95 }}
+          onClick={save}
+          disabled={!name.trim() || saving}
+          className={cn(
+            'flex items-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-bold transition-all',
+            name.trim() && !saving
+              ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
+              : 'bg-slate-100 text-slate-300',
+          )}
+        >
+          {saving
+            ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }}><Cpu className="w-4 h-4" /></motion.div>
+            : <Check className="w-4 h-4" />}
+          {saveMsg || '儲存'}
+        </motion.button>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-6" style={{ WebkitOverflowScrolling: 'touch' }}>
+
+        {/* ── 基本資料 ─────────────────────────────────── */}
+        <section>
+          <SectionHeading label="基本資料" />
+
+          <div className="space-y-3">
+            <div>
+              <label className="field-label">姓名 <span className="text-red-400">*</span></label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+                placeholder="你的名字"
+                className="field-input"
+              />
+            </div>
+
+            <div>
+              <label className="field-label">自我介紹</label>
+              <textarea
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+                placeholder="用幾句話介紹自己⋯"
+                rows={4}
+                className="field-input resize-none leading-relaxed"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ── 生活照 ───────────────────────────────────── */}
+        <section>
+          <SectionHeading label="生活照" hint={`${photos.length} / 5 張`} />
+
+          <div className="grid grid-cols-3 gap-2">
+            {photos.map((photo) => (
+              <div key={photo.id} className="relative aspect-square rounded-2xl overflow-hidden bg-slate-100">
+                <img src={photo.previewUrl} alt="" className="w-full h-full object-cover" />
+                <button
+                  onClick={() => removePhoto(photo.id)}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/50 backdrop-blur rounded-full flex items-center justify-center"
+                >
+                  <Trash2 className="w-3 h-3 text-white" />
+                </button>
+              </div>
+            ))}
+
+            {photos.length < 5 && (
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => photoInputRef.current?.click()}
+                className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 bg-white"
+              >
+                <Camera className="w-5 h-5 text-slate-300" />
+                <span className="text-[10px] text-slate-300 font-medium">新增照片</span>
+              </motion.button>
             )}
-          >
-            {saving ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}><Cpu className="w-4 h-4" /></motion.div> : <Check className="w-4 h-4" />}
-            儲存
-          </button>
-        </div>
 
-        {/* Form */}
-        <div className="px-5 py-5 space-y-4 overflow-y-auto">
-          <div>
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
-              姓名 <span className="text-red-400">*</span>
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
-              placeholder="你的名字"
-              className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none"
-            />
+            {photos.length === 0 && (
+              <div className="col-span-2 aspect-[2/1] rounded-2xl border-2 border-dashed border-slate-100 flex items-center justify-center bg-slate-50">
+                <div className="text-center">
+                  <ImageIcon className="w-8 h-8 text-slate-200 mx-auto mb-1" />
+                  <p className="text-xs text-slate-300">最多上傳 5 張生活照</p>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
-              自我介紹
-            </label>
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
-              placeholder="用幾句話介紹自己⋯"
-              rows={4}
-              className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none resize-none leading-relaxed"
-            />
-          </div>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => addPhotos(e.target.files)}
+          />
+        </section>
 
-          <div className="pb-8">
-            <p className="text-xs text-slate-400 text-center">其他欄位（興趣、職稱）將在後續版本開放編輯</p>
-          </div>
-        </div>
+        {/* ── 價值觀問答 ────────────────────────────────── */}
+        {qa.length > 0 && (
+          <section>
+            <SectionHeading label="價值觀問答" hint="可修改你的答案" />
+
+            <div className="space-y-4">
+              {qa.map((entry, i) => (
+                <div key={entry.id} className="bg-white rounded-3xl p-4 shadow-sm ring-1 ring-slate-100">
+                  <div className="flex items-start gap-2 mb-3">
+                    <span className="w-5 h-5 rounded-md bg-slate-900 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-white text-[9px] font-black">Q{i + 1}</span>
+                    </span>
+                    <p className="text-[13px] font-semibold text-slate-800 leading-snug">{entry.text}</p>
+                  </div>
+                  <textarea
+                    value={entry.answer}
+                    onChange={(e) => updateAnswer(i, e.target.value)}
+                    onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+                    rows={4}
+                    placeholder="修改你的回答⋯"
+                    className="w-full text-sm text-slate-700 placeholder:text-slate-300 leading-relaxed bg-slate-50 rounded-2xl px-3.5 py-3 outline-none focus:ring-1 focus:ring-slate-300 transition resize-none"
+                  />
+                  <p className="text-[10px] text-slate-300 text-right mt-1">{entry.answer.length} 字</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <div className="h-6" />
       </div>
     </motion.div>
+  )
+}
+
+function SectionHeading({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">{label}</h3>
+      {hint && <span className="text-xs text-slate-400">{hint}</span>}
+    </div>
   )
 }
 
@@ -731,10 +897,10 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
         </motion.button>
       </div>
 
-      {/* Edit sheet */}
+      {/* Edit screen */}
       <AnimatePresence>
         {editing && profile && (
-          <EditProfileSheet
+          <EditProfileScreen
             profile={profile}
             userId={userId}
             onClose={() => setEditing(false)}

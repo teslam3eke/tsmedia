@@ -64,6 +64,17 @@
   }
 }
 
+@layer components {
+  .field-label {
+    @apply text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block;
+  }
+  .field-input {
+    @apply w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900
+           placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100
+           focus:ring-slate-300 outline-none transition-all;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
