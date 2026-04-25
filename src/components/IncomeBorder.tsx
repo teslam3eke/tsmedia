@@ -36,33 +36,15 @@ const SIMPLE_FRAME_BG: Record<IncomeTier, string> = {
     #af8335 84%,
     #7a5319 100%)`,
 
-  // Diamond: metallic silver-blue base + fine horizontal hairline (brushed metal)
-  diamond: [
-    // Hairline brushed-metal texture — very fine nearly-horizontal lines
-    'repeating-linear-gradient(88deg,' +
-      'transparent 0px,' +
-      'transparent 1px,' +
-      'rgba(255,255,255,0.18) 1px,' +
-      'rgba(255,255,255,0.18) 2px,' +
-      'transparent 2px,' +
-      'transparent 4px,' +
-      'rgba(0,0,0,0.06) 4px,' +
-      'rgba(0,0,0,0.06) 4.5px,' +
-      'transparent 4.5px,' +
-      'transparent 8px' +
-    ')',
-    // Underlying metallic gradient
-    'linear-gradient(148deg,' +
-      '#60707e 0%,' +
-      '#9dafc0 12%,' +
-      '#c8d6e2 26%,' +
-      '#edf4fa 42%,' +
-      '#ffffff 50%,' +
-      '#dce8f2 62%,' +
-      '#a3b5c4 78%,' +
-      '#5e6d7c 100%' +
-    ')',
-  ].join(', '),
+  diamond: `linear-gradient(148deg,
+    #60707e 0%,
+    #9dafc0 12%,
+    #c8d6e2 26%,
+    #edf4fa 42%,
+    #ffffff 50%,
+    #dce8f2 62%,
+    #a3b5c4 78%,
+    #5e6d7c 100%)`,
 }
 
 // ─── Main component ──────────────────────────────────────────────────────────
