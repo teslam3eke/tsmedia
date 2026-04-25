@@ -68,9 +68,9 @@ export function IncomeBorder({
       >
         {/* Photo at natural size — determines container height */}
         {children}
-        {/* Diamond frame PNG stretched to cover the photo area, transparent center reveals photo */}
+        {/* Diamond frame PNG — same 2:3 ratio as photo, transparent center reveals photo */}
         <img
-          src="/assets/images/Diamond.png"
+          src="/assets/images/Diamond2.png"
           alt=""
           aria-hidden
           className="absolute inset-0 w-full h-full pointer-events-none select-none"
