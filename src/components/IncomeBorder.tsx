@@ -69,28 +69,18 @@ export function IncomeBorder({
   if (useAssetFrame) {
     return (
       <div
-        className={cn('relative', fill && 'h-full w-full', className)}
+        className={cn('relative overflow-hidden', fill && 'h-full w-full', className)}
         style={{ borderRadius: radius }}
       >
-        {/* Aspect-ratio spacer — matches PNG 422 × 572 */}
+        {/* Aspect-ratio spacer — matches PNG 422 × 572 = 135.545% */}
         <div aria-hidden className="w-full" style={{ paddingBottom: '135.545%' }} />
 
-        {/* Photo window — z-0, sits behind the frame PNG */}
-        <div
-          className="absolute z-0 overflow-hidden"
-          style={{
-            top:    '4.021%',
-            right:  '6.872%',
-            bottom: '4.021%',
-            left:   '6.872%',
-            borderRadius: '0.9rem',
-            boxShadow: 'inset 0 0 18px rgba(0,0,0,0.08)',
-          }}
-        >
+        {/* Photo fills the ENTIRE container so beads appear on top of photo */}
+        <div className="absolute inset-0 z-0 overflow-hidden" style={{ borderRadius: radius }}>
           {children}
         </div>
 
-        {/* Frame PNG — z-20, always above the photo */}
+        {/* Bead frame PNG — z-20, overlays directly on top of photo */}
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
           <img
             src={PREMIUM_FRAME_ASSET}
