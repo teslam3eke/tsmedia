@@ -18,7 +18,7 @@ export interface IncomeBorderProps {
 //   paddingBottom = 572/422 = 135.545%
 //   top/bottom inset = 23/572 = 4.021%
 //   left/right inset = 29/422 = 6.872%
-const PREMIUM_FRAME_ASSET = '/assets/images/premium_authentication_frame.png'
+const PREMIUM_FRAME_ASSET = '/assets/images/premium_authentication_frame_v2.png'
 
 const SIMPLE_FRAME_BG: Record<IncomeTier, string> = {
   silver: `linear-gradient(148deg,
