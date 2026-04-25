@@ -1,0 +1,36 @@
+---
+description: Prevent global iOS viewport and scroll fixes from breaking landing/auth page scrolling
+alwaysApply: true
+---
+
+# iOS Scroll Scope
+
+- Scope iOS `visualViewport`, keyboard, `scrollTo(0,0)`, and document `overflow: hidden` fixes as narrowly as possible.
+- Never apply those fixes globally unless the entire app truly needs them.
+- Landing, auth, onboarding, and other normal document-scrolling pages must keep natural scrolling behavior.
+- Main-app shell fixes for chat, keyboard, or tab bar layout should only run on the logged-in app screens that need them.
+- If a fix is for typing, keyboard, chat, or tab bar behavior, default to scoping it to `screen === 'main'` or an even smaller container.
+- Any code that force-resets document scroll (`window.scrollTo(0,0|1)`) must include an explicit screen/container guard and a comment explaining why the guard is safe.
+- Before shipping any iOS scroll/viewport fix, check both:
+  - the target screen that had the bug
+  - unrelated screens with normal vertical scrolling, especially the landing page
+
+## Regression Guard
+
+- Never let a fix for one screen silently change the scroll behavior of another screen.
+- Treat landing-page jumpiness, auth-page jumpiness, and broken natural document scroll as high-priority regressions.
+- When editing `App.tsx`, viewport listeners, or document-level scroll/overflow logic, assume landing/auth/onboarding are at risk and verify them every time.
+- Prefer container-scoped fixes over document-scoped fixes.
+
+## Bad
+
+- A global `visualViewport` listener that calls `window.scrollTo(0,0)` on every screen
+- Global `html/body { overflow: hidden }` for a bug that only exists in chat or the main app shell
+- A keyboard fix added in `App.tsx` without checking whether landing/auth still scroll normally
+
+## Good
+
+- Gate the fix by screen, route, or container
+- Keep landing/auth flows on normal document scroll unless there is a proven bug there
+- Remove temporary global hacks after replacing them with a narrower fix
+- Add code comments near viewport/scroll hacks explaining exactly which screen they are allowed to affect

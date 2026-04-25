@@ -1,0 +1,80 @@
+<svg width="1440" height="2048" viewBox="0 0 1440 2048" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <path id="frameShape" fill-rule="evenodd" d="M120 32H1320C1375.23 32 1420 76.7715 1420 132V1916C1420 1971.23 1375.23 2016 1320 2016H120C64.7715 2016 20 1971.23 20 1916V132C20 76.7715 64.7715 32 120 32ZM174 88H1266C1309.08 88 1344 122.922 1344 166V1882C1344 1925.08 1309.08 1960 1266 1960H174C130.922 1960 96 1925.08 96 1882V166C96 122.922 130.922 88 174 88Z"/>
+    <path id="photoCutout" d="M174 88H1266C1309.08 88 1344 122.922 1344 166V1882C1344 1925.08 1309.08 1960 1266 1960H174C130.922 1960 96 1925.08 96 1882V166C96 122.922 130.922 88 174 88Z"/>
+
+    <linearGradient id="outerMetal" x1="80" y1="72" x2="1360" y2="1976" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8FA2B9"/>
+      <stop offset="0.12" stop-color="#F7FBFF"/>
+      <stop offset="0.28" stop-color="#CBD9E9"/>
+      <stop offset="0.43" stop-color="#FFFFFF"/>
+      <stop offset="0.56" stop-color="#DDEAF7"/>
+      <stop offset="0.74" stop-color="#FDFEFF"/>
+      <stop offset="1" stop-color="#7D8DA1"/>
+    </linearGradient>
+    <linearGradient id="innerGlow" x1="132" y1="118" x2="1308" y2="1930" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.24" stop-color="#BFD2E8"/>
+      <stop offset="0.5" stop-color="#FFFFFF"/>
+      <stop offset="0.72" stop-color="#C8D7E8"/>
+      <stop offset="1" stop-color="#F8FBFF"/>
+    </linearGradient>
+    <linearGradient id="edgeShade" x1="720" y1="32" x2="720" y2="2016" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="0.12" stop-color="#FFFFFF" stop-opacity="0.24"/>
+      <stop offset="0.5" stop-color="#6E7D90" stop-opacity="0.1"/>
+      <stop offset="0.88" stop-color="#516174" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#263447" stop-opacity="0.36"/>
+    </linearGradient>
+    <radialGradient id="sparkle" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(412 368) rotate(58.6) scale(568 316)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="0.34" stop-color="#E7F2FF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#D8E8FA" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="crystalPattern" x="0" y="0" width="72" height="72" patternUnits="userSpaceOnUse">
+      <rect width="72" height="72" fill="#C5D5E7"/>
+      <path d="M36 8L64 36L36 64L8 36L36 8Z" fill="#F9FCFF" fill-opacity="0.66"/>
+      <path d="M36 18L54 36L36 54L18 36L36 18Z" fill="#9DB3C9" fill-opacity="0.26"/>
+      <path d="M0 36H72M36 0V72" stroke="#FFFFFF" stroke-opacity="0.36" stroke-width="3"/>
+      <path d="M8 36L36 8L64 36L36 64L8 36Z" stroke="#6F849A" stroke-opacity="0.2" stroke-width="3"/>
+    </pattern>
+    <mask id="frameMask" maskUnits="userSpaceOnUse">
+      <rect width="1440" height="2048" fill="black"/>
+      <path d="M120 32H1320C1375.23 32 1420 76.7715 1420 132V1916C1420 1971.23 1375.23 2016 1320 2016H120C64.7715 2016 20 1971.23 20 1916V132C20 76.7715 64.7715 32 120 32Z" fill="white"/>
+      <use href="#photoCutout" fill="black"/>
+    </mask>
+    <filter id="softShadow" x="-80" y="-80" width="1600" height="2208" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#0F172A" flood-opacity="0.2"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#FFFFFF" flood-opacity="0.42"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <use href="#frameShape" fill="url(#outerMetal)"/>
+    <use href="#frameShape" fill="url(#crystalPattern)" opacity="0.48"/>
+    <use href="#frameShape" fill="url(#sparkle)"/>
+    <use href="#frameShape" fill="url(#edgeShade)" opacity="0.78"/>
+
+    <g mask="url(#frameMask)" opacity="0.9">
+      <path d="M32 190L220 40H332L32 310V190Z" fill="#FFFFFF" fill-opacity="0.42"/>
+      <path d="M1408 174L1226 40H1126L1408 318V174Z" fill="#FFFFFF" fill-opacity="0.34"/>
+      <path d="M54 1912L250 2008H370L54 1774V1912Z" fill="#6F8095" fill-opacity="0.26"/>
+      <path d="M1386 1916L1192 2008H1068L1386 1760V1916Z" fill="#FFFFFF" fill-opacity="0.32"/>
+      <path d="M108 666L1332 1808" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="26"/>
+      <path d="M160 1850L1292 226" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="18"/>
+    </g>
+
+    <path d="M120 34H1320C1374.12 34 1418 77.8761 1418 132V1916C1418 1970.12 1374.12 2014 1320 2014H120C65.8761 2014 22 1970.12 22 1916V132C22 77.8761 65.8761 34 120 34Z" stroke="#FFFFFF" stroke-opacity="0.82" stroke-width="4"/>
+    <use href="#photoCutout" stroke="url(#innerGlow)" stroke-width="16"/>
+    <path d="M184 109H1256C1287.48 109 1313 134.52 1313 166V1882C1313 1913.48 1287.48 1939 1256 1939H184C152.52 1939 127 1913.48 127 1882V166C127 134.52 152.52 109 184 109Z" stroke="#FFFFFF" stroke-opacity="0.72" stroke-width="6"/>
+    <path d="M164 70H1276C1329.02 70 1372 112.981 1372 166V1882C1372 1935.02 1329.02 1978 1276 1978H164C110.981 1978 68 1935.02 68 1882V166C68 112.981 110.981 70 164 70Z" stroke="#65778C" stroke-opacity="0.28" stroke-width="8"/>
+  </g>
+
+  <g opacity="0.96">
+    <circle cx="1217" cy="1260" r="74" fill="#F9FCFF"/>
+    <circle cx="1217" cy="1260" r="70" fill="url(#outerMetal)"/>
+    <circle cx="1217" cy="1260" r="58" fill="#FFFFFF" fill-opacity="0.5"/>
+    <path d="M1185 1223L1217 1296L1249 1223" stroke="#586A80" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="1217" cy="1260" r="72" stroke="#FFFFFF" stroke-opacity="0.78" stroke-width="4"/>
+  </g>
+</svg>

@@ -43,38 +43,31 @@
     font-size: 16px;
   }
 
+  html, body, #root {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #ffffff;
+    /* Stop iOS rubber-band bounce on fast swipes — keeps PWA landing stable */
+    overscroll-behavior-y: none;
+  }
+
   html {
-    /* iOS PWA golden combo: fill-available ensures safe-area is resolved on cold start */
-    height: 100%;
-    min-height: -webkit-fill-available;
-    background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
   }
 
   body {
-    height: 100%;
-    min-height: -webkit-fill-available;
-    background-color: var(--color-background);
-    overflow: hidden;
     -webkit-overflow-scrolling: touch;
   }
+}
 
-  #root {
-    height: 100%;
-    min-height: -webkit-fill-available;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .main-layout-container {
-    display: flex;
-    flex-direction: column;
-    /* Fill parent (#root). Do NOT cap with 100svh — on iOS installed PWA the
-       small viewport can be shorter than the real chromeless window, leaving
-       a visible gap (~1cm) under the tab bar. */
-    height: 100%;
-    min-height: 0;
+/* iOS PWA standalone fallback — the inline var(--app-height) wins, this is
+   a last-resort backstop if the JS useEffect hasn't written the var yet. */
+@media (display-mode: standalone) {
+  .app-container {
+    min-height: 100vh;
   }
 }
 
@@ -117,4 +110,5 @@
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
+
 }

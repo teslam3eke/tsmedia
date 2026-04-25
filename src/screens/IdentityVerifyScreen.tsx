@@ -2,11 +2,15 @@ import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, FileText, Trash2, ChevronRight, ChevronLeft,
-  ShieldCheck, AlertCircle, Cpu, Upload, ImageIcon,
+  ShieldCheck, AlertCircle, Cpu, Upload, ImageIcon, Gem, Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { uploadPhoto, uploadProofDoc, submitVerificationDoc, upsertProfile } from '@/lib/db'
-import type { DocType } from '@/lib/types'
+import {
+  uploadPhoto, uploadProofDoc, submitVerificationDoc,
+  submitIncomeVerification, upsertProfile,
+} from '@/lib/db'
+import type { DocType, IncomeTier } from '@/lib/types'
+import { IncomeBorder } from '@/components/IncomeBorder'
 
 interface Props {
   userId?: string
@@ -27,18 +31,51 @@ interface ProofItem {
   name: string
   type: string
   file: File
+  previewUrl: string   // object URL for in-app preview
 }
 
-const STEPS = ['生活照上傳', '職業驗證文件']
+const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（選填）']
+const STEPS_FEMALE = ['生活照上傳', '收入認證（選填）']
+
+const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
+  { tier: 'silver',  range: '年收 200–299 萬', desc: '銀色金屬漸層邊框' },
+  { tier: 'gold',    range: '年收 300–399 萬', desc: '溫暖香檳金漸層邊框' },
+  { tier: 'diamond', range: '年收 400 萬以上', desc: '動態彩虹折射光效' },
+]
 
 export default function IdentityVerifyScreen({ userId, gender = 'male', onComplete, onSkip }: Props) {
+  const steps = gender === 'female' ? STEPS_FEMALE : STEPS_MALE
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<PhotoItem[]>([])
   const [proofs, setProofs] = useState<ProofItem[]>([])
   const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>('')
   const [submitting, setSubmitting] = useState(false)
-  const photoInputRef = useRef<HTMLInputElement>(null)
-  const proofInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Income verification state ────────────────────────────────────
+  const [selectedTier, setSelectedTier] = useState<IncomeTier | null>(null)
+  const [incomeDoc, setIncomeDoc]       = useState<ProofItem | null>(null)
+
+  const photoInputRef  = useRef<HTMLInputElement>(null)
+  const proofInputRef  = useRef<HTMLInputElement>(null)
+  const incomeInputRef = useRef<HTMLInputElement>(null)
+
+  const addIncomeDoc = (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const f = files[0]
+    if (incomeDoc) URL.revokeObjectURL(incomeDoc.previewUrl)
+    setIncomeDoc({
+      id: `${Date.now()}-${f.name}`,
+      name: f.name,
+      type: f.type,
+      file: f,
+      previewUrl: URL.createObjectURL(f),
+    })
+  }
+
+  const clearIncomeDoc = () => {
+    if (incomeDoc) URL.revokeObjectURL(incomeDoc.previewUrl)
+    setIncomeDoc(null)
+  }
 
   const addPhotos = (files: FileList | null) => {
     if (!files) return
@@ -63,6 +100,8 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
 
   const addProof = (files: FileList | null) => {
     if (!files) return
+    // Revoke any existing preview URL before replacing
+    proofs.forEach((p) => URL.revokeObjectURL(p.previewUrl))
     const newProofs: ProofItem[] = Array.from(files)
       .slice(0, 1)
       .map((f) => ({
@@ -70,18 +109,37 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
         name: f.name,
         type: f.type,
         file: f,
+        previewUrl: URL.createObjectURL(f),
       }))
     setProofs(newProofs)
   }
 
-  const canStep1 = photos.length >= 3
-  const canStep2 = selectedCompany !== '' && proofs.length > 0
+  const removeProof = () => {
+    proofs.forEach((p) => URL.revokeObjectURL(p.previewUrl))
+    setProofs([])
+  }
+
+  // Step index mapping differs by gender. Build helpers to check readiness.
+  const photosReady  = photos.length >= 3
+  const jobReady     = selectedCompany !== '' && proofs.length > 0
+  // Income step is optional — advance even with nothing selected, but if the
+  // user picks a tier they must also upload a doc.
+  const incomeReady  = !selectedTier || (selectedTier !== null && incomeDoc !== null)
+
+  const isLastStep  = step === steps.length - 1
+  const canAdvance  = (() => {
+    const label = steps[step]
+    if (label === '生活照上傳')     return photosReady
+    if (label === '職業驗證文件')   return jobReady
+    if (label === '收入認證（選填）') return incomeReady
+    return false
+  })()
 
   const handleSubmit = async () => {
     setSubmitting(true)
 
-    if (userId && selectedCompany) {
-      // 1. Upload life photos to Storage
+    if (userId) {
+      // 1. Upload life photos to Storage (both genders)
       const photoFiles = photos.map((p) => p.file).filter(Boolean) as File[]
       const uploadedPhotoUrls: string[] = []
       for (const file of photoFiles) {
@@ -92,8 +150,8 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
         await upsertProfile({ userId, photoUrls: uploadedPhotoUrls })
       }
 
-      // 2. Upload proof doc + save to verification_docs table
-      if (proofs.length > 0 && proofs[0].file) {
+      // 2. Male-only: employment proof
+      if (selectedCompany && proofs.length > 0 && proofs[0].file) {
         const proofResult = await uploadProofDoc(userId, proofs[0].file)
         if (proofResult.ok) {
           const docTypeMap: Record<string, DocType> = {
@@ -102,6 +160,15 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
           }
           const docType: DocType = docTypeMap[proofs[0].type] ?? 'payslip'
           await submitVerificationDoc(userId, selectedCompany, docType, proofResult.path)
+        }
+      }
+
+      // 3. Optional: income verification (both genders)
+      if (selectedTier && incomeDoc) {
+        const r = await uploadProofDoc(userId, incomeDoc.file)
+        if (r.ok) {
+          const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
+          await submitIncomeVerification(userId, selectedTier, docType, r.path)
         }
       }
     } else {
@@ -113,78 +180,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
     onComplete()
   }
 
-  // 女生不需要職業驗證，只需上傳生活照即可
-  if (gender === 'female') {
-    return (
-      <div className="min-h-dvh max-w-md mx-auto bg-[#fafafa] flex flex-col">
-        <div className="px-5 pt-safe pb-5">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-9 h-9 rounded-xl bg-violet-100 flex items-center justify-center">
-              <Camera className="w-5 h-5 text-violet-600" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900 leading-tight">上傳生活照</h1>
-              <p className="text-xs text-slate-400">讓對方更了解你的日常</p>
-            </div>
-          </div>
-
-          <div className="bg-violet-50 rounded-2xl p-4 mb-6 flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 text-violet-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-violet-700 leading-relaxed">
-              TsMedia 對女性會員不要求職業驗證。上傳 1–5 張生活照，即可完成設定。
-            </p>
-          </div>
-
-          <input
-            ref={photoInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => addPhotos(e.target.files)}
-          />
-
-          {/* Photo grid */}
-          <div className="grid grid-cols-3 gap-2 mb-6">
-            {photos.map((p) => (
-              <div key={p.id} className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
-                <img src={p.url} alt="" className="w-full h-full object-cover scale-110" style={{ filter: 'blur(6px)' }} />
-                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                  <span className="text-white text-[10px] font-semibold">隱私預覽</span>
-                </div>
-                <button
-                  onClick={() => removePhoto(p.id)}
-                  className="absolute top-1 right-1 w-5 h-5 bg-black/50 rounded-full flex items-center justify-center"
-                >
-                  <Trash2 className="w-2.5 h-2.5 text-white" />
-                </button>
-              </div>
-            ))}
-            {photos.length < 5 && (
-              <button
-                onClick={() => photoInputRef.current?.click()}
-                className="aspect-square rounded-xl bg-white ring-1 ring-dashed ring-slate-300 flex flex-col items-center justify-center gap-1"
-              >
-                <ImageIcon className="w-5 h-5 text-slate-300" />
-                <span className="text-[10px] text-slate-400">新增</span>
-              </button>
-            )}
-          </div>
-
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={onComplete}
-            className="w-full py-4 bg-slate-900 text-white font-semibold rounded-2xl text-sm"
-          >
-            完成設定，進入配對
-          </motion.button>
-          <button onClick={onSkip} className="w-full mt-3 py-2 text-sm text-slate-400">
-            跳過，稍後上傳
-          </button>
-        </div>
-      </div>
-    )
-  }
+  const stepLabel = steps[step]
 
   return (
     <div className="max-w-md mx-auto bg-[#fafafa]">
@@ -201,7 +197,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
           )}
           <div className="flex-1">
             <div className="flex gap-1.5 mb-2">
-              {STEPS.map((_, i) => (
+              {steps.map((_, i) => (
                 <div
                   key={i}
                   className={cn(
@@ -211,7 +207,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                 />
               ))}
             </div>
-            <p className="text-xs text-slate-400">{step + 1} / {STEPS.length} — {STEPS[step]}</p>
+            <p className="text-xs text-slate-400">{step + 1} / {steps.length} — {stepLabel}</p>
           </div>
         </div>
 
@@ -223,7 +219,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
             exit={{ opacity: 0, x: -16 }}
             transition={{ duration: 0.2 }}
           >
-            {step === 0 && (
+            {stepLabel === '生活照上傳' && (
               <>
                 <div className="flex items-center gap-2 mb-1">
                   <Camera className="w-4 h-4 text-slate-400" />
@@ -234,7 +230,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                 </p>
               </>
             )}
-            {step === 1 && (
+            {stepLabel === '職業驗證文件' && (
               <>
                 <div className="flex items-center gap-2 mb-1">
                   <FileText className="w-4 h-4 text-slate-400" />
@@ -242,6 +238,17 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
                   TsMedia 限台積電（TSMC）或聯發科（MediaTek）員工，請提供以下任一文件。
+                </p>
+              </>
+            )}
+            {stepLabel === '收入認證（選填）' && (
+              <>
+                <div className="flex items-center gap-2 mb-1">
+                  <Gem className="w-4 h-4 text-slate-400" />
+                  <h2 className="text-xl font-bold text-slate-900">收入認證</h2>
+                </div>
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  選擇對應的收入等級並上傳證明文件，通過審核後可啟用照片邊框特效。此步驟為選填。
                 </p>
               </>
             )}
@@ -260,8 +267,8 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
             transition={{ duration: 0.22 }}
             className="space-y-4"
           >
-            {/* ── STEP 1: Life photos ─────────────────────────────── */}
-            {step === 0 && (
+            {/* ── Life photos ─────────────────────────────── */}
+            {stepLabel === '生活照上傳' && (
               <>
                 <input
                   ref={photoInputRef}
@@ -373,8 +380,8 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
               </>
             )}
 
-            {/* ── STEP 2: Identity proof ──────────────────────────── */}
-            {step === 1 && (
+            {/* ── Employment proof (male only) ──────────────────────────── */}
+            {stepLabel === '職業驗證文件' && (
               <>
                 <input
                   ref={proofInputRef}
@@ -466,7 +473,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                       <p className="text-xs text-emerald-500 mt-0.5">✓ 文件已上傳</p>
                     </div>
                     <button
-                      onClick={() => setProofs([])}
+                      onClick={removeProof}
                       className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-slate-500" />
@@ -508,6 +515,151 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                 </div>
               </>
             )}
+
+            {/* ── Income verification (optional) ──────────────────── */}
+            {stepLabel === '收入認證（選填）' && (
+              <>
+                <input
+                  ref={incomeInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => addIncomeDoc(e.target.files)}
+                />
+
+                {/* Tier selection cards with live border preview */}
+                <div className="space-y-3">
+                  {TIER_CARDS.map(({ tier, range, desc }) => {
+                    const isActive = selectedTier === tier
+                    return (
+                      <button
+                        key={tier}
+                        onClick={() => setSelectedTier(isActive ? null : tier)}
+                        className={cn(
+                          'w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all',
+                          isActive
+                            ? 'bg-white ring-2 ring-slate-900 shadow-md'
+                            : 'bg-white ring-1 ring-slate-100 shadow-sm active:scale-[0.99]',
+                        )}
+                      >
+                        {/* Live preview — a little square showing the border */}
+                        <IncomeBorder tier={tier} radius="0.6rem" thickness={6}>
+                          <div className="w-14 h-14 bg-slate-100 flex items-center justify-center">
+                            <Gem className="w-5 h-5 text-slate-400" />
+                          </div>
+                        </IncomeBorder>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-900 leading-tight">
+                            {tier === 'silver' ? '銀級' : tier === 'gold' ? '金級' : '鑽石級'}認證
+                          </p>
+                          <p className="text-[12px] text-slate-500 mt-0.5">{range}</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">{desc}</p>
+                        </div>
+                        <div
+                          className={cn(
+                            'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0',
+                            isActive ? 'bg-slate-900' : 'bg-slate-100',
+                          )}
+                        >
+                          {isActive && <div className="w-2 h-2 rounded-full bg-white" />}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Document upload only after a tier is picked */}
+                {selectedTier && (
+                  <>
+                    <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
+                        接受的收入證明（任選一種）
+                      </p>
+                      <div className="space-y-1.5">
+                        {[
+                          { icon: '🧾', label: '綜合所得稅結算申報書（最可信）' },
+                          { icon: '💼', label: '薪資單 / 扣繳憑單' },
+                          { icon: '🏦', label: '薪轉存摺 / 銀行對帳單' },
+                        ].map(({ icon, label }) => (
+                          <div key={label} className="flex items-center gap-2 py-0.5">
+                            <span className="text-sm">{icon}</span>
+                            <p className="text-xs text-slate-600">{label}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {incomeDoc === null ? (
+                      <button
+                        onClick={() => incomeInputRef.current?.click()}
+                        className="w-full rounded-3xl p-6 flex flex-col items-center gap-3 bg-white ring-1 ring-slate-100 shadow-sm active:scale-[0.99] transition-all"
+                      >
+                        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
+                          <Upload className="w-6 h-6 text-slate-400" />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-sm font-semibold text-slate-700">
+                            上傳{selectedTier === 'silver' ? '銀級' : selectedTier === 'gold' ? '金級' : '鑽石級'}證明文件
+                          </p>
+                          <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF</p>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="space-y-3">
+                        {/* Preview */}
+                        <div className="bg-white rounded-2xl p-3 shadow-sm ring-1 ring-slate-100">
+                          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2 px-1">
+                            預覽
+                          </p>
+                          {incomeDoc.type.startsWith('image/') ? (
+                            <div className="relative w-full rounded-xl overflow-hidden bg-slate-100" style={{ aspectRatio: '4 / 3' }}>
+                              <img
+                                src={incomeDoc.previewUrl}
+                                alt="收入證明預覽"
+                                className="w-full h-full object-contain"
+                                style={{ filter: 'blur(6px)' }}
+                              />
+                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <div className="bg-white/85 backdrop-blur-sm rounded-full px-3 py-1.5">
+                                  <p className="text-[11px] font-bold text-slate-700 tracking-wide">
+                                    隱私保護預覽
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl bg-slate-50 p-4 flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center">
+                                <FileText className="w-5 h-5 text-slate-500" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-slate-800 truncate">{incomeDoc.name}</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">PDF 文件 · 已準備上傳</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={clearIncomeDoc}
+                          className="w-full py-2.5 text-xs text-slate-400 bg-slate-50 rounded-xl"
+                        >
+                          重新選擇檔案
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Privacy & review notes */}
+                <div className="flex items-start gap-2 px-1">
+                  <Sparkles className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    通過審核後，你可以到「編輯個人資訊」自行決定是否要顯示收入邊框。未通過前邊框不會顯示。
+                  </p>
+                </div>
+              </>
+            )}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -515,15 +667,16 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
       {/* Footer */}
       <div className="px-5 pb-10 pt-4 space-y-3">
         <motion.button
-          whileTap={{ scale: (step === 0 ? canStep1 : canStep2) ? 0.97 : 1 }}
+          whileTap={{ scale: canAdvance ? 0.97 : 1 }}
           onClick={() => {
-            if (step === 0 && canStep1) setStep(1)
-            else if (step === 1 && canStep2) handleSubmit()
+            if (!canAdvance) return
+            if (isLastStep) handleSubmit()
+            else setStep(step + 1)
           }}
-          disabled={submitting || (step === 0 ? !canStep1 : !canStep2)}
+          disabled={submitting || !canAdvance}
           className={cn(
             'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
-            (step === 0 ? canStep1 : canStep2) && !submitting
+            canAdvance && !submitting
               ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20'
               : 'bg-slate-100 text-slate-300',
           )}
@@ -540,7 +693,9 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
             </>
           ) : (
             <>
-              {step === 0 ? '繼續' : '提交審核申請'}
+              {isLastStep
+                ? (stepLabel === '收入認證（選填）' && !selectedTier ? '完成（略過收入認證）' : '提交審核申請')
+                : '繼續'}
               <ChevronRight className="w-5 h-5" />
             </>
           )}

@@ -75,15 +75,94 @@ export default function App() {
     return data.user ?? null
   }
 
-  // Determine which screen to show based on saved progress.
-  // 'pending' is the DB default for verification_status — it does NOT mean
-  // the user hasn't verified. Identity verification is optional after onboarding.
-  const routeByProfile = (profile: import('@/lib/types').ProfileRow | null) => {
-    if (!profile?.name) return go('security-check')
+  // After security check, decide where to go based on profile completeness.
+  const routeAfterSecurityCheck = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (!profile?.name) return go('profile-setup')
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
-    go('main') // identity-verify is optional — accessible from profile settings
+    go('main')
   }
+
+  // Always go through security check first, regardless of progress.
+  const routeByProfile = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (profile?.gender) setUserGender(profile.gender)
+    go('security-check')
+  }
+
+  // ── iOS PWA layout recalc hack ────────────────────────────────────
+  // On cold-start, iOS PWA occasionally renders with a stale viewport
+  // (phantom URL-bar reservation). Forcing a 1px scroll after mount
+  // makes WebKit re-layout and reclaim that space.
+  useEffect(() => {
+    const isIosPwa =
+      window.matchMedia('(display-mode: standalone)').matches &&
+      /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase())
+    if (isIosPwa) {
+      const t = setTimeout(() => window.scrollTo(0, 1), 100)
+      return () => clearTimeout(t)
+    }
+  }, [])
+
+  // ── visualViewport → --app-height (main screen only) ──────────────
+  // This fix is specifically for the logged-in app shell. If we keep it
+  // enabled on landing/auth flows, their normal page scrolling gets mistaken
+  // for iOS keyboard-avoidance and we end up snapping the document back to 0,
+  // which feels like the landing page "jumps" while scrolling.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    if (screen !== 'main') {
+      document.documentElement.style.removeProperty('--app-height')
+      return
+    }
+
+    const update = () => {
+      document.documentElement.style.setProperty('--app-height', `${vv.height}px`)
+      // Additionally, forcibly un-scroll the document. While typing, iOS
+      // likes to scroll html/body to keep the caret on-screen — since our
+      // container already matches the visible viewport, any such scroll
+      // is pure garbage and visually "flies" the content up.
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0)
+      }
+    }
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+      document.documentElement.style.removeProperty('--app-height')
+    }
+  }, [screen])
+
+  // ── Lock document scroll while on the main (logged-in) screen ─────
+  // Chat inputs trigger iOS keyboard-avoidance which scrolls <html>/<body>
+  // even though our container is already sized to visualViewport. Locking
+  // scroll at the document level guarantees nothing flies up mid-typing.
+  useEffect(() => {
+    if (screen !== 'main') return
+    const body = document.body
+    const html = document.documentElement
+    const prevBody = body.style.overflow
+    const prevHtml = html.style.overflow
+    body.style.overflow = 'hidden'
+    html.style.overflow = 'hidden'
+
+    // Belt-and-braces: if iOS still manages to scroll the document (e.g.
+    // during IME composition), snap it back instantly.
+    const snapBack = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0)
+      }
+    }
+    window.addEventListener('scroll', snapBack, { passive: true })
+    return () => {
+      body.style.overflow = prevBody
+      html.style.overflow = prevHtml
+      window.removeEventListener('scroll', snapBack)
+    }
+  }, [screen])
 
   // ── Auth init: read existing session first, then listen for changes ─────────
   useEffect(() => {
@@ -137,6 +216,9 @@ export default function App() {
         gender: data.gender,
         interests: data.interests,
         bio: data.bio,
+        workRegion: data.workRegion || null,
+        homeRegion: data.homeRegion || null,
+        preferredRegion: data.preferredRegion || null,
       })
     }
     go('questionnaire')
@@ -167,6 +249,21 @@ export default function App() {
   }
 
   if (!authReady) return <SplashScreen />
+
+  // Main screen is rendered OUTSIDE AnimatePresence/motion.div so it is not
+  // inside any transformed containing block. `position: fixed; inset: 0`
+  // pins it to the visual viewport edges — guaranteed no bottom gap on iOS
+  // PWA cold start (the dvh / fill-available bugs don't apply).
+  if (screen === 'main') {
+    return (
+      <div
+        className="app-container flex flex-col bg-white overflow-hidden"
+        style={{ height: 'var(--app-height, 100dvh)' }}
+      >
+        <MainScreen user={user} onSignOut={() => go('landing')} />
+      </div>
+    )
+  }
 
   return (
     <AnimatePresence mode="wait">
@@ -200,7 +297,12 @@ export default function App() {
 
         {screen === 'security-check' && (
           <SecurityCheckScreen
-            onContinue={() => go('profile-setup')}
+            onContinue={async () => {
+              const activeUser = await getActiveUser()
+              if (!activeUser) return go('profile-setup')
+              const profile = await getProfile(activeUser.id)
+              routeAfterSecurityCheck(profile)
+            }}
           />
         )}
 
@@ -226,15 +328,6 @@ export default function App() {
             onComplete={() => go('main')}
             onSkip={() => go('main')}
           />
-        )}
-
-        {screen === 'main' && (
-          <div className="h-[100dvh] flex flex-col overflow-hidden w-full bg-white min-h-0">
-            <MainScreen
-              user={user}
-              onSignOut={() => go('landing')}
-            />
-          </div>
         )}
       </motion.div>
     </AnimatePresence>

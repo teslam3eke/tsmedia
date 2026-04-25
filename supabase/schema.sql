@@ -29,6 +29,28 @@ create table if not exists public.profiles (
 -- 在 Supabase Dashboard > SQL Editor 執行此段來新增 gender 欄位：
 -- alter table public.profiles add column if not exists gender text check (gender in ('male', 'female'));
 
+-- ── Migration: add region columns (work / home / preferred) ───────────────────
+-- 在 Supabase Dashboard > SQL Editor 執行下面三行：
+-- alter table public.profiles add column if not exists work_region      text check (work_region      in ('north','central','south','east'));
+-- alter table public.profiles add column if not exists home_region      text check (home_region      in ('north','central','south','east'));
+-- alter table public.profiles add column if not exists preferred_region text check (preferred_region in ('north','central','south','east'));
+
+-- ── Migration: income verification + border effect ────────────────────────────
+-- 在 Supabase Dashboard > SQL Editor 執行以下區塊：
+-- alter table public.profiles
+--   add column if not exists income_tier text check (income_tier in ('silver','gold','diamond')),
+--   add column if not exists show_income_border boolean not null default false;
+--
+-- alter table public.verification_docs
+--   add column if not exists verification_kind    text not null default 'employment' check (verification_kind in ('employment','income')),
+--   add column if not exists claimed_income_tier  text check (claimed_income_tier in ('silver','gold','diamond'));
+--
+-- -- Relax doc_type so income docs can use broader categories:
+-- alter table public.verification_docs drop constraint if exists verification_docs_doc_type_check;
+-- alter table public.verification_docs
+--   add constraint verification_docs_doc_type_check
+--   check (doc_type in ('employee_id','tax_return','payslip','bank_statement','other'));
+
 -- 自動更新 updated_at
 create or replace function public.handle_updated_at()
 returns trigger language plpgsql as $$

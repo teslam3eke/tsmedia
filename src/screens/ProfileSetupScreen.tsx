@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { ChevronRight, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { REGION_LABELS, type Region } from '@/lib/types'
 
 interface Props {
   onComplete: (data: ProfileSetupData) => void
@@ -16,6 +17,9 @@ export interface ProfileSetupData {
   birthMonth: string
   interests: string[]
   bio: string
+  workRegion: Region | ''
+  homeRegion: Region | ''
+  preferredRegion: Region | ''
 }
 
 const INTERESTS = [
@@ -43,6 +47,9 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
     birthMonth: '',
     interests: [],
     bio: '',
+    workRegion: '',
+    homeRegion: '',
+    preferredRegion: '',
   })
 
   const set = <K extends keyof ProfileSetupData>(key: K, val: ProfileSetupData[K]) =>
@@ -60,7 +67,38 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
     form.name.trim().length >= 2 &&
     form.nickname.trim().length >= 1 &&
     form.birthYear !== '' &&
-    form.interests.length >= 3
+    form.interests.length >= 3 &&
+    form.workRegion !== '' &&
+    form.homeRegion !== '' &&
+    form.preferredRegion !== ''
+
+  const REGIONS: Region[] = ['north', 'central', 'south', 'east']
+
+  const RegionGrid = ({
+    value,
+    onChange,
+  }: {
+    value: Region | ''
+    onChange: (r: Region) => void
+  }) => (
+    <div className="grid grid-cols-4 gap-2">
+      {REGIONS.map((r) => (
+        <button
+          key={r}
+          type="button"
+          onClick={() => onChange(r)}
+          className={cn(
+            'py-2.5 rounded-xl text-sm font-semibold border-2 transition-all',
+            value === r
+              ? 'border-slate-900 bg-slate-900 text-white'
+              : 'border-slate-200 text-slate-500 bg-white',
+          )}
+        >
+          {REGION_LABELS[r]}
+        </button>
+      ))}
+    </div>
+  )
 
   return (
     <div className="max-w-md mx-auto bg-[#fafafa]">
@@ -159,6 +197,35 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
               {MONTHS.map((m) => <option key={m} value={m}>{m} 月</option>)}
             </select>
           </div>
+        </motion.div>
+
+        {/* Work Region */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+          <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+            工作地點 <span className="text-red-400">*</span>
+          </label>
+          <RegionGrid value={form.workRegion} onChange={(r) => set('workRegion', r)} />
+        </motion.div>
+
+        {/* Home Region */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.16 }}>
+          <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+            戶籍地 <span className="text-red-400">*</span>
+          </label>
+          <RegionGrid value={form.homeRegion} onChange={(r) => set('homeRegion', r)} />
+        </motion.div>
+
+        {/* Preferred Region */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.165 }}>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              希望配對的對象所在地 <span className="text-red-400">*</span>
+            </label>
+          </div>
+          <RegionGrid value={form.preferredRegion} onChange={(r) => set('preferredRegion', r)} />
+          <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+            對方的工作地或戶籍地其中一個符合就會出現在探索頁
+          </p>
         </motion.div>
 
         {/* Interests */}

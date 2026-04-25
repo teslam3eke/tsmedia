@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { QuestionnaireEntry, Company, DocType, ProfileRow } from './types'
+import type { QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier } from './types'
 
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
@@ -29,10 +29,14 @@ export interface UpsertProfilePayload {
   interests?: string[]
   questionnaire?: QuestionnaireEntry[]
   photoUrls?: string[]
+  workRegion?: Region | null
+  homeRegion?: Region | null
+  preferredRegion?: Region | null
+  showIncomeBorder?: boolean
 }
 
 export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok: boolean; error?: string }> {
-  const { userId, jobTitle, photoUrls, ...rest } = payload
+  const { userId, jobTitle, photoUrls, workRegion, homeRegion, preferredRegion, showIncomeBorder, ...rest } = payload
 
   // Build patch — always include id so upsert can match/insert the row
   const patch: Record<string, unknown> = { id: userId }
@@ -45,6 +49,10 @@ export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok
   if (rest.questionnaire !== undefined) patch.questionnaire = rest.questionnaire
   if (jobTitle           !== undefined) patch.job_title     = jobTitle
   if (photoUrls          !== undefined) patch.photo_urls    = photoUrls
+  if (workRegion         !== undefined) patch.work_region      = workRegion
+  if (homeRegion         !== undefined) patch.home_region      = homeRegion
+  if (preferredRegion    !== undefined) patch.preferred_region = preferredRegion
+  if (showIncomeBorder   !== undefined) patch.show_income_border = showIncomeBorder
 
   // Only id key = nothing to save
   if (Object.keys(patch).length <= 1) return { ok: true }
@@ -185,7 +193,6 @@ export async function submitVerificationDoc(
   docType: DocType,
   docPath: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  // Mark old pending docs as superseded by upserting a new record
   const { error } = await supabase
     .from('verification_docs')
     .insert({
@@ -194,6 +201,7 @@ export async function submitVerificationDoc(
       doc_type: docType,
       doc_url: docPath,
       status: 'pending',
+      verification_kind: 'employment',
     })
 
   if (error) {
@@ -201,11 +209,57 @@ export async function submitVerificationDoc(
     return { ok: false, error: error.message }
   }
 
-  // Update profile verification_status → submitted
   await supabase
     .from('profiles')
     .update({ verification_status: 'submitted' })
     .eq('id', userId)
 
   return { ok: true }
+}
+
+// ─── Income verification ─────────────────────────────────────────────────────
+//
+// 上傳收入認證文件。文件進 `verification_kind='income'`，需由管理員手動在
+// Supabase Dashboard 審核後把 profiles.income_tier 設為對應 tier。
+//
+export async function submitIncomeVerification(
+  userId: string,
+  claimedTier: IncomeTier,
+  docType: DocType,
+  docPath: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('verification_docs')
+    .insert({
+      user_id: userId,
+      doc_type: docType,
+      doc_url: docPath,
+      status: 'pending',
+      verification_kind: 'income',
+      claimed_income_tier: claimedTier,
+    })
+
+  if (error) {
+    console.error('[db] submitIncomeVerification error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// Get latest income-verification record for a user (for "審核中 / 已通過 / 已拒絕" status)
+export async function getIncomeVerification(userId: string) {
+  const { data, error } = await supabase
+    .from('verification_docs')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('verification_kind', 'income')
+    .order('submitted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[db] getIncomeVerification error:', error.message)
+    return null
+  }
+  return data
 }
