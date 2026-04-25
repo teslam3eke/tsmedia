@@ -59,28 +59,11 @@ export function IncomeBorder({
 }: IncomeBorderProps) {
   if (!tier) return <>{children}</>
 
-  // Diamond tier: PNG frame overlaid on top of photo via background-image
+  // Diamond tier: plain wrapper — frame img is injected by the caller inside children
   if (tier === 'diamond') {
     return (
-      <div
-        className={cn('relative', fill && 'h-full w-full', className)}
-        style={{ borderRadius: radius, isolation: 'isolate' }}
-      >
-        {/* Photo at natural size — determines container height */}
+      <div className={cn('relative', fill && 'h-full w-full', className)}>
         {children}
-        {/* Diamond frame PNG on top — uses background-image to avoid z-index conflicts */}
-        <div
-          aria-hidden
-          className="absolute inset-0 pointer-events-none select-none"
-          style={{
-            zIndex: 20,
-            backgroundImage: 'url(/assets/images/Diamond3.png)',
-            backgroundSize: '100% 100%',
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center',
-            borderRadius: radius,
-          }}
-        />
       </div>
     )
   }

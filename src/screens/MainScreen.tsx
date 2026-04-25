@@ -796,19 +796,26 @@ function DiscoverTab({
                         <span className="text-sm font-bold text-white">{profile.compatScore}% 契合</span>
                       </div>
 
-                      {/* Diamond: name + company overlaid at photo bottom */}
+                      {/* Diamond frame PNG — inside photo div, guaranteed on top */}
                       {isDiamond && (
-                        <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pt-10">
-                          <div className="flex items-end justify-between">
-                            <div>
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-[1.75rem] font-semibold tracking-[-0.03em] text-white drop-shadow-sm">{profile.name}</span>
-                                <span className="text-[1.1rem] font-medium text-white/70">{profile.age}</span>
-                              </div>
-                              <div className="mt-1">
-                                <CompanyBadge company={profile.company} />
-                              </div>
-                            </div>
+                        <img
+                          src="/assets/images/Diamond3.png"
+                          aria-hidden
+                          className="absolute inset-0 w-full h-full pointer-events-none select-none"
+                          style={{ zIndex: 20, objectFit: 'fill' }}
+                          draggable={false}
+                        />
+                      )}
+
+                      {/* Diamond: name + company overlaid above frame at photo bottom */}
+                      {isDiamond && (
+                        <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pt-10" style={{ zIndex: 30 }}>
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-[1.75rem] font-semibold tracking-[-0.03em] text-white drop-shadow-sm">{profile.name}</span>
+                            <span className="text-[1.1rem] font-medium text-white/70">{profile.age}</span>
+                          </div>
+                          <div className="mt-1">
+                            <CompanyBadge company={profile.company} />
                           </div>
                         </div>
                       )}
