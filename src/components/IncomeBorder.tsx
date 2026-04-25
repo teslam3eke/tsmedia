@@ -74,7 +74,7 @@ export function IncomeBorder({
           className="absolute inset-0 pointer-events-none select-none"
           style={{
             zIndex: 20,
-            backgroundImage: 'url(/assets/images/Diamond2.png)',
+            backgroundImage: 'url(/assets/images/Diamond3.png)',
             backgroundSize: '100% 100%',
             backgroundRepeat: 'no-repeat',
             backgroundPosition: 'center',
