@@ -747,72 +747,99 @@ function DiscoverTab({
               if ((e.currentTarget as HTMLElement).scrollTop > 24) setScrolled(true)
             }}
           >
-            {/* ── Photo header — vertical 2:3 portrait with thin platinum frame ── */}
-            <IncomeBorder
-              tier={(profile.showIncomeBorder && profile.incomeTier) ? profile.incomeTier : null}
-              radius="1.4rem"
-              thickness={8}
-              showVerifyMark={false}
-              assetFrame={profile.showIncomeBorder && profile.incomeTier === 'diamond'}
-              className="m-3"
-            >
-            <div
-              className="relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]"
-              style={{ paddingBottom: '150%' }}
-            >
-              {/* Background: real photo or gradient */}
-              {profile.photoUrl ? (
-                <img
-                  src={profile.photoUrl}
-                  alt={profile.name}
-                  className="absolute inset-0 w-full h-full object-cover scale-[1.04]"
-                  style={{ filter: 'blur(6px)' }}
-                />
-              ) : (
-                <div
-                  className="absolute inset-0"
-                  style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-                />
-              )}
+            {/* ── Photo header ── */}
+            {(() => {
+              const isDiamond = profile.showIncomeBorder && profile.incomeTier === 'diamond'
+              return (
+                <>
+                  <IncomeBorder
+                    tier={(profile.showIncomeBorder && profile.incomeTier) ? profile.incomeTier : null}
+                    radius="1.4rem"
+                    thickness={8}
+                    showVerifyMark={false}
+                    assetFrame={isDiamond}
+                    className={isDiamond ? '' : 'm-3'}
+                  >
+                    <div
+                      className={cn('relative w-full flex-shrink-0 overflow-hidden', isDiamond ? 'rounded-[1.4rem]' : 'rounded-[0.8rem]')}
+                      style={{ paddingBottom: '150%' }}
+                    >
+                      {/* Background: real photo or gradient */}
+                      {profile.photoUrl ? (
+                        <img
+                          src={profile.photoUrl}
+                          alt={profile.name}
+                          className="absolute inset-0 w-full h-full object-cover scale-[1.04]"
+                          style={{ filter: 'blur(6px)' }}
+                        />
+                      ) : (
+                        <div
+                          className="absolute inset-0"
+                          style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
+                        />
+                      )}
 
-              {/* Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                      {/* Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
 
-              {/* Privacy badge */}
-              {profile.photoUrl && (
-                <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span className="text-white/90 text-[10px] font-semibold">隱私保護中</span>
-                </div>
-              )}
+                      {/* Privacy badge */}
+                      {profile.photoUrl && (
+                        <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          <span className="text-white/90 text-[10px] font-semibold">隱私保護中</span>
+                        </div>
+                      )}
 
-              {/* Compat badge */}
-              <div className="absolute top-4 right-4 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span className="text-sm font-bold text-white">{profile.compatScore}% 契合</span>
-              </div>
-            </div>
-            </IncomeBorder>
+                      {/* Compat badge */}
+                      <div className="absolute top-4 right-4 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span className="text-sm font-bold text-white">{profile.compatScore}% 契合</span>
+                      </div>
 
-            <div className="px-5 pb-1 -mt-1">
-              <div className="flex items-end gap-3">
-                <div
-                  className="w-16 h-16 rounded-[1.35rem] flex items-center justify-center text-white font-black text-3xl select-none overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_10px_24px_rgba(15,23,42,0.18)]"
-                  style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-                >
-                  {profile.initials}
-                </div>
-                <div className="pb-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{profile.name}</span>
-                    <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
-                  </div>
-                  <div className="mt-1">
-                    <CompanyBadge company={profile.company} />
-                  </div>
-                </div>
-              </div>
-            </div>
+                      {/* Diamond: name + company overlaid at photo bottom */}
+                      {isDiamond && (
+                        <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pt-10">
+                          <div className="flex items-end justify-between">
+                            <div>
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-[1.75rem] font-semibold tracking-[-0.03em] text-white drop-shadow-sm">{profile.name}</span>
+                                <span className="text-[1.1rem] font-medium text-white/70">{profile.age}</span>
+                              </div>
+                              <div className="mt-1">
+                                <CompanyBadge company={profile.company} />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </IncomeBorder>
+
+                  {/* Non-diamond: name section below photo */}
+                  {!isDiamond && (
+                    <div className="px-5 pb-1 -mt-1">
+                      <div className="flex items-end gap-3">
+                        <div
+                          className="w-16 h-16 rounded-[1.35rem] flex items-center justify-center text-white font-black text-3xl select-none overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_10px_24px_rgba(15,23,42,0.18)]"
+                          style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
+                        >
+                          {profile.initials}
+                        </div>
+                        <div className="pb-1">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{profile.name}</span>
+                            <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
+                          </div>
+                          <div className="mt-1">
+                            <CompanyBadge company={profile.company} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             {/* ── Scroll hint — below photo, semi-transparent ── */}
             <AnimatePresence>
