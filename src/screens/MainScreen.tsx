@@ -8,10 +8,11 @@ import {
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   Camera, Trash2, ImageIcon, Users, Star,
   Search, Plus, Smile, BellRing, AlertCircle, Gem,
+  FileText, Upload, ShieldCheck, ChevronRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
-import { getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification } from '@/lib/db'
+import { getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification, uploadProofDoc, submitVerificationDoc, submitIncomeVerification } from '@/lib/db'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier } from '@/lib/types'
 import { REGION_LABELS, INCOME_TIER_META } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
@@ -1891,6 +1892,25 @@ function EditProfileScreen({
     return () => { cancelled = true }
   }, [userId])
 
+  // Income upload form state
+  const [incomeUploadTier, setIncomeUploadTier] = useState<IncomeTier | null>(null)
+  const [incomeUploadFile, setIncomeUploadFile] = useState<File | null>(null)
+  const [uploadingIncome, setUploadingIncome] = useState(false)
+  const incomeDocRef = useRef<HTMLInputElement>(null)
+
+  const submitIncome = async () => {
+    if (!incomeUploadTier || !incomeUploadFile) return
+    setUploadingIncome(true)
+    const res = await uploadProofDoc(userId, incomeUploadFile)
+    if (res.ok) {
+      await submitIncomeVerification(userId, incomeUploadTier, 'payslip', res.path)
+      setIncomeStatus({ status: 'pending', claimed: incomeUploadTier })
+      setIncomeUploadFile(null)
+      setIncomeUploadTier(null)
+    }
+    setUploadingIncome(false)
+  }
+
   const addPhotos = (files: FileList | null) => {
     if (!files) return
     const newItems: LocalPhoto[] = Array.from(files)
@@ -1931,7 +1951,7 @@ function EditProfileScreen({
       }
     }
 
-    await upsertProfile({
+    const result = await upsertProfile({
       userId,
       name: name.trim(),
       bio: bio.trim(),
@@ -1944,6 +1964,11 @@ function EditProfileScreen({
     })
 
     setSaving(false)
+    if (!result.ok) {
+      setSaveMsg('儲存失敗，請稍後再試')
+      setTimeout(() => setSaveMsg(''), 3000)
+      return
+    }
     setSaveMsg('已儲存 ✓')
     setTimeout(() => setSaveMsg(''), 1800)
 
@@ -2179,20 +2204,89 @@ function EditProfileScreen({
                 你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。通過後即可啟用邊框特效。
               </p>
             </div>
-          ) : incomeStatus?.status === 'rejected' ? (
-            <div className="bg-rose-50 rounded-2xl p-4 ring-1 ring-rose-100">
-              <p className="text-sm font-bold text-rose-800">收入認證未通過</p>
-              <p className="text-xs text-rose-700/70 mt-1">請到身分驗證頁重新上傳更清晰的文件。</p>
-            </div>
           ) : (
-            <div className="bg-white rounded-2xl p-4 ring-1 ring-slate-100 shadow-sm">
-              <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Gem className="w-4 h-4 text-slate-500" />
-                尚未進行收入認證
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                通過收入認證可解鎖照片邊框特效：銀 / 金 / 鑽石框。請到身分驗證頁上傳證明文件。
-              </p>
+            /* Rejected or not yet submitted — show upload form */
+            <div className="bg-white rounded-2xl p-4 ring-1 ring-slate-100 shadow-sm space-y-4">
+              {incomeStatus?.status === 'rejected' && (
+                <div className="bg-rose-50 rounded-xl px-3 py-2.5 ring-1 ring-rose-100">
+                  <p className="text-xs font-bold text-rose-700">上次送審未通過，請重新上傳更清晰的文件</p>
+                </div>
+              )}
+              <div>
+                <p className="text-sm font-bold text-slate-800 flex items-center gap-2 mb-3">
+                  <Gem className="w-4 h-4 text-slate-500" />
+                  上傳收入證明文件
+                </p>
+                <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
+                  可上傳薪資單、扣繳憑單、銀行對帳單等，審核通過後即可解鎖邊框特效。
+                </p>
+
+                {/* Tier picker */}
+                <p className="text-xs font-semibold text-slate-600 mb-2">選擇申請等級</p>
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  {(['silver','gold','diamond'] as IncomeTier[]).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setIncomeUploadTier(t)}
+                      className={cn(
+                        'rounded-xl p-2.5 text-center ring-1 transition-all',
+                        incomeUploadTier === t
+                          ? 'ring-slate-900 bg-slate-900 text-white'
+                          : 'ring-slate-200 bg-white text-slate-700',
+                      )}
+                    >
+                      <p className="text-xs font-bold leading-tight">{INCOME_TIER_META[t].label}</p>
+                      <p className="text-[10px] opacity-70 mt-0.5 leading-tight">{INCOME_TIER_META[t].range}</p>
+                    </button>
+                  ))}
+                </div>
+
+                {/* File upload */}
+                <input
+                  ref={incomeDocRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => setIncomeUploadFile(e.target.files?.[0] ?? null)}
+                />
+                <button
+                  onClick={() => incomeDocRef.current?.click()}
+                  className={cn(
+                    'w-full rounded-2xl border-2 border-dashed py-4 flex flex-col items-center gap-1.5 transition-all',
+                    incomeUploadFile ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50',
+                  )}
+                >
+                  {incomeUploadFile ? (
+                    <>
+                      <FileText className="w-5 h-5 text-emerald-500" />
+                      <p className="text-xs font-semibold text-emerald-700 truncate max-w-[200px]">{incomeUploadFile.name}</p>
+                      <p className="text-[10px] text-emerald-500">點擊重新選擇</p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5 text-slate-300" />
+                      <p className="text-xs text-slate-400 font-medium">點擊上傳照片或 PDF</p>
+                    </>
+                  )}
+                </button>
+
+                {/* Submit */}
+                <button
+                  onClick={submitIncome}
+                  disabled={!incomeUploadTier || !incomeUploadFile || uploadingIncome}
+                  className={cn(
+                    'mt-3 w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all',
+                    incomeUploadTier && incomeUploadFile && !uploadingIncome
+                      ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
+                      : 'bg-slate-100 text-slate-300',
+                  )}
+                >
+                  {uploadingIncome
+                    ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }}><Cpu className="w-4 h-4" /></motion.div>
+                    : <ShieldCheck className="w-4 h-4" />}
+                  {uploadingIncome ? '上傳中⋯' : '送出認證申請'}
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -2233,6 +2327,195 @@ function EditProfileScreen({
   )
 }
 
+// ─── Company Verify Screen ────────────────────────────────────────────────────
+
+const COMPANY_DOC_TYPES: { value: 'employee_id' | 'tax_return' | 'payslip'; label: string }[] = [
+  { value: 'employee_id', label: '員工證 / 識別證' },
+  { value: 'tax_return',  label: '扣繳憑單' },
+  { value: 'payslip',     label: '薪資單' },
+]
+
+function CompanyVerifyScreen({
+  profile, userId, onClose, onVerified,
+}: {
+  profile: ProfileRow
+  userId: string
+  onClose: () => void
+  onVerified: (updated: ProfileRow) => void
+}) {
+  const isApproved  = profile.verification_status === 'approved'
+  const isSubmitted = profile.verification_status === 'submitted'
+
+  const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>(profile.company ?? '')
+  const [selectedDocType, setSelectedDocType]   = useState<'employee_id' | 'tax_return' | 'payslip' | ''>('')
+  const [docFile, setDocFile]   = useState<File | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted]   = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const submit = async () => {
+    if (!selectedCompany || !selectedDocType || !docFile) return
+    setSubmitting(true)
+    const res = await uploadProofDoc(userId, docFile)
+    if (res.ok) {
+      await submitVerificationDoc(userId, selectedCompany, selectedDocType, res.path)
+      setSubmitted(true)
+      onVerified({ ...profile, verification_status: 'submitted' })
+    }
+    setSubmitting(false)
+  }
+
+  return createPortal(
+    <motion.div
+      className="fixed inset-0 z-[100] bg-[#fafafa] flex flex-col"
+      initial={{ x: '100%' }}
+      animate={{ x: 0 }}
+      exit={{ x: '100%' }}
+      transition={{ type: 'spring', stiffness: 320, damping: 36 }}
+    >
+      {/* Header */}
+      <div className="flex-shrink-0 flex items-center gap-3 px-5 pt-safe pb-3 bg-[#fafafa] border-b border-slate-100">
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={onClose}
+          className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
+        >
+          <ChevronLeft className="w-5 h-5 text-slate-600" />
+        </motion.button>
+        <span className="font-bold text-slate-900 text-[15px]">公司認證</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
+        {/* Status banner */}
+        {isApproved ? (
+          <div className="bg-emerald-50 rounded-2xl p-4 ring-1 ring-emerald-100 flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-emerald-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-emerald-800">公司認證已通過</p>
+              <p className="text-xs text-emerald-600 mt-0.5">你的 {profile.company} 員工身份已驗證</p>
+            </div>
+          </div>
+        ) : isSubmitted || submitted ? (
+          <div className="bg-amber-50 rounded-2xl p-4 ring-1 ring-amber-100 flex items-center gap-3">
+            <Sparkles className="w-6 h-6 text-amber-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-amber-800">審核中</p>
+              <p className="text-xs text-amber-600 mt-0.5">文件已送出，通常 1–3 個工作天完成審核</p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-blue-50 rounded-2xl p-4 ring-1 ring-blue-100">
+            <p className="text-sm font-bold text-blue-800">上傳公司驗證文件</p>
+            <p className="text-xs text-blue-600 mt-1 leading-relaxed">
+              上傳員工識別證、扣繳憑單或薪資單，審核通過後即顯示公司認證標記。
+            </p>
+          </div>
+        )}
+
+        {/* Upload form — hidden when already approved/submitted */}
+        {!isApproved && !isSubmitted && !submitted && (
+          <div className="bg-white rounded-2xl p-4 ring-1 ring-slate-100 shadow-sm space-y-4">
+            {/* Company select */}
+            <div>
+              <p className="text-xs font-semibold text-slate-600 mb-2">選擇公司</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(['TSMC', 'MediaTek'] as const).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setSelectedCompany(c)}
+                    className={cn(
+                      'py-3 rounded-xl text-sm font-bold ring-1 transition-all',
+                      selectedCompany === c
+                        ? 'bg-slate-900 text-white ring-slate-900'
+                        : 'bg-white text-slate-700 ring-slate-200',
+                    )}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Doc type select */}
+            <div>
+              <p className="text-xs font-semibold text-slate-600 mb-2">文件類型</p>
+              <div className="space-y-2">
+                {COMPANY_DOC_TYPES.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => setSelectedDocType(value)}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-4 py-3 rounded-xl ring-1 transition-all text-left',
+                      selectedDocType === value
+                        ? 'bg-slate-900 text-white ring-slate-900'
+                        : 'bg-white text-slate-700 ring-slate-200',
+                    )}
+                  >
+                    <FileText className="w-4 h-4 flex-shrink-0" />
+                    <span className="text-sm font-medium">{label}</span>
+                    {selectedDocType === value && <Check className="w-4 h-4 ml-auto" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* File upload */}
+            <div>
+              <p className="text-xs font-semibold text-slate-600 mb-2">上傳文件</p>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+              />
+              <button
+                onClick={() => fileRef.current?.click()}
+                className={cn(
+                  'w-full rounded-2xl border-2 border-dashed py-5 flex flex-col items-center gap-2 transition-all',
+                  docFile ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50',
+                )}
+              >
+                {docFile ? (
+                  <>
+                    <FileText className="w-6 h-6 text-emerald-500" />
+                    <p className="text-xs font-semibold text-emerald-700 truncate max-w-[220px]">{docFile.name}</p>
+                    <p className="text-[10px] text-emerald-500">點擊重新選擇</p>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-6 h-6 text-slate-300" />
+                    <p className="text-sm text-slate-400 font-medium">點擊上傳照片或 PDF</p>
+                    <p className="text-[11px] text-slate-300">支援 JPG、PNG、PDF</p>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Submit */}
+            <button
+              onClick={submit}
+              disabled={!selectedCompany || !selectedDocType || !docFile || submitting}
+              className={cn(
+                'w-full py-3.5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all',
+                selectedCompany && selectedDocType && docFile && !submitting
+                  ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
+                  : 'bg-slate-100 text-slate-300',
+              )}
+            >
+              {submitting
+                ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }}><Cpu className="w-4 h-4" /></motion.div>
+                : <ShieldCheck className="w-4 h-4" />}
+              {submitting ? '上傳中⋯' : '送出認證申請'}
+            </button>
+          </div>
+        )}
+      </div>
+    </motion.div>,
+    document.body,
+  )
+}
+
 function SectionHeading({ label, hint }: { label: string; hint?: string }) {
   return (
     <div className="flex items-center justify-between mb-3">
@@ -2249,6 +2532,7 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
   const [editing, setEditing] = useState(false)
   const [photoUrls, setPhotoUrls] = useState<string[]>([])
   const [showNotif, setShowNotif] = useState(false)
+  const [showCompanyVerify, setShowCompanyVerify] = useState(false)
 
   useEffect(() => {
     getProfile(userId).then(setProfile)
@@ -2374,10 +2658,12 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
         </motion.button>
         <motion.button
           whileTap={{ backgroundColor: '#f8fafc' }}
+          onClick={() => setShowCompanyVerify(true)}
           className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700"
         >
           <Cpu className="w-4 h-4 text-slate-400" />
           <span>公司認證</span>
+          <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
         </motion.button>
       </div>
       </div>
@@ -2402,6 +2688,18 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
             userId={userId}
             onClose={() => setEditing(false)}
             onSaved={(updated) => setProfile(updated)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Company verify screen */}
+      <AnimatePresence>
+        {showCompanyVerify && profile && (
+          <CompanyVerifyScreen
+            profile={profile}
+            userId={userId}
+            onClose={() => setShowCompanyVerify(false)}
+            onVerified={(updated) => setProfile(updated)}
           />
         )}
       </AnimatePresence>

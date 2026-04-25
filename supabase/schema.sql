@@ -21,6 +21,13 @@ create table if not exists public.profiles (
   is_verified         boolean not null default false,
   verification_status text not null default 'pending'
                         check (verification_status in ('pending','submitted','approved','rejected')),
+  -- 地點欄位
+  work_region         text check (work_region in ('north','central','south','east')),
+  home_region         text check (home_region in ('north','central','south','east')),
+  preferred_region    text check (preferred_region in ('north','central','south','east')),
+  -- 收入認證
+  income_tier         text check (income_tier in ('silver','gold','diamond')),
+  show_income_border  boolean not null default false,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
