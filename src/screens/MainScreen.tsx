@@ -756,11 +756,8 @@ function DiscoverTab({
               className="m-3"
             >
             <div
-              className={cn(
-                'relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]',
-                (profile.showIncomeBorder && profile.incomeTier === 'diamond') && 'h-full',
-              )}
-              style={(profile.showIncomeBorder && profile.incomeTier === 'diamond') ? undefined : { paddingBottom: '150%' }}
+              className="relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]"
+              style={{ paddingBottom: '150%' }}
             >
               {/* Background: real photo or gradient */}
               {profile.photoUrl ? (
@@ -1233,11 +1230,8 @@ function PersonDetailView({
               className="m-3"
             >
               <div
-                className={cn(
-                  'relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]',
-                  (profile.showIncomeBorder && profile.incomeTier === 'diamond') && 'h-full',
-                )}
-                style={(profile.showIncomeBorder && profile.incomeTier === 'diamond') ? undefined : { paddingBottom: '150%' }}
+                className="relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]"
+                style={{ paddingBottom: '150%' }}
               >
                 {profile.photoUrl ? (
                   <img
