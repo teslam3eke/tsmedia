@@ -59,8 +59,33 @@ export function IncomeBorder({
 }: IncomeBorderProps) {
   if (!tier) return <>{children}</>
 
-  const isDiamond   = tier === 'diamond'
-  const borderWidth = isDiamond ? 10 : thickness
+  // Diamond tier: PNG frame overlaid on top of photo
+  if (tier === 'diamond') {
+    return (
+      <div
+        className={cn('relative', fill && 'h-full w-full', className)}
+        style={{ borderRadius: radius, overflow: 'hidden' }}
+      >
+        {/* Aspect-ratio spacer: 1:1 square matching Diamond.png */}
+        <div className="w-full" style={{ paddingBottom: '100%' }} />
+        {/* Photo fills the entire area behind the frame */}
+        <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: radius }}>
+          {children}
+        </div>
+        {/* Diamond frame PNG on top — transparent center reveals photo */}
+        <img
+          src="/assets/images/Diamond.png"
+          alt=""
+          aria-hidden
+          className="absolute inset-0 w-full h-full pointer-events-none select-none"
+          style={{ zIndex: 10, objectFit: 'fill' }}
+          draggable={false}
+        />
+      </div>
+    )
+  }
+
+  const borderWidth = thickness
   const photoRadius = `calc(${radius} - ${borderWidth}px)`
 
   return (
@@ -70,21 +95,13 @@ export function IncomeBorder({
         padding:      borderWidth,
         borderRadius: radius,
         background:   SIMPLE_FRAME_BG[tier],
-        boxShadow: isDiamond
-          ? [
-              '0 6px 18px rgba(15,23,42,0.22)',
-              '0 22px 44px rgba(15,23,42,0.14)',
-              'inset 0 1.5px 0 rgba(255,255,255,0.82)',
-              'inset 0 -1.5px 0 rgba(0,0,0,0.26)',
-              'inset 0 0 0 0.5px rgba(255,255,255,0.28)',
-            ].join(', ')
-          : [
-              '0 4px 10px rgba(15,23,42,0.16)',
-              '0 18px 34px rgba(15,23,42,0.12)',
-              'inset 0 1.2px 0 rgba(255,255,255,0.72)',
-              'inset 0 -1.2px 0 rgba(0,0,0,0.22)',
-              'inset 0 0 0 0.5px rgba(0,0,0,0.18)',
-            ].join(', '),
+        boxShadow: [
+          '0 4px 10px rgba(15,23,42,0.16)',
+          '0 18px 34px rgba(15,23,42,0.12)',
+          'inset 0 1.2px 0 rgba(255,255,255,0.72)',
+          'inset 0 -1.2px 0 rgba(0,0,0,0.22)',
+          'inset 0 0 0 0.5px rgba(0,0,0,0.18)',
+        ].join(', '),
       }}
     >
       <div
@@ -95,9 +112,7 @@ export function IncomeBorder({
           overflow:     'hidden',
           boxShadow: [
             `inset 0 0 0 1px rgba(${
-              tier === 'gold'    ? '132,95,28,0.48'  :
-              tier === 'diamond' ? '120,145,170,0.52' :
-                                   '109,120,134,0.48'
+              tier === 'gold' ? '132,95,28,0.48' : '109,120,134,0.48'
             })`,
             'inset 0 0 16px rgba(0,0,0,0.08)',
           ].join(', '),
