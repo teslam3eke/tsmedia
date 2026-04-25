@@ -13,12 +13,7 @@ export interface IncomeBorderProps {
   children: ReactNode
 }
 
-// PNG frame asset — RGBA with transparent photo window in the center.
-// Measured from the actual PNG (422×572):
-//   paddingBottom = 572/422 = 135.545%
-//   top/bottom inset = 23/572 = 4.021%
-//   left/right inset = 29/422 = 6.872%
-const PREMIUM_FRAME_ASSET = '/assets/images/premium_authentication_frame_v2.png'
+// ─── Border gradients ─────────────────────────────────────────────────────────
 
 const SIMPLE_FRAME_BG: Record<IncomeTier, string> = {
   silver: `linear-gradient(148deg,
@@ -30,6 +25,7 @@ const SIMPLE_FRAME_BG: Record<IncomeTier, string> = {
     #dce3eb 63%,
     #aab3bd 80%,
     #6b7480 100%)`,
+
   gold: `linear-gradient(148deg,
     #7b5418 0%,
     #a97b32 16%,
@@ -39,15 +35,34 @@ const SIMPLE_FRAME_BG: Record<IncomeTier, string> = {
     #e2bf7d 68%,
     #af8335 84%,
     #7a5319 100%)`,
-  diamond: `linear-gradient(148deg,
-    #707986 0%,
-    #aab3be 16%,
-    #c9d1db 30%,
-    #eef3f8 46%,
-    #fbfdff 52%,
-    #dde4ec 66%,
-    #a8b0ba 82%,
-    #6e7682 100%)`,
+
+  // Diamond: metallic silver-blue base + fine horizontal hairline (brushed metal)
+  diamond: [
+    // Hairline brushed-metal texture — very fine nearly-horizontal lines
+    'repeating-linear-gradient(88deg,' +
+      'transparent 0px,' +
+      'transparent 1px,' +
+      'rgba(255,255,255,0.18) 1px,' +
+      'rgba(255,255,255,0.18) 2px,' +
+      'transparent 2px,' +
+      'transparent 4px,' +
+      'rgba(0,0,0,0.06) 4px,' +
+      'rgba(0,0,0,0.06) 4.5px,' +
+      'transparent 4.5px,' +
+      'transparent 8px' +
+    ')',
+    // Underlying metallic gradient
+    'linear-gradient(148deg,' +
+      '#60707e 0%,' +
+      '#9dafc0 12%,' +
+      '#c8d6e2 26%,' +
+      '#edf4fa 42%,' +
+      '#ffffff 50%,' +
+      '#dce8f2 62%,' +
+      '#a3b5c4 78%,' +
+      '#5e6d7c 100%' +
+    ')',
+  ].join(', '),
 }
 
 // ─── Main component ──────────────────────────────────────────────────────────
@@ -58,59 +73,36 @@ export function IncomeBorder({
   thickness = 8,
   className,
   fill      = false,
-  assetFrame = false,
   children,
 }: IncomeBorderProps) {
   if (!tier) return <>{children}</>
 
-  const isDiamond     = tier === 'diamond'
-  const useAssetFrame = isDiamond && assetFrame
-
-  if (useAssetFrame) {
-    return (
-      <div
-        className={cn('relative overflow-hidden', fill && 'h-full w-full', className)}
-        style={{ borderRadius: radius }}
-      >
-        {/* Aspect-ratio spacer — matches PNG 422 × 572 = 135.545% */}
-        <div aria-hidden className="w-full" style={{ paddingBottom: '135.545%' }} />
-
-        {/* Photo fills the ENTIRE container so beads appear on top of photo */}
-        <div className="absolute inset-0 z-0 overflow-hidden" style={{ borderRadius: radius }}>
-          {children}
-        </div>
-
-        {/* Bead frame PNG — z-20, overlays directly on top of photo */}
-        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
-          <img
-            src={PREMIUM_FRAME_ASSET}
-            alt=""
-            aria-hidden
-            draggable={false}
-            className="w-full h-full select-none"
-            style={{ objectFit: 'fill', display: 'block' }}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  const photoRadius = `calc(${radius} - ${thickness}px)`
+  const isDiamond   = tier === 'diamond'
+  const borderWidth = isDiamond ? 10 : thickness
+  const photoRadius = `calc(${radius} - ${borderWidth}px)`
 
   return (
     <div
       className={cn('relative', fill && 'h-full w-full', className)}
       style={{
-        padding:      thickness,
+        padding:      borderWidth,
         borderRadius: radius,
         background:   SIMPLE_FRAME_BG[tier],
-        boxShadow: [
-          '0 4px 10px rgba(15,23,42,0.16)',
-          '0 18px 34px rgba(15,23,42,0.12)',
-          'inset 0 1.2px 0 rgba(255,255,255,0.72)',
-          'inset 0 -1.2px 0 rgba(0,0,0,0.22)',
-          'inset 0 0 0 0.5px rgba(0,0,0,0.18)',
-        ].join(', '),
+        boxShadow: isDiamond
+          ? [
+              '0 6px 18px rgba(15,23,42,0.22)',
+              '0 22px 44px rgba(15,23,42,0.14)',
+              'inset 0 1.5px 0 rgba(255,255,255,0.82)',
+              'inset 0 -1.5px 0 rgba(0,0,0,0.26)',
+              'inset 0 0 0 0.5px rgba(255,255,255,0.28)',
+            ].join(', ')
+          : [
+              '0 4px 10px rgba(15,23,42,0.16)',
+              '0 18px 34px rgba(15,23,42,0.12)',
+              'inset 0 1.2px 0 rgba(255,255,255,0.72)',
+              'inset 0 -1.2px 0 rgba(0,0,0,0.22)',
+              'inset 0 0 0 0.5px rgba(0,0,0,0.18)',
+            ].join(', '),
       }}
     >
       <div
@@ -120,7 +112,11 @@ export function IncomeBorder({
           borderRadius: photoRadius,
           overflow:     'hidden',
           boxShadow: [
-            `inset 0 0 0 1px rgba(${tier === 'gold' ? '132,95,28,0.48' : '109,120,134,0.48'})`,
+            `inset 0 0 0 1px rgba(${
+              tier === 'gold'    ? '132,95,28,0.48'  :
+              tier === 'diamond' ? '120,145,170,0.52' :
+                                   '109,120,134,0.48'
+            })`,
             'inset 0 0 16px rgba(0,0,0,0.08)',
           ].join(', '),
         }}
@@ -136,17 +132,7 @@ export function IncomeBorder({
 export function IncomeTierChip({ tier }: { tier: IncomeTier | null | undefined }) {
   if (!tier) return null
   const label = tier === 'silver' ? '銀' : tier === 'gold' ? '金' : '鑽'
-  const background = tier === 'diamond'
-    ? `linear-gradient(148deg,
-      #707986 0%,
-      #aab3be 16%,
-      #c9d1db 30%,
-      #eef3f8 46%,
-      #fbfdff 52%,
-      #dde4ec 66%,
-      #a8b0ba 82%,
-      #6e7682 100%)`
-    : SIMPLE_FRAME_BG[tier]
+  const background = SIMPLE_FRAME_BG[tier]
   return (
     <span
       className="inline-flex items-center justify-center text-[10px] font-bold leading-none px-1.5 py-0.5 rounded-md"
