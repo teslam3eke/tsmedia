@@ -1,5 +1,9 @@
 import { supabase } from './supabase'
-import type { QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier } from './types'
+import type {
+  QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
+  AiConfidence, VerificationDocWithProfile, AppNotificationKind, AppNotificationRow,
+  ProfileInteractionAction, MatchRow, MessageRow,
+} from './types'
 
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
@@ -187,11 +191,27 @@ export async function uploadProofDoc(
 
 // ─── Verification Docs ───────────────────────────────────────────────────────
 
+export interface AiResult {
+  passed: boolean
+  company: Company | null
+  confidence: AiConfidence | null
+  reason: string | null
+}
+
+export type ReviewSubmissionMode = 'ai_auto' | 'manual'
+
+function addSeconds(date: Date, seconds: number) {
+  return new Date(date.getTime() + seconds * 1000).toISOString()
+}
+
 export async function submitVerificationDoc(
   userId: string,
   company: Company,
   docType: DocType,
   docPath: string,
+  aiResult?: AiResult,
+  reviewMode: ReviewSubmissionMode = aiResult?.passed ? 'ai_auto' : 'manual',
+  manualReviewReason?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase
     .from('verification_docs')
@@ -202,6 +222,15 @@ export async function submitVerificationDoc(
       doc_url: docPath,
       status: 'pending',
       verification_kind: 'employment',
+      review_mode: reviewMode,
+      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), 15) : null,
+      manual_review_reason: manualReviewReason ?? null,
+      ...(aiResult && {
+        ai_passed:     aiResult.passed,
+        ai_company:    aiResult.company,
+        ai_confidence: aiResult.confidence,
+        ai_reason:     aiResult.reason,
+      }),
     })
 
   if (error) {
@@ -227,6 +256,9 @@ export async function submitIncomeVerification(
   claimedTier: IncomeTier,
   docType: DocType,
   docPath: string,
+  aiResult?: AiResult,
+  reviewMode: ReviewSubmissionMode = aiResult?.passed ? 'ai_auto' : 'manual',
+  manualReviewReason?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase
     .from('verification_docs')
@@ -237,6 +269,15 @@ export async function submitIncomeVerification(
       status: 'pending',
       verification_kind: 'income',
       claimed_income_tier: claimedTier,
+      review_mode: reviewMode,
+      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), 15) : null,
+      manual_review_reason: manualReviewReason ?? null,
+      ...(aiResult && {
+        ai_passed:     aiResult.passed,
+        ai_company:    aiResult.company,
+        ai_confidence: aiResult.confidence,
+        ai_reason:     aiResult.reason,
+      }),
     })
 
   if (error) {
@@ -244,6 +285,305 @@ export async function submitIncomeVerification(
     return { ok: false, error: error.message }
   }
   return { ok: true }
+}
+
+export async function getTodayVerificationSubmissionCount(userId: string): Promise<number> {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+
+  const { count, error } = await supabase
+    .from('verification_docs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('submitted_at', start.toISOString())
+
+  if (error) {
+    console.error('[db] getTodayVerificationSubmissionCount error:', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+export async function finalizeDueAiReviews(): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.rpc('finalize_due_ai_reviews')
+  if (error) {
+    console.error('[db] finalizeDueAiReviews error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// ─── Admin functions ─────────────────────────────────────────────────────────
+
+export async function getPendingVerifications(): Promise<VerificationDocWithProfile[]> {
+  const { data, error } = await supabase
+    .from('verification_docs')
+    .select('*')
+    .eq('status', 'pending')
+    .eq('review_mode', 'manual')
+    .order('submitted_at', { ascending: true })
+
+  if (error) {
+    console.error('[db] getPendingVerifications error:', error.message)
+    return []
+  }
+  return attachProfilesToDocs((data ?? []) as VerificationDocWithProfile[])
+}
+
+export async function getAllVerifications(statusFilter?: string): Promise<VerificationDocWithProfile[]> {
+  let query = supabase
+    .from('verification_docs')
+    .select('*')
+    .order('submitted_at', { ascending: false })
+
+  if (statusFilter && statusFilter !== 'all') {
+    query = query.eq('status', statusFilter)
+    if (statusFilter === 'pending') {
+      query = query.eq('review_mode', 'manual')
+    }
+  }
+
+  const { data, error } = await query
+  if (error) {
+    console.error('[db] getAllVerifications error:', error.message)
+    return []
+  }
+  return attachProfilesToDocs((data ?? []) as VerificationDocWithProfile[])
+}
+
+async function attachProfilesToDocs(docs: VerificationDocWithProfile[]): Promise<VerificationDocWithProfile[]> {
+  const userIds = [...new Set(docs.map((doc) => doc.user_id).filter(Boolean))]
+  if (userIds.length === 0) return docs
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, gender, photo_urls')
+    .in('id', userIds)
+
+  if (error) {
+    console.error('[db] attachProfilesToDocs error:', error.message)
+    return docs.map((doc) => ({ ...doc, profiles: null }))
+  }
+
+  const profileMap = new Map(
+    (data ?? []).map((profile) => [profile.id, {
+      name:       profile.name,
+      gender:     profile.gender,
+      photo_urls: profile.photo_urls,
+    }]),
+  )
+
+  return docs.map((doc) => ({
+    ...doc,
+    profiles: profileMap.get(doc.user_id) ?? null,
+  }))
+}
+
+export async function approveVerificationDoc(
+  docId: string,
+  doc: VerificationDocWithProfile,
+  reviewerNote?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('verification_docs')
+    .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewer_note: reviewerNote ?? null })
+    .eq('id', docId)
+
+  if (error) {
+    console.error('[db] approveVerificationDoc error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  if (doc.verification_kind === 'employment') {
+    await supabase
+      .from('profiles')
+      .update({ is_verified: true, verification_status: 'approved', company: doc.company })
+      .eq('id', doc.user_id)
+    await createAppNotification({
+      userId: doc.user_id,
+      kind: 'verification_approved',
+      title: '職業認證已通過',
+      body: `你的${doc.company ? ` ${doc.company} ` : ''}職業認證已通過。`,
+    })
+  } else if (doc.verification_kind === 'income' && doc.claimed_income_tier) {
+    await supabase
+      .from('profiles')
+      .update({ income_tier: doc.claimed_income_tier })
+      .eq('id', doc.user_id)
+    await createAppNotification({
+      userId: doc.user_id,
+      kind: 'verification_approved',
+      title: '收入認證已通過',
+      body: '你的收入認證已通過，可以到編輯個人資訊開啟收入邊框。',
+    })
+  }
+
+  return { ok: true }
+}
+
+export async function rejectVerificationDoc(
+  docId: string,
+  doc?: VerificationDocWithProfile,
+  reviewerNote?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('verification_docs')
+    .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewer_note: reviewerNote ?? null })
+    .eq('id', docId)
+
+  if (error) {
+    console.error('[db] rejectVerificationDoc error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  if (doc?.verification_kind === 'employment') {
+    await supabase
+      .from('profiles')
+      .update({ is_verified: false, verification_status: 'rejected' })
+      .eq('id', doc.user_id)
+    await createAppNotification({
+      userId: doc.user_id,
+      kind: 'verification_rejected',
+      title: '職業認證未通過',
+      body: reviewerNote ? `原因：${reviewerNote}` : '你的職業認證未通過，請重新上傳清楚的文件。',
+    })
+  } else if (doc?.verification_kind === 'income') {
+    await createAppNotification({
+      userId: doc.user_id,
+      kind: 'verification_rejected',
+      title: '收入認證未通過',
+      body: reviewerNote ? `原因：${reviewerNote}` : '你的收入認證未通過，請重新上傳清楚的文件。',
+    })
+  }
+
+  return { ok: true }
+}
+
+export async function createAppNotification(payload: {
+  userId: string
+  kind: AppNotificationKind
+  title: string
+  body: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('app_notifications')
+    .insert({
+      user_id: payload.userId,
+      kind: payload.kind,
+      title: payload.title,
+      body: payload.body,
+    })
+
+  if (error) {
+    console.error('[db] createAppNotification error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+export async function getUnreadAppNotifications(userId: string): Promise<AppNotificationRow[]> {
+  const { data, error } = await supabase
+    .from('app_notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .is('read_at', null)
+    .order('created_at', { ascending: false })
+    .limit(10)
+
+  if (error) {
+    console.error('[db] getUnreadAppNotifications error:', error.message)
+    return []
+  }
+  return (data ?? []) as AppNotificationRow[]
+}
+
+export async function markAppNotificationRead(notificationId: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('app_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', notificationId)
+
+  if (error) {
+    console.error('[db] markAppNotificationRead error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// ─── Matching / likes ────────────────────────────────────────────────────────
+
+export async function recordProfileInteraction(payload: {
+  targetProfileKey: string
+  action: ProfileInteractionAction
+  targetUserId?: string | null
+}): Promise<{ ok: boolean; matched?: boolean; error?: string }> {
+  // Server-side RPC handles notification/match creation securely. For current
+  // demo profiles targetUserId is null, so it records intent only; once Discover
+  // uses real profiles, super likes notify the target automatically.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('record_profile_interaction', {
+    p_target_profile_key: payload.targetProfileKey,
+    p_action: payload.action,
+    p_target_user_id: payload.targetUserId ?? null,
+  })
+
+  if (error) {
+    console.error('[db] recordProfileInteraction error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  return { ok: true, matched: Boolean(data?.matched) }
+}
+
+export async function getMyMatches(userId: string): Promise<MatchRow[]> {
+  const { data, error } = await supabase
+    .from('matches')
+    .select('*')
+    .or(`user_a.eq.${userId},user_b.eq.${userId}`)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[db] getMyMatches error:', error.message)
+    return []
+  }
+  return (data ?? []) as MatchRow[]
+}
+
+export async function getMatchMessages(matchId: string): Promise<MessageRow[]> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('match_id', matchId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[db] getMatchMessages error:', error.message)
+    return []
+  }
+  return (data ?? []) as MessageRow[]
+}
+
+export async function sendMatchMessage(matchId: string, body: string): Promise<{ ok: boolean; message?: MessageRow; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('send_match_message', {
+    p_match_id: matchId,
+    p_body: body,
+  })
+
+  if (error) {
+    console.error('[db] sendMatchMessage error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, message: data as MessageRow }
+}
+
+export async function getDocSignedUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from('proofs')
+    .createSignedUrl(path, 60 * 30)
+
+  if (error || !data?.signedUrl) return null
+  return data.signedUrl
 }
 
 // Get latest income-verification record for a user (for "審核中 / 已通過 / 已拒絕" status)

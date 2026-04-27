@@ -68,6 +68,7 @@ export default function App() {
   const [, setQuestionnaireEntries] = useState<QuestionnaireEntry[]>([])
   const [, setProfileSetupData] = useState<ProfileSetupData | null>(null)
   const [userGender, setUserGender] = useState<'male' | 'female'>('male')
+  const [currentProfileName, setCurrentProfileName] = useState<string | null>(null)
 
   const getActiveUser = async () => {
     if (user) return user
@@ -78,6 +79,7 @@ export default function App() {
   // After security check, decide where to go based on profile completeness.
   const routeAfterSecurityCheck = (profile: import('@/lib/types').ProfileRow | null) => {
     if (!profile?.name) return go('profile-setup')
+    setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
     go('main')
@@ -86,6 +88,7 @@ export default function App() {
   // Always go through security check first, regardless of progress.
   const routeByProfile = (profile: import('@/lib/types').ProfileRow | null) => {
     if (profile?.gender) setUserGender(profile.gender)
+    if (profile?.name) setCurrentProfileName(profile.name)
     go('security-check')
   }
 
@@ -207,6 +210,7 @@ export default function App() {
   // ── ProfileSetup complete → save basic profile ───────────────
   const handleProfileSetupComplete = async (data: ProfileSetupData) => {
     setProfileSetupData(data)
+    setCurrentProfileName(data.name)
     setUserGender(data.gender)
     const activeUser = await getActiveUser()
     if (activeUser) {
@@ -324,6 +328,7 @@ export default function App() {
         {screen === 'identity-verify' && (
           <IdentityVerifyScreen
             userId={user?.id}
+            claimedName={currentProfileName}
             gender={userGender}
             onComplete={() => go('main')}
             onSkip={() => go('main')}

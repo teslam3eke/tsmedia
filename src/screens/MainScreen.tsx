@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+﻿import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -12,10 +12,17 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
-import { getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification, uploadProofDoc, submitVerificationDoc, submitIncomeVerification } from '@/lib/db'
-import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier } from '@/lib/types'
+import {
+  getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification,
+  uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
+  getUnreadAppNotifications, markAppNotificationRead,
+  getTodayVerificationSubmissionCount, finalizeDueAiReviews,
+  recordProfileInteraction,
+} from '@/lib/db'
+import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow } from '@/lib/types'
 import { REGION_LABELS, INCOME_TIER_META } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
+import AdminScreen from '@/screens/AdminScreen'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -24,6 +31,11 @@ import { IncomeBorder } from '@/components/IncomeBorder'
 const HARDCORE_MARKERS = [
   '絕對', '硬核', '絕不', '我付', '當然', '肯定', '一定', '必須', '毫不', '不可能', '死都', '最硬',
 ]
+const AI_REVIEW_SECONDS = 15
+
+function toIncomeTier(value: unknown): IncomeTier | null {
+  return value === 'silver' || value === 'gold' || value === 'diamond' ? value : null
+}
 function isHardcoreAnswer(answer: string): boolean {
   if (!answer) return false
   return HARDCORE_MARKERS.some((kw) => answer.includes(kw))
@@ -58,6 +70,7 @@ interface Profile {
   homeRegion: 'north' | 'central' | 'south' | 'east'
   incomeTier?: IncomeTier
   showIncomeBorder?: boolean
+  userId?: string
 }
 
 type Tab = 'discover' | 'matches' | 'messages' | 'profile'
@@ -501,7 +514,7 @@ function NotificationModal({ onClose }: { onClose: () => void }) {
   const allOff = !Object.values(settings).some(Boolean)
 
   const items: { key: NotifKey; icon: React.ElementType; label: string; desc: string }[] = [
-    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '有人對你按愛心時通知你' },
+    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '超級喜歡或配對成功時通知你' },
     { key: 'messages',      icon: MessageCircle, label: '新訊息通知', desc: '收到新訊息時通知你' },
     { key: 'newProfile',    icon: Users,    label: '新推薦通知',   desc: '有新的高契合度對象時通知你' },
     { key: 'weeklyDigest',  icon: Star,     label: '每週精選摘要', desc: '每週一匯總你的配對概況' },
@@ -631,10 +644,12 @@ function NotificationModal({ onClose }: { onClose: () => void }) {
 // ─── Discover Tab ─────────────────────────────────────────────────────────────
 
 function DiscoverTab({
+  userId,
   currentUserGender,
   preferredRegion,
   contentScrollRef,
 }: {
+  userId?: string
   currentUserGender: 'male' | 'female'
   preferredRegion: import('@/lib/types').Region | null
   contentScrollRef?: React.RefObject<HTMLDivElement | null>
@@ -690,8 +705,20 @@ function DiscoverTab({
     setIndex((i) => i - 1)
   }
 
-  const handleLike = () => goNext()
-  const handlePass = () => goNext()
+  const handleInteraction = async (action: 'pass' | 'like' | 'super_like') => {
+    if (userId && profile) {
+      await recordProfileInteraction({
+        targetProfileKey: `demo:${profile.id}`,
+        targetUserId: profile.userId ?? null,
+        action,
+      })
+    }
+    goNext()
+  }
+
+  const handleLike = () => handleInteraction('like')
+  const handleSuperLike = () => handleInteraction('super_like')
+  const handlePass = () => handleInteraction('pass')
 
   if (done) {
     return (
@@ -761,55 +788,78 @@ function DiscoverTab({
                     className={isDiamond ? '' : 'm-3'}
                   >
                     <div
-                      className={cn('relative w-full flex-shrink-0 overflow-hidden', isDiamond ? 'rounded-[1.4rem]' : 'rounded-[0.8rem]')}
+                      className={cn(
+                        'relative w-full flex-shrink-0',
+                        isDiamond ? 'overflow-visible rounded-[1.4rem]' : 'overflow-hidden rounded-[0.8rem]',
+                      )}
                       style={{ paddingBottom: '150%' }}
                     >
-                      {/* Background: real photo or gradient */}
-                      {profile.photoUrl ? (
-                        <img
-                          src={profile.photoUrl}
-                          alt={profile.name}
-                          className="absolute inset-0 w-full h-full object-cover scale-[1.04]"
-                          style={{ filter: 'blur(6px)' }}
-                        />
-                      ) : (
-                        <div
-                          className="absolute inset-0"
-                          style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-                        />
-                      )}
+                      {/* Diamond photos are clipped to the transparent opening inside the frame. */}
+                      <div
+                        className={cn('absolute overflow-hidden', isDiamond ? 'rounded-[1rem]' : 'inset-0 rounded-[0.8rem]')}
+                        style={isDiamond ? {
+                          left: '6%',
+                          right: '6%',
+                          top: '3.35%',
+                          bottom: '3.5%',
+                        } : undefined}
+                      >
+                        {/* Background: real photo or gradient */}
+                        {profile.photoUrl ? (
+                          <img
+                            src={profile.photoUrl}
+                            alt={profile.name}
+                            className="absolute inset-0 w-full h-full object-cover scale-[1.04]"
+                            style={{ filter: 'blur(6px)' }}
+                          />
+                        ) : (
+                          <div
+                            className="absolute inset-0"
+                            style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
+                          />
+                        )}
 
-                      {/* Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                        {/* Overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                      </div>
 
                       {/* Privacy badge */}
                       {profile.photoUrl && (
-                        <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5">
+                        <div
+                          className="absolute flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5"
+                          style={{ zIndex: 30, top: isDiamond ? '6%' : '1rem', left: isDiamond ? '8%' : '1rem' }}
+                        >
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
                           <span className="text-white/90 text-[10px] font-semibold">隱私保護中</span>
                         </div>
                       )}
 
                       {/* Compat badge */}
-                      <div className="absolute top-4 right-4 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5">
+                      <div
+                        className="absolute bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5"
+                        style={{ zIndex: 30, top: isDiamond ? '6%' : '1rem', right: isDiamond ? '8%' : '1rem' }}
+                      >
                         <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                         <span className="text-sm font-bold text-white">{profile.compatScore}% 契合</span>
                       </div>
 
-                      {/* Diamond frame PNG — inside photo div, guaranteed on top */}
+                      {/* Diamond2 frame wraps the full card; photo is inset to the frame opening above. */}
                       {isDiamond && (
                         <img
-                          src="/assets/images/Diamond3.png"
+                          src="/assets/images/Diamond2-frame-clean.png"
                           aria-hidden
                           className="absolute inset-0 w-full h-full pointer-events-none select-none"
-                          style={{ zIndex: 20, objectFit: 'fill' }}
+                          style={{
+                            zIndex: 20,
+                            objectFit: 'fill',
+                          }}
                           draggable={false}
                         />
                       )}
 
                       {/* Diamond: name + company overlaid above frame at photo bottom */}
                       {isDiamond && (
-                        <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pt-10" style={{ zIndex: 30 }}>
+                        <div className="absolute bottom-20 left-0 right-0 px-11 pt-10" style={{ zIndex: 30 }}>
                           <div className="flex items-baseline gap-2">
                             <span className="text-[1.75rem] font-semibold tracking-[-0.03em] text-white drop-shadow-sm">{profile.name}</span>
                             <span className="text-[1.1rem] font-medium text-white/70">{profile.age}</span>
@@ -957,7 +1007,7 @@ function DiscoverTab({
                   <div className="flex-1 h-px bg-slate-100" />
                 </div>
 
-                <div className="flex items-center justify-center gap-8">
+                <div className="flex items-center justify-center gap-4">
                   {index > 0 && (
                     <motion.button
                       whileTap={{ scale: 0.88 }}
@@ -980,12 +1030,28 @@ function DiscoverTab({
                     whileTap={{ scale: 0.88 }}
                     onClick={handleLike}
                     className="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center shadow-lg shadow-slate-900/25"
+                    aria-label="一般喜歡"
                   >
                     <Heart className="w-7 h-7 text-white" />
                   </motion.button>
 
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={handleSuperLike}
+                    className="relative w-16 h-16 rounded-full bg-gradient-to-br from-rose-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-rose-500/25"
+                    aria-label="超級喜歡"
+                  >
+                    <Heart className="w-7 h-7 text-white fill-white" />
+                    <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-rose-500">
+                      超級喜歡
+                    </span>
+                  </motion.button>
+
                   {index > 0 && <div className="w-12 h-12" />}
                 </div>
+                <p className="mt-8 text-center text-[11px] leading-relaxed text-slate-400">
+                  一般愛心不會通知對方；超級喜歡會讓對方知道你對他有興趣。
+                </p>
               </div>
             </div>
           </div>
@@ -1050,7 +1116,7 @@ function NotifEnablePrompt({
         // Fire a welcome ping so the user immediately sees it works
         try {
           const options: NotificationOptions = {
-            body: '通知已啟用，有人對你按愛心或傳訊息時會第一時間通知你',
+            body: '通知已啟用，有人對你按超級喜歡、配對成功或傳訊息時會第一時間通知你',
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
             tag: 'tsmedia-welcome',
@@ -1095,7 +1161,7 @@ function NotifEnablePrompt({
         </div>
         <h3 className="text-[19px] font-bold text-slate-900 tracking-tight mb-2">開啟通知，不錯過任何配對</h3>
         <p className="text-[13px] text-slate-500 leading-relaxed mb-5">
-          當有人對你按愛心、傳訊息、或出現高契合度對象時，我們會立即通知你。
+          一般愛心不會通知對方；當有人對你按超級喜歡、配對成功或傳訊息時，我們會立即通知你。
         </p>
         <button
           onClick={enableNow}
@@ -1930,17 +1996,162 @@ function EditProfileScreen({
   const [incomeUploadTier, setIncomeUploadTier] = useState<IncomeTier | null>(null)
   const [incomeUploadFile, setIncomeUploadFile] = useState<File | null>(null)
   const [uploadingIncome, setUploadingIncome] = useState(false)
+  const [incomeSubmitMsg, setIncomeSubmitMsg] = useState('')
+  const [incomeReviewCountdown, setIncomeReviewCountdown] = useState(0)
   const incomeDocRef = useRef<HTMLInputElement>(null)
+  const canSubmitIncomeVerification = profile.verification_status === 'approved'
+
+  useEffect(() => {
+    if (incomeReviewCountdown <= 0) return
+    const timer = window.setTimeout(() => setIncomeReviewCountdown((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [incomeReviewCountdown])
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+
+  const fileToEnhancedBase64 = (file: File): Promise<string> =>
+    new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) {
+        fileToBase64(file).then(resolve)
+        return
+      }
+
+      const img = new Image()
+      const objectUrl = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl)
+        const maxSide = 2600
+        const scale = Math.min(3, Math.max(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight)))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.naturalWidth * scale)
+        canvas.height = Math.round(img.naturalHeight * scale)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          fileToBase64(file).then(resolve)
+          return
+        }
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.filter = 'contrast(1.22) brightness(1.06) saturate(0.85)'
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.95))
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl)
+        fileToBase64(file).then(resolve)
+      }
+      img.src = objectUrl
+    })
+
+  const reviewIncomeWithAI = async (file: File, tier: IncomeTier) => {
+    if (!file.type.startsWith('image/')) {
+      return {
+        passed: false,
+        company: null,
+        confidence: null,
+        reason: 'PDF 文件無法即時 AI 審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+      } as const
+    }
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 5 * 60 * 1000)
+    try {
+      const imageBase64 = await fileToEnhancedBase64(file)
+      const response = await fetch('/api/verify-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          verificationKind: 'income',
+          claimedIncomeTier: tier,
+          claimedName: profile.name ?? undefined,
+          claimedCompany: profile.company ?? undefined,
+          docType: 'other',
+        }),
+        signal: controller.signal,
+      })
+      const data = await response.json() as {
+        ok: boolean
+        confidence?: string
+        suggestedIncomeTier?: string | null
+        message: string
+        reason?: string
+      }
+      const confidence: AiConfidence | null =
+        data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low'
+          ? data.confidence
+          : null
+      return {
+        passed: data.ok,
+        company: null,
+        confidence,
+        suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
+        reason: data.reason ?? data.message,
+      }
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  }
 
   const submitIncome = async () => {
     if (!incomeUploadTier || !incomeUploadFile) return
+    setIncomeSubmitMsg('')
+    if (!canSubmitIncomeVerification) {
+      setIncomeSubmitMsg('請先完成職業資料認證，通過後才能申請薪資收入審核。')
+      return
+    }
     setUploadingIncome(true)
+    const count = await getTodayVerificationSubmissionCount(userId)
+    if (count >= 20) {
+      setIncomeSubmitMsg('今天已達送審上限 20 次，請明天再試。')
+      setUploadingIncome(false)
+      return
+    }
+
+    const optimisticIncomeTier = incomeUploadTier
+    setIncomeStatus({ status: 'pending', claimed: optimisticIncomeTier })
+    setIncomeReviewCountdown(AI_REVIEW_SECONDS)
+    setIncomeSubmitMsg(`AI 審核倒數 ${AI_REVIEW_SECONDS} 秒。`)
+
+    let aiResult: Awaited<ReturnType<typeof reviewIncomeWithAI>>
+    let reviewMode: 'ai_auto' | 'manual' = 'manual'
+    let manualReason = ''
+    try {
+      aiResult = await reviewIncomeWithAI(incomeUploadFile, incomeUploadTier)
+      if (aiResult.passed) {
+        reviewMode = 'ai_auto'
+        setIncomeSubmitMsg(`AI 審核中，AI 審核時間為 ${AI_REVIEW_SECONDS} 秒。`)
+      } else {
+        manualReason = aiResult.reason || 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
+        setIncomeSubmitMsg(manualReason)
+      }
+    } catch {
+      aiResult = {
+        passed: false,
+        company: null,
+        confidence: null,
+        suggestedIncomeTier: null,
+        reason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+      }
+      manualReason = aiResult.reason
+      setIncomeSubmitMsg(manualReason)
+    }
+
     const res = await uploadProofDoc(userId, incomeUploadFile)
     if (res.ok) {
-      await submitIncomeVerification(userId, incomeUploadTier, 'payslip', res.path)
-      setIncomeStatus({ status: 'pending', claimed: incomeUploadTier })
+      await submitIncomeVerification(userId, incomeUploadTier, 'payslip', res.path, aiResult, reviewMode, manualReason)
       setIncomeUploadFile(null)
       setIncomeUploadTier(null)
+    } else {
+      setIncomeStatus(null)
+      setIncomeReviewCountdown(0)
+      setIncomeSubmitMsg(`文件上傳失敗：${res.error ?? '請稍後再試'}`)
     }
     setUploadingIncome(false)
   }
@@ -2235,12 +2446,17 @@ function EditProfileScreen({
                 收入認證審核中
               </p>
               <p className="text-xs text-amber-700/70 mt-1 leading-relaxed">
-                你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。通過後即可啟用邊框特效。
+                你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。{incomeReviewCountdown > 0 ? `AI 審核倒數 ${incomeReviewCountdown} 秒。` : `AI 審核時間為 ${AI_REVIEW_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`}
               </p>
             </div>
           ) : (
             /* Rejected or not yet submitted — show upload form */
             <div className="bg-white rounded-2xl p-4 ring-1 ring-slate-100 shadow-sm space-y-4">
+              {!canSubmitIncomeVerification && (
+                <div className="bg-slate-50 rounded-xl px-3 py-2.5 ring-1 ring-slate-100">
+                  <p className="text-xs font-bold text-slate-600">請先完成職業資料認證，通過後才能申請薪資收入審核。</p>
+                </div>
+              )}
               {incomeStatus?.status === 'rejected' && (
                 <div className="bg-rose-50 rounded-xl px-3 py-2.5 ring-1 ring-rose-100">
                   <p className="text-xs font-bold text-rose-700">上次送審未通過，請重新上傳更清晰的文件</p>
@@ -2252,7 +2468,7 @@ function EditProfileScreen({
                   上傳收入證明文件
                 </p>
                 <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
-                  可上傳薪資單、扣繳憑單、銀行對帳單等，審核通過後即可解鎖邊框特效。
+                  可上傳薪資單、扣繳憑單、銀行對帳單等。AI 審核時間為 {AI_REVIEW_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
                 </p>
 
                 {/* Tier picker */}
@@ -2281,13 +2497,17 @@ function EditProfileScreen({
                   type="file"
                   accept="image/*,.pdf"
                   className="hidden"
+                  disabled={!canSubmitIncomeVerification}
                   onChange={(e) => setIncomeUploadFile(e.target.files?.[0] ?? null)}
                 />
                 <button
-                  onClick={() => incomeDocRef.current?.click()}
+                  onClick={() => canSubmitIncomeVerification && incomeDocRef.current?.click()}
+                  disabled={!canSubmitIncomeVerification}
                   className={cn(
                     'w-full rounded-2xl border-2 border-dashed py-4 flex flex-col items-center gap-1.5 transition-all',
-                    incomeUploadFile ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50',
+                    !canSubmitIncomeVerification
+                      ? 'border-slate-100 bg-slate-50 opacity-60 cursor-not-allowed'
+                      : incomeUploadFile ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50',
                   )}
                 >
                   {incomeUploadFile ? (
@@ -2300,17 +2520,29 @@ function EditProfileScreen({
                     <>
                       <Upload className="w-5 h-5 text-slate-300" />
                       <p className="text-xs text-slate-400 font-medium">點擊上傳照片或 PDF</p>
+                      <p className="text-[10px] text-slate-300">AI 審核時間為 {AI_REVIEW_SECONDS} 秒，送出後倒數</p>
                     </>
                   )}
                 </button>
 
+                {incomeSubmitMsg && (
+                  <div className={cn(
+                    'mt-3 rounded-2xl px-4 py-3 ring-1',
+                    incomeSubmitMsg.includes('上限') || incomeSubmitMsg.includes('人工') || incomeSubmitMsg.includes('拒絕')
+                      ? 'bg-amber-50 ring-amber-100'
+                      : 'bg-blue-50 ring-blue-100',
+                  )}>
+                    <p className="text-xs font-medium leading-relaxed text-slate-700">{incomeSubmitMsg}</p>
+                  </div>
+                )}
+
                 {/* Submit */}
                 <button
                   onClick={submitIncome}
-                  disabled={!incomeUploadTier || !incomeUploadFile || uploadingIncome}
+                  disabled={!canSubmitIncomeVerification || !incomeUploadTier || !incomeUploadFile || uploadingIncome}
                   className={cn(
                     'mt-3 w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all',
-                    incomeUploadTier && incomeUploadFile && !uploadingIncome
+                    canSubmitIncomeVerification && incomeUploadTier && incomeUploadFile && !uploadingIncome
                       ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
                       : 'bg-slate-100 text-slate-300',
                   )}
@@ -2380,23 +2612,283 @@ function CompanyVerifyScreen({
   const isApproved  = profile.verification_status === 'approved'
   const isSubmitted = profile.verification_status === 'submitted'
 
-  const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>(profile.company ?? '')
+  const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>('TSMC')
   const [selectedDocType, setSelectedDocType]   = useState<'employee_id' | 'tax_return' | 'payslip' | ''>('')
   const [docFile, setDocFile]   = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted]   = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const [aiMessage, setAiMessage] = useState('')
+  const [companyReviewCountdown, setCompanyReviewCountdown] = useState(0)
+  const [linkedIncomeTier, setLinkedIncomeTier] = useState<IncomeTier | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const canLinkIncomeVerification = selectedDocType === 'tax_return' || selectedDocType === 'payslip'
+
+  useEffect(() => {
+    if (companyReviewCountdown <= 0) return
+    const timer = window.setTimeout(() => setCompanyReviewCountdown((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [companyReviewCountdown])
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+
+  const fileToEnhancedBase64 = (file: File): Promise<string> =>
+    new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) {
+        fileToBase64(file).then(resolve)
+        return
+      }
+
+      const img = new Image()
+      const objectUrl = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl)
+        const maxSide = 2600
+        const scale = Math.min(3, Math.max(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight)))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.naturalWidth * scale)
+        canvas.height = Math.round(img.naturalHeight * scale)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          fileToBase64(file).then(resolve)
+          return
+        }
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.filter = 'contrast(1.22) brightness(1.06) saturate(0.85)'
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.95))
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl)
+        fileToBase64(file).then(resolve)
+      }
+      img.src = objectUrl
+    })
+
+  const verifyCompanyDocWithAI = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      return {
+        passed: false,
+        company: null,
+        confidence: null,
+        reason: 'PDF 文件無法即時 AI 審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+      } as const
+    }
+
+    setAiMessage('AI 正在辨識員工證⋯')
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 5 * 60 * 1000)
+    try {
+      const imageBase64 = await fileToEnhancedBase64(file)
+      const response = await fetch('/api/verify-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          verificationKind: 'employment',
+          claimedName: profile.name ?? undefined,
+          claimedCompany: selectedCompany || undefined,
+          docType: selectedDocType || undefined,
+        }),
+        signal: controller.signal,
+      })
+      const data = await response.json() as {
+        ok: boolean
+        company?: string
+        confidence?: string
+        suggestedIncomeTier?: string | null
+        message: string
+        reason?: string
+      }
+
+      const aiCompany: Company | null = data.company === 'TSMC' || data.company === 'MediaTek' ? data.company : null
+      const aiConfidence: AiConfidence | null = data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low'
+        ? data.confidence
+        : null
+
+      return {
+        passed: data.ok,
+        company: aiCompany,
+        confidence: aiConfidence,
+        suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
+        reason: data.reason ?? data.message,
+      }
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  }
+
+  const verifyLinkedIncomeWithAI = async (file: File, tier: IncomeTier) => {
+    if (!file.type.startsWith('image/')) {
+      return {
+        passed: false,
+        company: null,
+        confidence: null,
+        reason: 'PDF 文件將由人工審核確認。人工審核時間可能大於 12 小時。',
+      } as const
+    }
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 5 * 60 * 1000)
+    try {
+      const imageBase64 = await fileToEnhancedBase64(file)
+      const response = await fetch('/api/verify-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          verificationKind: 'income',
+          claimedIncomeTier: tier,
+          claimedName: profile.name ?? undefined,
+          claimedCompany: selectedCompany || profile.company || undefined,
+          docType: selectedDocType || undefined,
+        }),
+        signal: controller.signal,
+      })
+      const data = await response.json() as {
+        ok: boolean
+        confidence?: string
+        suggestedIncomeTier?: string | null
+        message: string
+        reason?: string
+      }
+      const aiConfidence: AiConfidence | null = data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low'
+        ? data.confidence
+        : null
+      return {
+        passed: data.ok,
+        company: null,
+        confidence: aiConfidence,
+        suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
+        reason: data.reason ?? data.message,
+      }
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  }
 
   const submit = async () => {
     if (!selectedCompany || !selectedDocType || !docFile) return
+    setSubmitError('')
+    setAiMessage('')
     setSubmitting(true)
-    const res = await uploadProofDoc(userId, docFile)
-    if (res.ok) {
-      await submitVerificationDoc(userId, selectedCompany, selectedDocType, res.path)
-      setSubmitted(true)
-      onVerified({ ...profile, verification_status: 'submitted' })
+    const count = await getTodayVerificationSubmissionCount(userId)
+    if (count >= 20) {
+      setSubmitError('今天已達送審上限 20 次，請明天再試。')
+      setSubmitting(false)
+      return
     }
+
+    const optimisticCompany = selectedCompany
+    setSubmitted(true)
+    setCompanyReviewCountdown(AI_REVIEW_SECONDS)
+    setAiMessage(`AI 審核倒數 ${AI_REVIEW_SECONDS} 秒。`)
+    onVerified({ ...profile, company: optimisticCompany, verification_status: 'submitted' })
+
+    let aiResult: Awaited<ReturnType<typeof verifyCompanyDocWithAI>>
+    let reviewMode: 'ai_auto' | 'manual' = 'manual'
+    let manualReason = ''
+    try {
+      aiResult = await verifyCompanyDocWithAI(docFile)
+    } catch {
+      aiResult = {
+        passed: false,
+        company: null,
+        confidence: null,
+        suggestedIncomeTier: null,
+        reason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+      }
+    }
+
+    if (!aiResult.passed) {
+      manualReason = aiResult.reason || 'AI 初審未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
+      setAiMessage(manualReason)
+    } else {
+      if (selectedDocType === 'employee_id') {
+        reviewMode = 'ai_auto'
+        setAiMessage(`AI 審核中，AI 審核時間為 ${AI_REVIEW_SECONDS} 秒。`)
+      } else {
+        reviewMode = 'manual'
+        manualReason = 'AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。人工審核時間可能大於 12 小時。'
+        setAiMessage(manualReason)
+      }
+    }
+
+    if (aiResult.company) setSelectedCompany(aiResult.company)
+
+    const res = await uploadProofDoc(userId, docFile)
+    if (!res.ok) {
+      setSubmitError(`文件上傳失敗：${res.error}`)
+      setSubmitted(false)
+      setCompanyReviewCountdown(0)
+      setSubmitting(false)
+      setAiMessage('')
+      return
+    }
+
+    const docResult = await submitVerificationDoc(
+      userId,
+      aiResult.company ?? selectedCompany,
+      selectedDocType,
+      res.path,
+      aiResult,
+      reviewMode,
+      manualReason,
+    )
+    if (!docResult.ok) {
+      setSubmitError(`送出審核失敗：${docResult.error ?? '請稍後再試'}`)
+      setSubmitted(false)
+      setCompanyReviewCountdown(0)
+      setSubmitting(false)
+      setAiMessage('')
+      return
+    }
+
+    const autoIncomeTier = reviewMode === 'ai_auto' && canLinkIncomeVerification
+      ? linkedIncomeTier ?? toIncomeTier('suggestedIncomeTier' in aiResult ? aiResult.suggestedIncomeTier : null)
+      : null
+
+    if (canLinkIncomeVerification && autoIncomeTier) {
+      let incomeAiResult: Awaited<ReturnType<typeof verifyLinkedIncomeWithAI>>
+      let incomeReviewMode: 'ai_auto' | 'manual' = 'manual'
+      let incomeManualReason = ''
+      try {
+        incomeAiResult = await verifyLinkedIncomeWithAI(docFile, autoIncomeTier)
+      } catch {
+        incomeAiResult = {
+          passed: false,
+          company: null,
+          confidence: null,
+          suggestedIncomeTier: null,
+          reason: 'AI 暫時無法完成收入審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+        }
+      }
+      if (incomeAiResult.passed) {
+        incomeReviewMode = 'ai_auto'
+      } else {
+        incomeManualReason = incomeAiResult.reason || 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
+      }
+      await submitIncomeVerification(
+        userId,
+        autoIncomeTier,
+        selectedDocType,
+        res.path,
+        incomeAiResult,
+        incomeReviewMode,
+        incomeManualReason,
+      )
+    }
+
+    onVerified({ ...profile, company: aiResult.company ?? selectedCompany, verification_status: 'submitted' })
     setSubmitting(false)
+    if (reviewMode === 'ai_auto') setAiMessage('')
   }
 
   return createPortal(
@@ -2434,14 +2926,16 @@ function CompanyVerifyScreen({
             <Sparkles className="w-6 h-6 text-amber-500 flex-shrink-0" />
             <div>
               <p className="text-sm font-bold text-amber-800">審核中</p>
-              <p className="text-xs text-amber-600 mt-0.5">文件已送出，通常 1–3 個工作天完成審核</p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                文件已送出。{companyReviewCountdown > 0 ? `AI 審核倒數 ${companyReviewCountdown} 秒。` : (aiMessage || `AI 審核時間為 ${AI_REVIEW_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`)}
+              </p>
             </div>
           </div>
         ) : (
           <div className="bg-blue-50 rounded-2xl p-4 ring-1 ring-blue-100">
             <p className="text-sm font-bold text-blue-800">上傳公司驗證文件</p>
             <p className="text-xs text-blue-600 mt-1 leading-relaxed">
-              上傳員工識別證、扣繳憑單或薪資單，審核通過後即顯示公司認證標記。
+              上傳員工識別證、扣繳憑單或薪資單。AI 審核時間為 {AI_REVIEW_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
             </p>
           </div>
         )}
@@ -2477,7 +2971,10 @@ function CompanyVerifyScreen({
                 {COMPANY_DOC_TYPES.map(({ value, label }) => (
                   <button
                     key={value}
-                    onClick={() => setSelectedDocType(value)}
+                    onClick={() => {
+                      setSelectedDocType(value)
+                      if (value === 'employee_id') setLinkedIncomeTier(null)
+                    }}
                     className={cn(
                       'w-full flex items-center gap-3 px-4 py-3 rounded-xl ring-1 transition-all text-left',
                       selectedDocType === value
@@ -2492,6 +2989,31 @@ function CompanyVerifyScreen({
                 ))}
               </div>
             </div>
+
+            {canLinkIncomeVerification && (
+              <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
+                <p className="text-xs font-bold text-slate-700 mb-1.5">同步收入認證</p>
+                <p className="text-[11px] text-slate-400 leading-relaxed mb-3">
+                  這份文件若能看出薪資，可同時審核收入等級。AI 通過後收入認證也會進入 {AI_REVIEW_SECONDS} 秒倒數。
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['silver','gold','diamond'] as IncomeTier[]).map((tier) => (
+                    <button
+                      key={tier}
+                      onClick={() => setLinkedIncomeTier(tier)}
+                      className={cn(
+                        'rounded-xl px-2 py-2 text-center ring-1 transition-all',
+                        linkedIncomeTier === tier
+                          ? 'bg-slate-900 text-white ring-slate-900'
+                          : 'bg-white text-slate-600 ring-slate-200',
+                      )}
+                    >
+                      <p className="text-[11px] font-bold leading-tight">{INCOME_TIER_META[tier].label}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* File upload */}
             <div>
@@ -2520,13 +3042,27 @@ function CompanyVerifyScreen({
                   <>
                     <Upload className="w-6 h-6 text-slate-300" />
                     <p className="text-sm text-slate-400 font-medium">點擊上傳照片或 PDF</p>
-                    <p className="text-[11px] text-slate-300">支援 JPG、PNG、PDF</p>
+                    <p className="text-[11px] text-slate-300">AI 審核時間為 {AI_REVIEW_SECONDS} 秒，送出後倒數</p>
                   </>
                 )}
               </button>
             </div>
 
             {/* Submit */}
+            {submitError && (
+              <div className="rounded-2xl bg-red-50 px-4 py-3 ring-1 ring-red-100">
+                <p className="text-xs font-medium leading-relaxed text-red-600">{submitError}</p>
+              </div>
+            )}
+
+            {aiMessage && (
+              <div className="rounded-2xl bg-blue-50 px-4 py-3 ring-1 ring-blue-100">
+                <p className="text-xs font-medium leading-relaxed text-blue-700">
+                  {companyReviewCountdown > 0 ? `AI 審核倒數 ${companyReviewCountdown} 秒。` : aiMessage}
+                </p>
+              </div>
+            )}
+
             <button
               onClick={submit}
               disabled={!selectedCompany || !selectedDocType || !docFile || submitting}
@@ -2567,10 +3103,36 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
   const [photoUrls, setPhotoUrls] = useState<string[]>([])
   const [showNotif, setShowNotif] = useState(false)
   const [showCompanyVerify, setShowCompanyVerify] = useState(false)
+  const [showAdmin, setShowAdmin] = useState(false)
+  const [appNotifications, setAppNotifications] = useState<AppNotificationRow[]>([])
 
   useEffect(() => {
-    getProfile(userId).then(setProfile)
+    const load = async () => {
+      await finalizeDueAiReviews()
+      const latest = await getProfile(userId)
+      setProfile(latest)
+    }
+    load()
   }, [userId])
+
+  useEffect(() => {
+    if (!userId) return
+    const loadNotifications = async () => {
+      await finalizeDueAiReviews()
+      const latest = await getProfile(userId)
+      if (latest) setProfile(latest)
+      const notifications = await getUnreadAppNotifications(userId)
+      setAppNotifications(notifications)
+    }
+    loadNotifications()
+    const intervalId = window.setInterval(loadNotifications, 5_000)
+    return () => window.clearInterval(intervalId)
+  }, [userId, profile?.verification_status, profile?.income_tier])
+
+  const dismissAppNotification = async (notificationId: string) => {
+    setAppNotifications((prev) => prev.filter((n) => n.id !== notificationId))
+    await markAppNotificationRead(notificationId)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -2638,6 +3200,51 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
       </div>
 
       {/* Bio */}
+      {appNotifications.length > 0 && (
+        <div className="mx-4 mt-3 space-y-2">
+          {appNotifications.map((notification) => (
+            <motion.div
+              key={notification.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                'rounded-2xl p-4 shadow-sm ring-1',
+                notification.kind === 'verification_approved'
+                  ? 'bg-emerald-50 ring-emerald-100'
+                  : 'bg-red-50 ring-red-100',
+              )}
+            >
+              <div className="flex items-start gap-3">
+                {notification.kind === 'verification_approved'
+                  ? <ShieldCheck className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-600" />
+                  : <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" />}
+                <div className="min-w-0 flex-1">
+                  <p className={cn(
+                    'text-sm font-bold',
+                    notification.kind === 'verification_approved' ? 'text-emerald-800' : 'text-red-700',
+                  )}>
+                    {notification.title}
+                  </p>
+                  <p className={cn(
+                    'mt-1 text-xs leading-relaxed',
+                    notification.kind === 'verification_approved' ? 'text-emerald-700' : 'text-red-600',
+                  )}>
+                    {notification.body}
+                  </p>
+                </div>
+                <button
+                  onClick={() => dismissAppNotification(notification.id)}
+                  className="rounded-full bg-white/70 px-3 py-1.5 text-[11px] font-semibold text-slate-500"
+                >
+                  已讀
+                </button>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Bio */}
       {bio ? (
         <div className="mx-4 mt-3 bg-white rounded-2xl px-4 py-3.5 shadow-sm ring-1 ring-slate-100">
           <p className="text-sm text-slate-700 leading-relaxed">{bio}</p>
@@ -2703,7 +3310,18 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
       </div>
 
       {/* Logout — pinned above bottom tab bar, never inside scroll */}
-      <div className="flex-shrink-0 px-4 pt-2 pb-1 bg-white border-t border-gray-200">
+      <div className="flex-shrink-0 px-4 pt-2 pb-1 bg-white border-t border-gray-200 space-y-2">
+        {/* Admin entry — only visible for admin accounts */}
+        {profile?.is_admin && (
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setShowAdmin(true)}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold text-slate-700 bg-slate-100 ring-1 ring-slate-200"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>管理後台</span>
+          </motion.button>
+        )}
         <motion.button
           whileTap={{ backgroundColor: '#fff1f2' }}
           onClick={onSignOut}
@@ -2741,6 +3359,21 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
       {/* Notification modal */}
       <AnimatePresence>
         {showNotif && <NotificationModal onClose={() => setShowNotif(false)} />}
+      </AnimatePresence>
+
+      {/* Admin screen */}
+      <AnimatePresence>
+        {showAdmin && (
+          <motion.div
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+            className="fixed inset-0 z-50 bg-[#f5f5f7]"
+          >
+            <AdminScreen onBack={() => setShowAdmin(false)} />
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   )
@@ -2795,7 +3428,7 @@ export default function MainScreen({ user, onSignOut }: { user?: import('@supaba
   }
 
   const tabContent: Record<Tab, React.ReactNode> = {
-    discover: <DiscoverTab currentUserGender={currentUserGender} preferredRegion={currentUserPreferredRegion} contentScrollRef={contentScrollRef} />,
+    discover: <DiscoverTab userId={user?.id} currentUserGender={currentUserGender} preferredRegion={currentUserPreferredRegion} contentScrollRef={contentScrollRef} />,
     matches: (
       <MatchesTab
         onOpenPerson={setViewingPerson}
@@ -2895,3 +3528,5 @@ export default function MainScreen({ user, onSignOut }: { user?: import('@supaba
     </div>
   )
 }
+
+

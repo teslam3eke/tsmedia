@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+﻿import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, FileText, Trash2, ChevronRight, ChevronLeft,
@@ -7,13 +7,14 @@ import {
 import { cn } from '@/lib/utils'
 import {
   uploadPhoto, uploadProofDoc, submitVerificationDoc,
-  submitIncomeVerification, upsertProfile,
+  submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
 } from '@/lib/db'
 import type { DocType, IncomeTier } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 
 interface Props {
   userId?: string
+  claimedName?: string | null
   gender?: 'male' | 'female'
   onComplete: () => void
   onSkip: () => void
@@ -42,8 +43,9 @@ const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
   { tier: 'gold',    range: '年收 300–399 萬', desc: '溫暖香檳金漸層邊框' },
   { tier: 'diamond', range: '年收 400 萬以上', desc: '動態彩虹折射光效' },
 ]
+const AI_REVIEW_SECONDS = 15
 
-export default function IdentityVerifyScreen({ userId, gender = 'male', onComplete, onSkip }: Props) {
+export default function IdentityVerifyScreen({ userId, claimedName, gender = 'male', onComplete, onSkip }: Props) {
   const steps = gender === 'female' ? STEPS_FEMALE : STEPS_MALE
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<PhotoItem[]>([])
@@ -55,9 +57,75 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
   const [selectedTier, setSelectedTier] = useState<IncomeTier | null>(null)
   const [incomeDoc, setIncomeDoc]       = useState<ProofItem | null>(null)
 
+  // ── AI verification state ────────────────────────────────────────
+  const [aiStatus,     setAiStatus]     = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
+  const [aiMessage,    setAiMessage]    = useState('')
+  const [aiReviewCountdown, setAiReviewCountdown] = useState(0)
+  const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: 'TSMC' | 'MediaTek' | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
+
   const photoInputRef  = useRef<HTMLInputElement>(null)
   const proofInputRef  = useRef<HTMLInputElement>(null)
   const incomeInputRef = useRef<HTMLInputElement>(null)
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload  = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+
+  useEffect(() => {
+    if (aiReviewCountdown <= 0) return
+    const timer = window.setTimeout(() => setAiReviewCountdown((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [aiReviewCountdown])
+
+  const verifyProofWithAI = async (file: File): Promise<boolean> => {
+    if (!file.type.startsWith('image/')) {
+      // PDF files skip AI check; proceed to human review
+      setAiStatus('ok')
+      setAiMessage('PDF 文件將由人工審核確認')
+      return true
+    }
+    setAiStatus('checking')
+    setAiMessage('')
+    setAiReviewCountdown(AI_REVIEW_SECONDS)
+    try {
+      const imageBase64 = await fileToBase64(file)
+      const res = await fetch('/api/verify-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          verificationKind: 'employment',
+          claimedName: claimedName?.trim() || undefined,
+          claimedCompany: selectedCompany || undefined,
+          docType: 'other',
+        }),
+      })
+      const data = await res.json() as { ok: boolean; company?: string; confidence?: string; message: string; reason?: string }
+      if (data.ok) {
+        setAiStatus('ok')
+        setAiMessage(data.message)
+        const aiCompany = (data.company === 'TSMC' || data.company === 'MediaTek') ? data.company : null
+        const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low') ? data.confidence : null
+        setAiResultData({ passed: true, company: aiCompany, confidence: aiConf, reason: data.reason ?? null })
+        if (aiCompany) setSelectedCompany(aiCompany)
+        return true
+      } else {
+        setAiStatus('fail')
+        setAiMessage(`${data.message}。已轉人工審核，人工審核時間可能大於 12 小時。`)
+        setAiResultData({ passed: false, company: null, confidence: null, reason: data.message })
+        return true
+      }
+    } catch {
+      setAiStatus('fail')
+      setAiMessage('AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。')
+      setAiResultData({ passed: false, company: null, confidence: null, reason: 'AI 暫時無法完成審核，已轉人工審核。' })
+      return true
+    }
+  }
 
   const addIncomeDoc = (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -100,7 +168,6 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
 
   const addProof = (files: FileList | null) => {
     if (!files) return
-    // Revoke any existing preview URL before replacing
     proofs.forEach((p) => URL.revokeObjectURL(p.previewUrl))
     const newProofs: ProofItem[] = Array.from(files)
       .slice(0, 1)
@@ -112,11 +179,17 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
         previewUrl: URL.createObjectURL(f),
       }))
     setProofs(newProofs)
+    setAiStatus('idle')
+    setAiMessage('')
+    setAiResultData(null)
   }
 
   const removeProof = () => {
     proofs.forEach((p) => URL.revokeObjectURL(p.previewUrl))
     setProofs([])
+    setAiStatus('idle')
+    setAiMessage('')
+    setAiResultData(null)
   }
 
   // Step index mapping differs by gender. Build helpers to check readiness.
@@ -139,6 +212,14 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
     setSubmitting(true)
 
     if (userId) {
+      const submissionCount = await getTodayVerificationSubmissionCount(userId)
+      if (submissionCount >= 20) {
+        setSubmitting(false)
+        setAiStatus('fail')
+        setAiMessage('今天已達送審上限 20 次，請明天再試。')
+        return
+      }
+
       // 1. Upload life photos to Storage (both genders)
       const photoFiles = photos.map((p) => p.file).filter(Boolean) as File[]
       const uploadedPhotoUrls: string[] = []
@@ -159,7 +240,15 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
             'image/heic': 'employee_id', 'application/pdf': 'tax_return',
           }
           const docType: DocType = docTypeMap[proofs[0].type] ?? 'payslip'
-          await submitVerificationDoc(userId, selectedCompany, docType, proofResult.path)
+          await submitVerificationDoc(
+            userId,
+            selectedCompany,
+            docType,
+            proofResult.path,
+            aiResultData ?? undefined,
+            aiResultData?.passed ? 'ai_auto' : 'manual',
+            aiResultData?.passed ? undefined : 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。',
+          )
         }
       }
 
@@ -168,7 +257,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
         const r = await uploadProofDoc(userId, incomeDoc.file)
         if (r.ok) {
           const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
-          await submitIncomeVerification(userId, selectedTier, docType, r.path)
+          await submitIncomeVerification(userId, selectedTier, docType, r.path, undefined, 'manual', '收入文件由人工審核。人工審核時間可能大於 12 小時。')
         }
       }
     } else {
@@ -456,7 +545,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                       <p className="text-sm font-semibold text-slate-700">
                         {selectedCompany ? `上傳 ${selectedCompany} 驗證文件` : '請先選擇公司'}
                       </p>
-                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF</p>
+                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · AI 審核時間為 {AI_REVIEW_SECONDS} 秒</p>
                     </div>
                   </button>
                 ) : (
@@ -478,6 +567,42 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
                     >
                       <Trash2 className="w-3.5 h-3.5 text-slate-500" />
                     </button>
+                  </motion.div>
+                )}
+
+                {/* AI verification status */}
+                {aiStatus !== 'idle' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={cn(
+                      'rounded-2xl p-4 flex items-start gap-3',
+                      aiStatus === 'checking' && 'bg-slate-50 ring-1 ring-slate-100',
+                      aiStatus === 'ok'       && 'bg-emerald-50 ring-1 ring-emerald-100',
+                      aiStatus === 'fail'     && 'bg-red-50 ring-1 ring-red-100',
+                    )}
+                  >
+                    {aiStatus === 'checking' && (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                        className="flex-shrink-0 mt-0.5"
+                      >
+                        <Cpu className="w-4 h-4 text-slate-500" />
+                      </motion.div>
+                    )}
+                    {aiStatus === 'ok'   && <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />}
+                    {aiStatus === 'fail' && <AlertCircle  className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"    />}
+                    <p className={cn(
+                      'text-xs leading-relaxed',
+                      aiStatus === 'checking' && 'text-slate-500',
+                      aiStatus === 'ok'       && 'text-emerald-700 font-medium',
+                      aiStatus === 'fail'     && 'text-red-600',
+                    )}>
+                      {aiStatus === 'checking'
+                        ? `AI 審核倒數 ${aiReviewCountdown || AI_REVIEW_SECONDS} 秒`
+                        : aiMessage}
+                    </p>
                   </motion.div>
                 )}
 
@@ -668,12 +793,18 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
       <div className="px-5 pb-10 pt-4 space-y-3">
         <motion.button
           whileTap={{ scale: canAdvance ? 0.97 : 1 }}
-          onClick={() => {
+          onClick={async () => {
             if (!canAdvance) return
-            if (isLastStep) handleSubmit()
-            else setStep(step + 1)
+            if (isLastStep) {
+              handleSubmit()
+            } else if (stepLabel === '職業驗證文件' && proofs.length > 0 && aiStatus !== 'ok') {
+              const passed = await verifyProofWithAI(proofs[0].file)
+              if (passed) setStep(step + 1)
+            } else {
+              setStep(step + 1)
+            }
           }}
-          disabled={submitting || !canAdvance}
+          disabled={submitting || !canAdvance || aiStatus === 'checking'}
           className={cn(
             'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
             canAdvance && !submitting
@@ -681,7 +812,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
               : 'bg-slate-100 text-slate-300',
           )}
         >
-          {submitting ? (
+          {submitting || aiStatus === 'checking' ? (
             <>
               <motion.div
                 animate={{ rotate: 360 }}
@@ -689,7 +820,7 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
               >
                 <Cpu className="w-5 h-5" />
               </motion.div>
-              提交中⋯
+              {aiStatus === 'checking' ? `AI 審核倒數 ${aiReviewCountdown || AI_REVIEW_SECONDS} 秒` : '提交中⋯'}
             </>
           ) : (
             <>
@@ -708,3 +839,4 @@ export default function IdentityVerifyScreen({ userId, gender = 'male', onComple
     </div>
   )
 }
+
