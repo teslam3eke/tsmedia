@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Heart, X, MessageCircle, Compass, User,
-  Sparkles, MapPin, Briefcase, GraduationCap,
+  Sparkles, MapPin, Briefcase,
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   Camera, Trash2, ImageIcon, Users, Star,
   Search, Plus, Smile, BellRing, AlertCircle, Gem,
-  FileText, Upload, ShieldCheck, ChevronRight,
+  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
@@ -17,9 +17,10 @@ import {
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
   getUnreadAppNotifications, markAppNotificationRead,
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
-  recordProfileInteraction,
+  recordProfileInteraction, submitProfileReport, blockProfile,
+  getMyBlockedProfileKeys, submitMessageReport, getCreditBalance,
 } from '@/lib/db'
-import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow } from '@/lib/types'
+import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import { REGION_LABELS, INCOME_TIER_META } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import AdminScreen from '@/screens/AdminScreen'
@@ -32,6 +33,18 @@ const HARDCORE_MARKERS = [
   '絕對', '硬核', '絕不', '我付', '當然', '肯定', '一定', '必須', '毫不', '不可能', '死都', '最硬',
 ]
 const AI_REVIEW_SECONDS = 15
+const REPORT_REASONS: { value: ReportReason; label: string; desc: string }[] = [
+  { value: 'fake_profile', label: '假帳號 / 盜用照片', desc: '資料或照片疑似不屬於本人' },
+  { value: 'married_or_not_single', label: '已婚或非單身', desc: '疑似不符合單身交友規範' },
+  { value: 'harassment', label: '騷擾或不當訊息', desc: '色情、威脅、歧視或持續騷擾' },
+  { value: 'scam_or_sales', label: '詐騙 / 推銷', desc: '投資、保險、傳銷、借貸或商業招攬' },
+  { value: 'inappropriate_content', label: '不當內容', desc: '暴力、裸露、仇恨或其他違規內容' },
+  { value: 'privacy_violation', label: '侵犯隱私', desc: '截圖、側錄、外流或威脅散布資料' },
+  { value: 'other', label: '其他', desc: '其他需要平台協助審查的情況' },
+]
+const MESSAGE_REPORT_REASONS: { value: MessageReportReason; label: string; desc: string }[] = REPORT_REASONS
+  .filter((item) => item.value !== 'fake_profile' && item.value !== 'married_or_not_single')
+  .map((item) => ({ ...item, value: item.value as MessageReportReason }))
 
 function toIncomeTier(value: unknown): IncomeTier | null {
   return value === 'silver' || value === 'gold' || value === 'diamond' ? value : null
@@ -52,6 +65,7 @@ interface Profile {
   id: number
   gender: 'male' | 'female'
   name: string
+  nickname?: string
   age: number
   company: string
   role: string
@@ -85,6 +99,7 @@ const PROFILES: Profile[] = [
     id: 1,
     gender: 'female',
     name: '林子晴',
+    nickname: '明子',
     age: 29,
     company: '台大醫院',
     role: '內科住院醫師',
@@ -114,6 +129,7 @@ const PROFILES: Profile[] = [
     id: 3,
     gender: 'female',
     name: '吳思妤',
+    nickname: '思妤',
     age: 26,
     company: '自由接案',
     role: '品牌設計師',
@@ -143,6 +159,7 @@ const PROFILES: Profile[] = [
     id: 5,
     gender: 'female',
     name: '王雅婷',
+    nickname: 'Yating',
     age: 27,
     company: '理律法律事務所',
     role: '律師',
@@ -170,6 +187,7 @@ const PROFILES: Profile[] = [
     id: 7,
     gender: 'female',
     name: '陳映晴',
+    nickname: '映晴',
     age: 25,
     company: 'Gogoro',
     role: 'UX 設計師',
@@ -200,6 +218,7 @@ const PROFILES: Profile[] = [
     id: 2,
     gender: 'male',
     name: '陳宥翔',
+    nickname: '翔',
     age: 30,
     company: 'MediaTek',
     role: 'SoC 架構設計師',
@@ -227,6 +246,7 @@ const PROFILES: Profile[] = [
     id: 4,
     gender: 'male',
     name: '張哲維',
+    nickname: '哲維',
     age: 32,
     company: 'MediaTek',
     role: 'AI 演算法工程師',
@@ -254,6 +274,7 @@ const PROFILES: Profile[] = [
     id: 6,
     gender: 'male',
     name: '許庭安',
+    nickname: '庭安',
     age: 29,
     company: 'TSMC',
     role: 'EUV 設備工程師',
@@ -286,6 +307,7 @@ const MATCH_PROFILES: Profile[] = [
     id: 101,
     gender: 'female',
     name: '王雅婷',
+    nickname: 'Yating',
     age: 31,
     company: '理律法律事務所',
     role: '律師',
@@ -313,6 +335,7 @@ const MATCH_PROFILES: Profile[] = [
     id: 102,
     gender: 'male',
     name: '劉承恩',
+    nickname: '承恩',
     age: 32,
     company: 'TSMC',
     role: '製程研發工程師',
@@ -338,6 +361,7 @@ const MATCH_PROFILES: Profile[] = [
     id: 103,
     gender: 'female',
     name: '蔡佩如',
+    nickname: '佩如',
     age: 29,
     company: 'MediaTek',
     role: '數位設計工程師',
@@ -373,7 +397,7 @@ const MATCH_META: Record<number, { lastMessage: string; time: string; unread: nu
 // Legacy shape used by existing MatchesTab — now derived from MATCH_PROFILES
 const MATCHES = MATCH_PROFILES.map((p) => ({
   id: p.id,
-  name: p.name,
+  name: p.nickname ?? p.name,
   company: p.company,
   role: p.role,
   initials: p.initials,
@@ -384,6 +408,14 @@ const MATCHES = MATCH_PROFILES.map((p) => ({
 
 function findFullProfile(id: number): Profile | null {
   return [...PROFILES, ...MATCH_PROFILES].find((p) => p.id === id) ?? null
+}
+
+function getPublicName(profile: Pick<Profile, 'nickname' | 'name' | 'id'>): string {
+  return profile.nickname?.trim() || `會員 ${profile.id}`
+}
+
+function getRegionText(profile: Pick<Profile, 'workRegion' | 'homeRegion'>): string {
+  return REGION_LABELS[profile.workRegion] ?? REGION_LABELS[profile.homeRegion]
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
@@ -403,6 +435,15 @@ function CompanyBadge({ company }: { company: string }) {
       <Cpu className="w-2.5 h-2.5" />
       {company}
     </span>
+  )
+}
+
+function InfoChip({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-100 rounded-full px-3 py-1.5">
+      <Icon className="w-3 h-3 text-slate-400" />
+      <span className="text-xs text-slate-600 font-medium">{label}</span>
+    </div>
   )
 }
 
@@ -641,6 +682,316 @@ function NotificationModal({ onClose }: { onClose: () => void }) {
   )
 }
 
+function ReportProfileModal({
+  target,
+  onClose,
+}: {
+  target: {
+    profileKey: string
+    displayName: string
+    userId?: string | null
+  }
+  onClose: () => void
+}) {
+  const [reason, setReason] = useState<ReportReason>('fake_profile')
+  const [details, setDetails] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const result = await submitProfileReport({
+        reportedProfileKey: target.profileKey,
+        reportedUserId: target.userId ?? null,
+        reportedDisplayName: target.displayName,
+        reason,
+        details,
+      })
+      if (!result.ok) {
+        setStatus({ type: 'error', message: result.error ?? '送出失敗，請稍後再試。' })
+        return
+      }
+      setStatus({ type: 'success', message: '已收到檢舉，我們會盡快審查。' })
+      window.setTimeout(onClose, 900)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[240] flex items-end justify-center bg-slate-950/55 px-4 pb-4 pt-10"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 24, opacity: 0, scale: 0.96 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 20, opacity: 0, scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 340, damping: 32 }}
+        className="flex max-h-[84dvh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-red-50">
+              <Flag className="h-5 w-5 text-red-500" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-900">檢舉 {target.displayName}</h2>
+              <p className="text-xs text-slate-400">平台會保密你的檢舉者身分</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <p className="mb-3 text-xs font-bold tracking-[0.18em] text-slate-400 uppercase">檢舉原因</p>
+          <div className="space-y-2">
+            {REPORT_REASONS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setReason(item.value)}
+                className={cn(
+                  'w-full rounded-2xl px-4 py-3 text-left ring-1 transition-all',
+                  reason === item.value ? 'bg-slate-900 text-white ring-slate-900' : 'bg-slate-50 text-slate-700 ring-slate-100',
+                )}
+              >
+                <span className="block text-sm font-bold">{item.label}</span>
+                <span className={cn('mt-0.5 block text-[11px] leading-relaxed', reason === item.value ? 'text-white/60' : 'text-slate-400')}>
+                  {item.desc}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <label className="mt-4 block">
+            <span className="text-xs font-bold tracking-[0.18em] text-slate-400 uppercase">補充說明</span>
+            <textarea
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+              rows={4}
+              placeholder="可以補充發生時間、對話內容、可疑行為等。"
+              className="mt-2 w-full resize-none rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none ring-1 ring-slate-100 placeholder:text-slate-300 focus:ring-slate-300"
+            />
+          </label>
+
+          {status && (
+            <div className={cn(
+              'mt-3 rounded-2xl px-3 py-2 text-xs font-semibold',
+              status.type === 'success' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600',
+            )}>
+              {status.message}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 border-t border-slate-100 px-5 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-500"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="flex-1 rounded-2xl bg-red-500 py-3 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {busy ? '送出中…' : '送出檢舉'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  )
+}
+
+function BlockProfileConfirm({
+  target,
+  onClose,
+  onBlocked,
+}: {
+  target: {
+    profileKey: string
+    displayName: string
+    userId?: string | null
+  }
+  onClose: () => void
+  onBlocked?: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await blockProfile({
+        blockedProfileKey: target.profileKey,
+        blockedUserId: target.userId ?? null,
+        blockedDisplayName: target.displayName,
+        reason: 'user_block',
+      })
+      if (!result.ok) {
+        setError(result.error ?? '封鎖失敗，請稍後再試。')
+        return
+      }
+      onBlocked?.()
+      onClose()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[245] flex items-center justify-center bg-slate-950/55 px-5"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.94, y: 10, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.96, y: 8, opacity: 0 }}
+        className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50">
+          <Ban className="h-6 w-6 text-red-500" />
+        </div>
+        <h2 className="text-base font-black text-slate-900">封鎖 {target.displayName}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">
+          封鎖後你們將不能看到彼此、不能配對，也不能繼續聊天。這個動作可以保護你的隱私與安全。
+        </p>
+        {error && <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">{error}</p>}
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button onClick={onClose} className="rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-500">
+            取消
+          </button>
+          <button onClick={submit} disabled={busy} className="rounded-2xl bg-red-500 py-3 text-sm font-bold text-white disabled:opacity-60">
+            {busy ? '處理中…' : '確認封鎖'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  )
+}
+
+function ReportMessageModal({
+  target,
+  onClose,
+}: {
+  target: {
+    displayName: string
+    messageBody: string
+    reportedProfileKey?: string | null
+    reportedUserId?: string | null
+    messageId?: string | null
+    matchId?: string | null
+  }
+  onClose: () => void
+}) {
+  const [reason, setReason] = useState<MessageReportReason>('harassment')
+  const [details, setDetails] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const result = await submitMessageReport({
+        reason,
+        details,
+        messageBody: target.messageBody,
+        reportedProfileKey: target.reportedProfileKey ?? null,
+        reportedUserId: target.reportedUserId ?? null,
+        reportedDisplayName: target.displayName,
+        messageId: target.messageId ?? null,
+        matchId: target.matchId ?? null,
+      })
+      if (!result.ok) {
+        setStatus(result.error ?? '送出失敗，請稍後再試。')
+        return
+      }
+      setStatus('已收到訊息檢舉，我們會盡快審查。')
+      window.setTimeout(onClose, 900)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[246] flex items-end justify-center bg-slate-950/55 px-4 pb-4 pt-10"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 24, opacity: 0, scale: 0.96 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 20, opacity: 0, scale: 0.98 }}
+        className="flex max-h-[84dvh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-100 px-5 py-4">
+          <h2 className="text-base font-black text-slate-900">檢舉訊息</h2>
+          <p className="mt-1 text-xs text-slate-400">對象：{target.displayName}</p>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          <div className="rounded-2xl bg-slate-50 px-3 py-2">
+            <p className="text-[10px] font-bold text-slate-400">被檢舉訊息</p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-600">{target.messageBody}</p>
+          </div>
+          {MESSAGE_REPORT_REASONS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setReason(item.value)}
+              className={cn(
+                'w-full rounded-2xl px-4 py-3 text-left ring-1 transition-all',
+                reason === item.value ? 'bg-slate-900 text-white ring-slate-900' : 'bg-slate-50 text-slate-700 ring-slate-100',
+              )}
+            >
+              <span className="block text-sm font-bold">{item.label}</span>
+              <span className={cn('mt-0.5 block text-[11px] leading-relaxed', reason === item.value ? 'text-white/60' : 'text-slate-400')}>
+                {item.desc}
+              </span>
+            </button>
+          ))}
+          <textarea
+            value={details}
+            onChange={(e) => setDetails(e.target.value)}
+            rows={3}
+            placeholder="補充說明（選填）"
+            className="w-full resize-none rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700 outline-none ring-1 ring-slate-100 placeholder:text-slate-300 focus:ring-slate-300"
+          />
+          {status && <p className="rounded-2xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">{status}</p>}
+        </div>
+        <div className="flex gap-3 border-t border-slate-100 px-5 py-4">
+          <button onClick={onClose} className="flex-1 rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-500">取消</button>
+          <button onClick={submit} disabled={busy} className="flex-1 rounded-2xl bg-red-500 py-3 text-sm font-bold text-white disabled:opacity-60">
+            {busy ? '送出中…' : '送出檢舉'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  )
+}
+
 // ─── Discover Tab ─────────────────────────────────────────────────────────────
 
 function DiscoverTab({
@@ -656,8 +1007,10 @@ function DiscoverTab({
 }) {
   // Men see female profiles, women see male profiles
   // Additional filter: if user set a preferred region, the candidate's work OR home region must match
+  const [blockedKeys, setBlockedKeys] = useState<string[]>([])
   const visibleProfiles = PROFILES.filter((p) => {
     if (p.gender === currentUserGender) return false
+    if (blockedKeys.includes(`demo:${p.id}`)) return false
     if (!preferredRegion) return true
     return p.workRegion === preferredRegion || p.homeRegion === preferredRegion
   })
@@ -668,6 +1021,8 @@ function DiscoverTab({
   const [scrolled, setScrolled] = useState(false)
   const [showNotifModal, setShowNotifModal] = useState(false)
   const [showNotifPrompt, setShowNotifPrompt] = useState(false)
+  const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
+  const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
 
   // On first visit to Discover each session, prompt user to enable notifications
@@ -681,6 +1036,10 @@ function DiscoverTab({
     const t = setTimeout(() => setShowNotifPrompt(true), 600)
     return () => clearTimeout(t)
   }, [])
+
+  useEffect(() => {
+    getMyBlockedProfileKeys().then(setBlockedKeys)
+  }, [userId])
 
   // Reset hint + card scroll position whenever we switch to a new card
   useEffect(() => {
@@ -719,8 +1078,13 @@ function DiscoverTab({
   const handleLike = () => handleInteraction('like')
   const handleSuperLike = () => handleInteraction('super_like')
   const handlePass = () => handleInteraction('pass')
+  const handleBlockedCurrent = () => {
+    if (!profile) return
+    setBlockedKeys((prev) => [...new Set([...prev, `demo:${profile.id}`])])
+    goNext()
+  }
 
-  if (done) {
+  if (visibleProfiles.length === 0 || done || !profile) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-8">
         <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4">
@@ -742,9 +1106,9 @@ function DiscoverTab({
     <div className="flex flex-col h-full">
       {/* Counter */}
       <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
-        <div>
+        <div className="flex items-baseline gap-2">
           <h1 className="text-[20px] font-bold text-slate-900 tracking-tight leading-none">探索</h1>
-          <p className="text-xs text-slate-400 mt-0.5">{index + 1} / {visibleProfiles.length}</p>
+          <p className="text-xs font-semibold text-slate-400">{index + 1} / {visibleProfiles.length}</p>
         </div>
         <button
           onClick={() => setShowNotifModal(true)}
@@ -775,40 +1139,24 @@ function DiscoverTab({
             }}
           >
             {/* ── Photo header ── */}
-            {(() => {
-              const isDiamond = profile.showIncomeBorder && profile.incomeTier === 'diamond'
-              return (
-                <>
-                  <IncomeBorder
-                    tier={(profile.showIncomeBorder && profile.incomeTier) ? profile.incomeTier : null}
-                    radius="1.4rem"
-                    thickness={8}
-                    showVerifyMark={false}
-                    assetFrame={isDiamond}
-                    className={isDiamond ? '' : 'm-3'}
-                  >
-                    <div
-                      className={cn(
-                        'relative w-full flex-shrink-0',
-                        isDiamond ? 'overflow-visible rounded-[1.4rem]' : 'overflow-hidden rounded-[0.8rem]',
-                      )}
-                      style={{ paddingBottom: '150%' }}
-                    >
-                      {/* Diamond photos are clipped to the transparent opening inside the frame. */}
-                      <div
-                        className={cn('absolute overflow-hidden', isDiamond ? 'rounded-[1rem]' : 'inset-0 rounded-[0.8rem]')}
-                        style={isDiamond ? {
-                          left: '6%',
-                          right: '6%',
-                          top: '3.35%',
-                          bottom: '3.5%',
-                        } : undefined}
-                      >
+            <>
+              <IncomeBorder
+                tier={(profile.showIncomeBorder && profile.incomeTier) ? profile.incomeTier : null}
+                radius="1.4rem"
+                thickness={8}
+                showVerifyMark={false}
+                className="m-3"
+              >
+                <div
+                  className="relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]"
+                  style={{ paddingBottom: '150%' }}
+                >
+                      <div className="absolute inset-0 overflow-hidden rounded-[0.8rem]">
                         {/* Background: real photo or gradient */}
                         {profile.photoUrl ? (
                           <img
                             src={profile.photoUrl}
-                            alt={profile.name}
+                            alt={getPublicName(profile)}
                             className="absolute inset-0 w-full h-full object-cover scale-[1.04]"
                             style={{ filter: 'blur(6px)' }}
                           />
@@ -827,76 +1175,44 @@ function DiscoverTab({
                       {profile.photoUrl && (
                         <div
                           className="absolute flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5"
-                          style={{ zIndex: 30, top: isDiamond ? '6%' : '1rem', left: isDiamond ? '8%' : '1rem' }}
+                          style={{ zIndex: 30, left: '1rem', bottom: '1rem' }}
                         >
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
                           <span className="text-white/90 text-[10px] font-semibold">隱私保護中</span>
                         </div>
                       )}
 
-                      {/* Compat badge */}
-                      <div
-                        className="absolute bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5"
-                        style={{ zIndex: 30, top: isDiamond ? '6%' : '1rem', right: isDiamond ? '8%' : '1rem' }}
+                      <button
+                        type="button"
+                        onClick={() => setReportTarget({
+                          profileKey: `demo:${profile.id}`,
+                          displayName: getPublicName(profile),
+                          userId: profile.userId ?? null,
+                        })}
+                        className="absolute flex items-center gap-1.5 rounded-full bg-black/30 px-3 py-1.5 text-[10px] font-semibold text-white/85 backdrop-blur-md"
+                        style={{ zIndex: 30, top: '1rem', left: '1rem' }}
                       >
-                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                        <span className="text-sm font-bold text-white">{profile.compatScore}% 契合</span>
-                      </div>
+                        <Flag className="h-3.5 w-3.5" />
+                        檢舉
+                      </button>
 
-                      {/* Diamond2 frame wraps the full card; photo is inset to the frame opening above. */}
-                      {isDiamond && (
-                        <img
-                          src="/assets/images/Diamond2-frame-clean.png"
-                          aria-hidden
-                          className="absolute inset-0 w-full h-full pointer-events-none select-none"
-                          style={{
-                            zIndex: 20,
-                            objectFit: 'fill',
-                          }}
-                          draggable={false}
-                        />
-                      )}
-
-                      {/* Diamond: name + company overlaid above frame at photo bottom */}
-                      {isDiamond && (
-                        <div className="absolute bottom-20 left-0 right-0 px-11 pt-10" style={{ zIndex: 30 }}>
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-[1.75rem] font-semibold tracking-[-0.03em] text-white drop-shadow-sm">{profile.name}</span>
-                            <span className="text-[1.1rem] font-medium text-white/70">{profile.age}</span>
-                          </div>
-                          <div className="mt-1">
-                            <CompanyBadge company={profile.company} />
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </IncomeBorder>
 
-                  {/* Non-diamond: name section below photo */}
-                  {!isDiamond && (
+                  {/* Public profile summary: nickname only, no real-name initial block. */}
                     <div className="px-5 pb-1 -mt-1">
-                      <div className="flex items-end gap-3">
-                        <div
-                          className="w-16 h-16 rounded-[1.35rem] flex items-center justify-center text-white font-black text-3xl select-none overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_10px_24px_rgba(15,23,42,0.18)]"
-                          style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-                        >
-                          {profile.initials}
+                      <div className="pb-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{getPublicName(profile)}</span>
+                          <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
                         </div>
-                        <div className="pb-1">
-                          <div className="flex items-baseline gap-2">
-                            <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{profile.name}</span>
-                            <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
-                          </div>
-                          <div className="mt-1">
-                            <CompanyBadge company={profile.company} />
-                          </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <InfoChip icon={MapPin} label={getRegionText(profile)} />
+                          <InfoChip icon={Briefcase} label={profile.role} />
                         </div>
                       </div>
                     </div>
-                  )}
                 </>
-              )
-            })()}
 
             {/* ── Scroll hint — below photo, semi-transparent ── */}
             <AnimatePresence>
@@ -920,20 +1236,6 @@ function DiscoverTab({
 
             {/* ── Info section ────────────────────────────────── */}
             <div className="p-4 pt-2 space-y-4">
-              {/* Role / location / edu chips */}
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { icon: Briefcase, label: profile.role },
-                  { icon: MapPin, label: profile.location },
-                  { icon: GraduationCap, label: profile.education },
-                ].map(({ icon: Icon, label }) => (
-                  <div key={label} className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-100 rounded-full px-3 py-1.5">
-                    <Icon className="w-3 h-3 text-slate-400" />
-                    <span className="text-xs text-slate-600 font-medium">{label}</span>
-                  </div>
-                ))}
-              </div>
-
               {/* Bio */}
               <div className="bg-slate-50 rounded-2xl px-4 py-3.5">
                 <p className="text-sm text-slate-700 leading-relaxed">{profile.bio}</p>
@@ -979,26 +1281,6 @@ function DiscoverTab({
                 <span className="text-xs text-slate-500 font-medium">{profile.department}</span>
               </div>
 
-              {/* compat bar */}
-              <div className="bg-white rounded-2xl p-4 ring-1 ring-slate-100">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">AI 契合度</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full rounded-full"
-                      style={{ background: `linear-gradient(90deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${profile.compatScore}%` }}
-                      transition={{ duration: 0.8, ease: 'easeOut', delay: 0.2 }}
-                    />
-                  </div>
-                  <span className="text-sm font-bold text-slate-600">{profile.compatScore}%</span>
-                </div>
-              </div>
-
               {/* ── Action buttons — 看完才出現，在卡片最底部 ── */}
               <div className="pt-2 pb-10">
                 <div className="flex items-center gap-3 mb-5">
@@ -1038,11 +1320,14 @@ function DiscoverTab({
                   <motion.button
                     whileTap={{ scale: 0.88 }}
                     onClick={handleSuperLike}
-                    className="relative w-16 h-16 rounded-full bg-gradient-to-br from-rose-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-rose-500/25"
+                    className="relative ml-2 h-[68px] w-[68px] rounded-full border border-amber-200/80 bg-gradient-to-br from-amber-300 via-yellow-400 to-orange-500 flex items-center justify-center shadow-xl shadow-amber-400/35 ring-4 ring-amber-100/70"
                     aria-label="超級喜歡"
                   >
-                    <Heart className="w-7 h-7 text-white fill-white" />
-                    <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-rose-500">
+                    <Sparkles className="h-8 w-8 text-white drop-shadow-[0_2px_5px_rgba(146,64,14,0.55)]" strokeWidth={2.7} />
+                    <span className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white/90 shadow-sm">
+                      <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-yellow-300" />
+                    </span>
+                    <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-amber-500">
                       超級喜歡
                     </span>
                   </motion.button>
@@ -1077,6 +1362,24 @@ function DiscoverTab({
               setShowNotifPrompt(false)
               setShowNotifModal(true)
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {reportTarget && (
+          <ReportProfileModal
+            target={reportTarget}
+            onClose={() => setReportTarget(null)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {blockTarget && (
+          <BlockProfileConfirm
+            target={blockTarget}
+            onClose={() => setBlockTarget(null)}
+            onBlocked={handleBlockedCurrent}
           />
         )}
       </AnimatePresence>
@@ -1293,6 +1596,8 @@ function PersonDetailView({
   // Look up the full profile so this view is visually identical to the
   // Discover card — same photo header, same chips, same bio, same Q&A.
   const profile = findFullProfile(person.id)
+  const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
+  const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
 
   return createPortal(
     <motion.div
@@ -1311,7 +1616,18 @@ function PersonDetailView({
           <ChevronLeft className="w-5 h-5 text-slate-600" />
         </button>
         <span className="text-sm font-bold text-slate-900">個人檔案</span>
-        <div className="w-9 h-9" />
+        <button
+          type="button"
+          onClick={() => setReportTarget({
+            profileKey: profile ? `demo:${profile.id}` : `person:${person.id}`,
+            displayName: person.name,
+            userId: profile?.userId ?? null,
+          })}
+          className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
+          aria-label="檢舉此用戶"
+        >
+          <Flag className="w-4 h-4 text-red-400" />
+        </button>
       </div>
 
       {/* Scrollable content — layout mirrors the Discover card exactly */}
@@ -1321,13 +1637,12 @@ function PersonDetailView({
       >
         {profile ? (
           <div className="rounded-3xl bg-white shadow-md ring-1 ring-slate-100 overflow-hidden">
-            {/* ── Photo header — vertical 2:3 portrait with thin platinum frame ── */}
+            {/* ── Photo header — vertical 2:3 portrait with income crown badge ── */}
             <IncomeBorder
               tier={(profile.showIncomeBorder && profile.incomeTier) ? profile.incomeTier : null}
               radius="1.4rem"
               thickness={8}
               showVerifyMark={false}
-              assetFrame={profile.showIncomeBorder && profile.incomeTier === 'diamond'}
               className="m-3"
             >
               <div
@@ -1337,7 +1652,7 @@ function PersonDetailView({
                 {profile.photoUrl ? (
                   <img
                     src={profile.photoUrl}
-                    alt={profile.name}
+                    alt={getPublicName(profile)}
                     className="absolute inset-0 w-full h-full object-cover scale-[1.04]"
                     style={{ filter: 'blur(6px)' }}
                   />
@@ -1356,7 +1671,7 @@ function PersonDetailView({
                   </div>
                 )}
 
-                <div className="absolute top-4 right-4 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5">
+                <div className="absolute right-4 bottom-4 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-300" />
                   <span className="text-sm font-bold text-white">{profile.compatScore}% 契合</span>
                 </div>
@@ -1364,21 +1679,14 @@ function PersonDetailView({
             </IncomeBorder>
 
             <div className="px-5 pb-1 -mt-1">
-              <div className="flex items-end gap-3">
-                <div
-                  className="w-16 h-16 rounded-[1.35rem] flex items-center justify-center text-white font-black text-3xl select-none overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_10px_24px_rgba(15,23,42,0.18)]"
-                  style={{ background: `linear-gradient(160deg, ${profile.gradientFrom}, ${profile.gradientTo})` }}
-                >
-                  {profile.initials}
+              <div className="pb-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{getPublicName(profile)}</span>
+                  <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
                 </div>
-                <div className="pb-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{profile.name}</span>
-                    <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
-                  </div>
-                  <div className="mt-1">
-                    <CompanyBadge company={profile.company} />
-                  </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <InfoChip icon={MapPin} label={getRegionText(profile)} />
+                  <InfoChip icon={Briefcase} label={profile.role} />
                 </div>
               </div>
             </div>
@@ -1388,8 +1696,7 @@ function PersonDetailView({
               <div className="flex flex-wrap gap-2">
                 {[
                   { icon: Briefcase, label: profile.role },
-                  { icon: MapPin, label: profile.location },
-                  { icon: GraduationCap, label: profile.education },
+                  { icon: MapPin, label: getRegionText(profile) },
                 ].map(({ icon: Icon, label }) => (
                   <div key={label} className="flex items-center gap-1.5 bg-slate-50 ring-1 ring-slate-100 rounded-full px-3 py-1.5">
                     <Icon className="w-3 h-3 text-slate-400" />
@@ -1485,9 +1792,20 @@ function PersonDetailView({
       {/* Bottom CTA */}
       {onStartChat && (
         <div
-          className="flex-shrink-0 px-5 pt-3 bg-[#fafafa] border-t border-slate-100"
+          className="flex-shrink-0 px-5 pt-3 bg-[#fafafa] border-t border-slate-100 space-y-2"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}
         >
+          <button
+            onClick={() => setBlockTarget({
+              profileKey: profile ? `demo:${profile.id}` : `person:${person.id}`,
+              displayName: profile ? getPublicName(profile) : person.name,
+              userId: profile?.userId ?? null,
+            })}
+            className="w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 bg-red-50 text-red-500"
+          >
+            <Ban className="w-4 h-4" />
+            封鎖此用戶
+          </button>
           <motion.button
             whileTap={{ scale: 0.97 }}
             onClick={() => onStartChat(person.id)}
@@ -1498,6 +1816,23 @@ function PersonDetailView({
           </motion.button>
         </div>
       )}
+      <AnimatePresence>
+        {reportTarget && (
+          <ReportProfileModal
+            target={reportTarget}
+            onClose={() => setReportTarget(null)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {blockTarget && (
+          <BlockProfileConfirm
+            target={blockTarget}
+            onClose={() => setBlockTarget(null)}
+            onBlocked={onClose}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>,
     document.body,
   )
@@ -1523,8 +1858,13 @@ interface Conversation {
   initials: string
   from: string
   to: string
+  photoUrl?: string
+  matchedAt?: number
   messages: ChatMessage[]
 }
+
+const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
+const DEMO_MATCHED_AT = Date.now() - 10 * 60 * 1000
 
 const CONVERSATIONS: Conversation[] = [
   {
@@ -1534,6 +1874,8 @@ const CONVERSATIONS: Conversation[] = [
     initials: '王',
     from: '#7c3aed',
     to: '#6d28d9',
+    photoUrl: MATCH_PROFILES.find((p) => p.id === 101)?.photoUrl,
+    matchedAt: DEMO_MATCHED_AT,
     messages: [
       { id: 1, text: '你也喜歡手沖嗎？我最近在練習 V60 ☕',             from: 'them', time: '14:32', date: '今天' },
       { id: 2, text: '早安，剛剛看到你分享的那篇文章',                  from: 'them', time: '14:32', date: '今天' },
@@ -1549,6 +1891,8 @@ const CONVERSATIONS: Conversation[] = [
     initials: '劉',
     from: '#0f766e',
     to: '#0d9488',
+    photoUrl: MATCH_PROFILES.find((p) => p.id === 102)?.photoUrl,
+    matchedAt: DEMO_MATCHED_AT,
     messages: [
       { id: 1, text: '週末要一起去陽明山嗎？', from: 'them', time: '11:20', date: '今天' },
       { id: 2, text: '氣象預報看起來不錯',     from: 'them', time: '11:21', date: '今天' },
@@ -1561,12 +1905,323 @@ const CONVERSATIONS: Conversation[] = [
     initials: '蔡',
     from: '#b45309',
     to: '#d97706',
+    photoUrl: MATCH_PROFILES.find((p) => p.id === 103)?.photoUrl,
+    matchedAt: DEMO_MATCHED_AT,
     messages: [
       { id: 1, text: '那部紀錄片我也很想看！', from: 'them', time: '昨天', date: '昨天' },
       { id: 2, text: '下週末有空嗎？',          from: 'me',   time: '昨天', date: '昨天', read: true },
     ],
   },
 ]
+
+const PUZZLE_UNLOCK_ORDER = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15]
+
+function getPuzzleTilePath(tile: number) {
+  const col = tile % 4
+  const row = Math.floor(tile / 4)
+  const x = col * 100
+  const y = row * 150
+  const w = 100
+  const h = 150
+  const cx = x + w / 2
+  const cy = y + h / 2
+  const rightTab = col < 3
+  const bottomTab = row < 3
+  const leftTab = col > 0
+  const topTab = row > 0
+
+  return [
+    `M ${x} ${y}`,
+    `L ${cx - 10} ${y}`,
+    topTab ? `C ${cx - 5} ${y - 20}, ${cx + 5} ${y - 20}, ${cx + 10} ${y}` : `L ${cx + 10} ${y}`,
+    `L ${x + w} ${y}`,
+    `L ${x + w} ${cy - 12}`,
+    rightTab ? `C ${x + w + 18} ${cy - 6}, ${x + w + 18} ${cy + 6}, ${x + w} ${cy + 12}` : `L ${x + w} ${cy + 12}`,
+    `L ${x + w} ${y + h}`,
+    `L ${cx + 10} ${y + h}`,
+    bottomTab ? `C ${cx + 5} ${y + h + 20}, ${cx - 5} ${y + h + 20}, ${cx - 10} ${y + h}` : `L ${cx - 10} ${y + h}`,
+    `L ${x} ${y + h}`,
+    `L ${x} ${cy + 12}`,
+    leftTab ? `C ${x - 18} ${cy + 6}, ${x - 18} ${cy - 6}, ${x} ${cy - 12}` : `L ${x} ${cy - 12}`,
+    'Z',
+  ].join(' ')
+}
+
+function formatPuzzleBoostCountdown(ms: number) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function getPuzzleProgress(messages: ChatMessage[], manualUnlockedTiles: number[] = [], matchedAt?: number, now = Date.now()) {
+  const meCount = messages.filter((message) => message.from === 'me').length
+  const themCount = messages.filter((message) => message.from === 'them').length
+  const boostRemainingMs = matchedAt ? Math.max(0, RECENT_MATCH_BOOST_MS - (now - matchedAt)) : 0
+  const boostActive = boostRemainingMs > 0
+  const unlockMultiplier = boostActive ? 2 : 1
+  const chatUnlocks = Math.floor(Math.min(meCount, themCount) / 3) * unlockMultiplier
+  const unlockedTiles = Array.from(new Set([
+    ...PUZZLE_UNLOCK_ORDER.slice(0, chatUnlocks),
+    ...manualUnlockedTiles,
+  ])).slice(0, 16)
+  const unlockedCount = unlockedTiles.length
+  const nextRemaining = unlockedCount >= 16
+    ? 0
+    : Math.max(0, 3 - (Math.min(meCount, themCount) % 3))
+
+  return { meCount, themCount, chatUnlocks, unlockedCount, unlockedTiles, nextRemaining, boostActive, boostRemainingMs }
+}
+
+function PuzzlePhotoUnlock({
+  conversation,
+  messages,
+  manualUnlockedTiles,
+  isKeyboardOpen,
+  onSpendUnlock,
+}: {
+  conversation: Conversation
+  messages: ChatMessage[]
+  manualUnlockedTiles: number[]
+  isKeyboardOpen: boolean
+  onSpendUnlock: () => void
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  const progress = getPuzzleProgress(messages, manualUnlockedTiles, conversation.matchedAt, now)
+  const unlocked = new Set(progress.unlockedTiles)
+  const unlockedKey = progress.unlockedTiles.join(',')
+  const previousUnlockedKeyRef = useRef<string | null>(null)
+  const [recentlyUnlockedTiles, setRecentlyUnlockedTiles] = useState<number[]>([])
+  const [unlockBurstCount, setUnlockBurstCount] = useState(0)
+  const [showCompletionBurst, setShowCompletionBurst] = useState(false)
+  const recentlyUnlocked = new Set(recentlyUnlockedTiles)
+  const photoUrl = conversation.photoUrl
+  const puzzleSvgId = `chat-puzzle-${conversation.id}`
+  const puzzleTiles = Array.from({ length: 16 }, (_, tile) => tile)
+  const orderedPuzzleTiles = [...puzzleTiles].sort((a, b) => Number(unlocked.has(a)) - Number(unlocked.has(b)))
+  const isPuzzleComplete = progress.unlockedCount >= 16
+
+  useEffect(() => {
+    if (!conversation.matchedAt || !progress.boostActive) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [conversation.matchedAt, progress.boostActive])
+
+  useEffect(() => {
+    const previousKey = previousUnlockedKeyRef.current
+    previousUnlockedKeyRef.current = unlockedKey
+    if (previousKey === null) return
+
+    const previousTiles = previousKey
+      .split(',')
+      .filter(Boolean)
+      .map((tile) => Number(tile))
+    const previousSet = new Set(previousTiles)
+    const addedTiles = progress.unlockedTiles.filter((tile) => !previousSet.has(tile))
+    if (addedTiles.length === 0) return
+
+    setRecentlyUnlockedTiles(addedTiles)
+    setUnlockBurstCount(addedTiles.length)
+    if (progress.unlockedCount >= 16) {
+      setShowCompletionBurst(true)
+    }
+    const timer = window.setTimeout(() => {
+      setRecentlyUnlockedTiles([])
+      setUnlockBurstCount(0)
+      setShowCompletionBurst(false)
+    }, 1400)
+    return () => window.clearTimeout(timer)
+  }, [unlockedKey])
+
+  if (isKeyboardOpen) {
+    return (
+      <div className="border-t border-slate-100 bg-white px-3 py-2">
+        <div className="flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2">
+          <div>
+            <p className="text-[12px] font-black text-slate-900">
+              {conversation.name} 的拼圖 · {progress.unlockedCount}/16
+            </p>
+            <p className="text-[10px] font-semibold text-slate-500">
+              鍵盤開啟時先收起照片，避免擋住訊息
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onSpendUnlock}
+            disabled={progress.unlockedCount >= 16}
+            className="rounded-full bg-sky-500 px-3 py-1.5 text-[10px] font-black text-white disabled:bg-slate-200 disabled:text-slate-400"
+          >
+            隨機解 1 片
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
+      <div className="flex h-[238px] w-full items-stretch justify-center gap-1 sm:gap-1.5">
+        <div className="flex w-[76px] shrink-0 flex-col justify-center sm:w-[82px]">
+          <button
+            type="button"
+            onClick={onSpendUnlock}
+            disabled={progress.unlockedCount >= 16}
+            className={cn(
+              'w-full rounded-2xl px-2 py-3 text-[11px] font-black leading-snug shadow-sm transition active:scale-[0.98]',
+              progress.unlockedCount >= 16
+                ? 'bg-slate-100 text-slate-400'
+                : 'bg-sky-500 text-white shadow-sky-500/30',
+            )}
+          >
+            隨機解 1 片
+          </button>
+        </div>
+        <div className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]">
+        {photoUrl ? (
+          <>
+            <img
+              src={photoUrl}
+              alt={conversation.name}
+              className="absolute inset-0 h-full w-full object-contain object-center blur-2xl opacity-45"
+            />
+            <div className="absolute inset-0 bg-slate-950/20" />
+            {isPuzzleComplete ? (
+              <motion.img
+                src={photoUrl}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 h-full w-full object-contain object-center"
+                initial={{ opacity: 0, scale: 1.08 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.55, ease: 'easeOut' }}
+              />
+            ) : (
+              <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
+                <defs>
+                  <filter id={`${puzzleSvgId}-blur`}>
+                    <feGaussianBlur stdDeviation="8" />
+                  </filter>
+                  {puzzleTiles.map((tile) => (
+                    <clipPath key={tile} id={`${puzzleSvgId}-clip-${tile}`} clipPathUnits="userSpaceOnUse">
+                      <path d={getPuzzleTilePath(tile)} />
+                    </clipPath>
+                  ))}
+                </defs>
+                {orderedPuzzleTiles.map((tile) => {
+                  const isUnlocked = unlocked.has(tile)
+                  const tilePath = getPuzzleTilePath(tile)
+                  return (
+                    <g key={tile}>
+                      <g clipPath={`url(#${puzzleSvgId}-clip-${tile})`}>
+                        <image
+                          href={photoUrl}
+                          x="0"
+                          y="0"
+                          width="400"
+                          height="600"
+                          preserveAspectRatio="xMidYMid meet"
+                          opacity={isUnlocked ? 1 : 0.26}
+                          filter={isUnlocked ? undefined : `url(#${puzzleSvgId}-blur)`}
+                        />
+                        {!isUnlocked && <path d={tilePath} fill="rgba(15, 23, 42, 0.38)" />}
+                      </g>
+                      <path d={tilePath} fill="none" stroke="rgba(255,255,255,.42)" strokeWidth="2.2" />
+                      {recentlyUnlocked.has(tile) && (
+                        <motion.path
+                          d={tilePath}
+                          fill="rgba(255,255,255,.72)"
+                          initial={{ opacity: 0.95 }}
+                          animate={{ opacity: 0 }}
+                          transition={{ duration: 0.8, ease: 'easeOut' }}
+                        />
+                      )}
+                    </g>
+                  )
+                })}
+              </svg>
+            )}
+            <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/20" />
+            <AnimatePresence>
+              {unlockBurstCount > 0 && (
+                <motion.div
+                  key={unlockBurstCount}
+                  className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[12px] font-black text-sky-600 shadow-lg shadow-sky-900/20"
+                  initial={{ opacity: 0, scale: 0.72, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: -10 }}
+                  transition={{ duration: 0.28, ease: 'easeOut' }}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  解鎖 +{unlockBurstCount}
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <AnimatePresence>
+              {showCompletionBurst && (
+                <motion.div
+                  className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <motion.div
+                    className="absolute inset-[-18px] rounded-[2rem] bg-[conic-gradient(from_180deg,rgba(56,189,248,.0),rgba(56,189,248,.45),rgba(251,191,36,.55),rgba(236,72,153,.45),rgba(56,189,248,.0))] blur-md"
+                    initial={{ rotate: 0, scale: 0.86, opacity: 0 }}
+                    animate={{ rotate: 180, scale: 1.1, opacity: [0, 1, 0] }}
+                    transition={{ duration: 1.25, ease: 'easeOut' }}
+                  />
+                  <motion.div
+                    className="relative flex items-center gap-1.5 rounded-full bg-white/95 px-4 py-2 text-[13px] font-black text-amber-500 shadow-xl shadow-amber-900/20"
+                    initial={{ scale: 0.72, y: 12 }}
+                    animate={{ scale: [0.72, 1.08, 1], y: 0 }}
+                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    拼圖完成
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        ) : (
+          <div
+            className="absolute inset-0 flex items-center justify-center text-white"
+            style={{ background: `linear-gradient(135deg, ${conversation.from}, ${conversation.to})` }}
+          >
+            <span className="text-4xl font-black">{conversation.initials}</span>
+          </div>
+        )}
+        </div>
+        <div className="flex min-w-0 flex-1 basis-0 max-w-[118px] flex-col justify-center gap-2.5 pl-0.5 sm:max-w-[124px]">
+          <div className="space-y-1">
+            <p className="truncate text-[11px] font-black leading-tight text-slate-900">
+              {conversation.name} 的拼圖
+            </p>
+            <p className="flex items-baseline gap-0.5 tabular-nums">
+              <span className="text-[22px] font-black leading-none tracking-tight text-slate-900">
+                {progress.unlockedCount}
+              </span>
+              <span className="text-[13px] font-bold text-slate-400">/16</span>
+            </p>
+          </div>
+          <p className="border-l-2 border-sky-200/90 pl-2 text-[10px] font-medium leading-relaxed text-slate-500">
+            {progress.unlockedCount >= 16 ? '照片已完整解鎖' : `再互相 ${progress.nextRemaining || 3} 則解下一格`}
+          </p>
+          {progress.boostActive && (
+            <div className="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50/90 px-2.5 py-2 shadow-sm ring-1 ring-amber-100/80">
+              <p className="text-[9px] font-semibold leading-tight text-amber-800/90">
+                配對完成後 30 分鐘內
+              </p>
+              <p className="mt-1 text-[10px] font-black leading-tight text-amber-700">
+                拼圖解鎖加倍剩餘 {formatPuzzleBoostCountdown(progress.boostRemainingMs)}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // ─── Chat List View ──────────────────────────────────────────────────────────
 
@@ -1646,6 +2301,9 @@ function ChatListView({
 }
 
 // ─── Chat Room View (LINE-style) ─────────────────────────────────────────────
+// 版本 0430：聊天室鍵盤遮擋僅在此元件處理（visualViewport + paddingBottom）。
+// 之後要比對／還原：git show 0430 或 git checkout 0430 -- src/screens/MainScreen.tsx
+// 不要為了鍵盤去改全站 App.tsx / index.css（避免底部導覽浮動問題）。
 
 function ChatRoomView({
   conversation,
@@ -1660,27 +2318,58 @@ function ChatRoomView({
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(conversation.messages)
   const [input, setInput] = useState('')
+  const [reportMessage, setReportMessage] = useState<ChatMessage | null>(null)
+  const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
+  const [recentSendTimes, setRecentSendTimes] = useState<number[]>([])
+  const [sendWarning, setSendWarning] = useState('')
+  const [manualUnlockedTiles, setManualUnlockedTiles] = useState<number[]>([])
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false)
+  /** Pushes composer + scroll area above the on-screen keyboard — chat shell only. */
+  const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages])
+  }, [messages, isKeyboardOpen, keyboardInsetBottom])
 
   // When the keyboard opens/closes the viewport resizes — make sure the
   // latest message stays in view rather than getting hidden behind the composer.
   useEffect(() => {
     const vv = window.visualViewport
-    if (!vv) return
-    const onResize = () => {
-      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+    const updateKeyboardState = () => {
+      const inputFocused = document.activeElement === inputRef.current
+      const viewportShrunk = vv ? vv.height < window.innerHeight - 120 : false
+      setIsKeyboardOpen(inputFocused || viewportShrunk)
+      if (vv) {
+        const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+        setKeyboardInsetBottom(inset)
+      } else {
+        setKeyboardInsetBottom(0)
+      }
+      window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 50)
     }
-    vv.addEventListener('resize', onResize)
-    return () => vv.removeEventListener('resize', onResize)
+    updateKeyboardState()
+    vv?.addEventListener('resize', updateKeyboardState)
+    vv?.addEventListener('scroll', updateKeyboardState)
+    document.addEventListener('focusin', updateKeyboardState)
+    document.addEventListener('focusout', updateKeyboardState)
+    return () => {
+      vv?.removeEventListener('resize', updateKeyboardState)
+      vv?.removeEventListener('scroll', updateKeyboardState)
+      document.removeEventListener('focusin', updateKeyboardState)
+      document.removeEventListener('focusout', updateKeyboardState)
+    }
   }, [])
 
   const send = () => {
     if (!input.trim()) return
+    const nowMs = Date.now()
+    const recent = recentSendTimes.filter((time) => nowMs - time < 60_000)
+    if (recent.length >= 8) {
+      setSendWarning('你傳送太快了，請稍等一下再傳。')
+      return
+    }
     const now = new Date()
     const hh = String(now.getHours()).padStart(2, '0')
     const mm = String(now.getMinutes()).padStart(2, '0')
@@ -1688,7 +2377,42 @@ function ChatRoomView({
       ...prev,
       { id: Date.now(), text: input.trim(), from: 'me', time: `${hh}:${mm}`, date: '今天', read: false },
     ])
+    setRecentSendTimes([...recent, nowMs])
+    setSendWarning('')
     setInput('')
+  }
+
+  const simulateTheirReply = () => {
+    const now = new Date()
+    const hh = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    const samples = [
+      '我也回你一則，測試拼圖解鎖。',
+      '哈哈這個功能感覺滿有趣的。',
+      '那我再補一句，看看會不會多開一格。',
+      '收到，換我回覆你。',
+    ]
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        text: samples[prev.length % samples.length],
+        from: 'them',
+        time: `${hh}:${mm}`,
+        date: '今天',
+      },
+    ])
+  }
+
+  const spendDemoUnlock = () => {
+    const progress = getPuzzleProgress(messages, manualUnlockedTiles, conversation.matchedAt)
+    if (progress.unlockedCount >= 16) return
+    const unlocked = new Set(progress.unlockedTiles)
+    const lockedTiles = Array.from({ length: 16 }, (_, tile) => tile).filter((tile) => !unlocked.has(tile))
+    const nextTile = lockedTiles[Math.floor(Math.random() * lockedTiles.length)]
+    if (nextTile == null) return
+    setManualUnlockedTiles((tiles) => [...tiles, nextTile])
+    setSendWarning('測試：已使用 1 個解除模糊道具，隨機解鎖 1 片。')
   }
 
   // Group consecutive messages from the same sender to suppress repeated avatars
@@ -1715,18 +2439,61 @@ function ChatRoomView({
   }
 
   return (
-    <div className="relative flex flex-col h-full bg-white">
-      {/* Floating back button — no header bar, just this */}
-      <button
-        onClick={onBack}
-        aria-label="返回"
-        className="absolute top-2 left-2 z-20 w-9 h-9 rounded-full bg-white/80 backdrop-blur-md shadow-sm flex items-center justify-center active:bg-white"
+    <div
+      className="relative flex flex-col h-full bg-white"
+      style={
+        keyboardInsetBottom > 0
+          ? { paddingBottom: keyboardInsetBottom }
+          : undefined
+      }
+    >
+      <div
+        className="flex-shrink-0 border-b border-slate-100 bg-white"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 22px)' }}
       >
-        <ChevronLeft className="w-5 h-5 text-slate-700" />
-      </button>
+        <div className="flex items-center gap-2 px-2 py-1.5">
+          <button
+            onClick={onBack}
+            aria-label="返回"
+            className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center active:bg-slate-200"
+          >
+            <ChevronLeft className="w-5 h-5 text-slate-700" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-black text-slate-900">{conversation.name}</p>
+            <p className="truncate text-[10px] font-semibold text-slate-400">{conversation.subtitle}</p>
+          </div>
+          <button
+            onClick={() => setBlockTarget({
+              profileKey: `demo:${conversation.id}`,
+              displayName: conversation.name,
+            })}
+            aria-label="封鎖對方"
+            className="h-8 rounded-full bg-slate-100 px-3 text-[11px] font-bold text-red-500 active:bg-slate-200"
+          >
+            封鎖
+          </button>
+        </div>
+        <PuzzlePhotoUnlock
+          conversation={conversation}
+          messages={messages}
+          manualUnlockedTiles={manualUnlockedTiles}
+          isKeyboardOpen={isKeyboardOpen}
+          onSpendUnlock={spendDemoUnlock}
+        />
+      </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 pt-14 pb-3 space-y-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-1 bg-slate-50/70" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="mb-2 flex justify-center">
+          <button
+            type="button"
+            onClick={simulateTheirReply}
+            className="rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-black text-violet-600 ring-1 ring-violet-100"
+          >
+            測試：讓對方傳一則訊息
+          </button>
+        </div>
         {renderBlocks.map((block, bi) => {
           if (block.type === 'date') {
             return (
@@ -1776,6 +2543,15 @@ function ChatRoomView({
                             ? 'bg-[#8fe37f] text-slate-900 rounded-2xl rounded-br-md'
                             : 'bg-slate-100 text-slate-900 rounded-2xl rounded-bl-md',
                         )}
+                        onDoubleClick={() => !isMe && setReportMessage(msg)}
+                        onContextMenu={(e) => {
+                          if (!isMe) {
+                            e.preventDefault()
+                            setReportMessage(msg)
+                          }
+                        }}
+                        role={!isMe ? 'button' : undefined}
+                        title={!isMe ? '長按或點兩下可檢舉此訊息' : undefined}
                       >
                         {msg.text}
                       </motion.div>
@@ -1791,6 +2567,11 @@ function ChatRoomView({
 
       {/* Composer */}
       <div className="flex-shrink-0 px-2 py-2 bg-white border-t border-slate-200 flex items-center gap-1.5">
+        {sendWarning && (
+          <div className="absolute bottom-[54px] left-3 right-3 rounded-2xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-600">
+            {sendWarning}
+          </div>
+        )}
         <button className="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 active:bg-slate-100 flex-shrink-0">
           <Plus className="w-5 h-5" />
         </button>
@@ -1800,8 +2581,15 @@ function ChatRoomView({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
-            onFocus={() => onChatInputFocus?.()}
-            onBlur={() => onChatInputBlur?.()}
+            onFocus={() => {
+              setIsKeyboardOpen(true)
+              window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 80)
+              onChatInputFocus?.()
+            }}
+            onBlur={() => {
+              setIsKeyboardOpen(false)
+              onChatInputBlur?.()
+            }}
             placeholder="輸入訊息"
             style={{ fontSize: '16px' }}
             className="flex-1 bg-transparent outline-none text-slate-900 placeholder:text-slate-400 py-1"
@@ -1825,6 +2613,28 @@ function ChatRoomView({
           </button>
         )}
       </div>
+      <AnimatePresence>
+        {reportMessage && (
+          <ReportMessageModal
+            target={{
+              displayName: conversation.name,
+              messageBody: reportMessage.text,
+              reportedProfileKey: `demo:${conversation.id}`,
+              messageId: String(reportMessage.id),
+            }}
+            onClose={() => setReportMessage(null)}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {blockTarget && (
+          <BlockProfileConfirm
+            target={blockTarget}
+            onClose={() => setBlockTarget(null)}
+            onBlocked={onBack}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -1927,6 +2737,7 @@ function EditProfileScreen({
   onSaved: (updated: ProfileRow) => void
 }) {
   const [name, setName]     = useState(profile.name ?? '')
+  const [nickname, setNickname] = useState(profile.nickname ?? '')
   const [bio, setBio]       = useState(profile.bio ?? '')
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
@@ -2199,6 +3010,7 @@ function EditProfileScreen({
     const result = await upsertProfile({
       userId,
       name: name.trim(),
+      nickname: nickname.trim(),
       bio: bio.trim(),
       questionnaire: qa.length > 0 ? qa : undefined,
       photoUrls: uploadedPaths.length > 0 ? uploadedPaths : undefined,
@@ -2220,6 +3032,7 @@ function EditProfileScreen({
     const updated: ProfileRow = {
       ...profile,
       name: name.trim(),
+      nickname: nickname.trim(),
       bio: bio.trim(),
       questionnaire: qa.length > 0 ? qa : profile.questionnaire,
       photo_urls: uploadedPaths.length > 0 ? uploadedPaths : profile.photo_urls,
@@ -2254,10 +3067,10 @@ function EditProfileScreen({
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={save}
-          disabled={!name.trim() || saving}
+          disabled={!name.trim() || !nickname.trim() || saving}
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-bold transition-all',
-            name.trim() && !saving
+            name.trim() && nickname.trim() && !saving
               ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
               : 'bg-slate-100 text-slate-300',
           )}
@@ -2278,12 +3091,23 @@ function EditProfileScreen({
 
           <div className="space-y-3">
             <div>
-              <label className="field-label">姓名 <span className="text-red-400">*</span></label>
+              <label className="field-label">真實姓名 <span className="text-red-400">*</span></label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
-                placeholder="你的名字"
+                placeholder="僅用於認證，不會顯示在探索頁"
+                className="field-input"
+              />
+            </div>
+
+            <div>
+              <label className="field-label">暱稱 <span className="text-red-400">*</span></label>
+              <input
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+                placeholder="對方看到的顯示名稱"
                 className="field-input"
               />
             </div>
@@ -2385,9 +3209,9 @@ function EditProfileScreen({
           <p className="text-xs text-slate-400 mt-2">上傳預覽會先以霧化方式顯示，正式照片會保留原始清晰版本。</p>
         </section>
 
-        {/* ── 收入認證 邊框特效 ─────────────────────────── */}
+        {/* ── 收入認證 皇冠特效 ─────────────────────────── */}
         <section>
-          <SectionHeading label="收入認證邊框特效" hint={profile.income_tier ? '可切換顯示' : undefined} />
+          <SectionHeading label="收入認證皇冠特效" hint={profile.income_tier ? '可切換顯示' : undefined} />
 
           {profile.income_tier ? (
             <div className="bg-white rounded-3xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3">
@@ -2397,6 +3221,7 @@ function EditProfileScreen({
                   tier={showIncomeBorder ? profile.income_tier : null}
                   radius="0.75rem"
                   thickness={6}
+                  crownCompact
                 >
                   <div className="w-20 h-20 bg-slate-100 flex items-center justify-center text-slate-400 font-black text-xl">
                     {(profile.name ?? '?').charAt(0)}
@@ -2424,7 +3249,7 @@ function EditProfileScreen({
                     : 'bg-slate-100 text-slate-600',
                 )}
               >
-                <span>{showIncomeBorder ? '已啟用邊框特效' : '未啟用'}</span>
+                <span>{showIncomeBorder ? '已啟用皇冠特效' : '未啟用'}</span>
                 <div className={cn(
                   'w-11 h-6 rounded-full p-0.5 transition-all',
                   showIncomeBorder ? 'bg-white/30' : 'bg-slate-300',
@@ -3104,7 +3929,9 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
   const [showNotif, setShowNotif] = useState(false)
   const [showCompanyVerify, setShowCompanyVerify] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
+  const [showTermsNotice, setShowTermsNotice] = useState(false)
   const [appNotifications, setAppNotifications] = useState<AppNotificationRow[]>([])
+  const [creditBalance, setCreditBalance] = useState<CreditBalance>({ heart: 0, super_like: 0, blur_unlock: 0, point: 0 })
 
   useEffect(() => {
     const load = async () => {
@@ -3123,6 +3950,7 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
       if (latest) setProfile(latest)
       const notifications = await getUnreadAppNotifications(userId)
       setAppNotifications(notifications)
+      setCreditBalance(await getCreditBalance(userId))
     }
     loadNotifications()
     const intervalId = window.setInterval(loadNotifications, 5_000)
@@ -3175,6 +4003,7 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
               radius="0.75rem"
               thickness={5}
               showVerifyMark={false}
+              crownCompact
             >
               <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-white font-black text-2xl ring-2 ring-white/25">
                 {initials}
@@ -3244,6 +4073,24 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
         </div>
       )}
 
+      <div className="mx-4 mt-3 grid grid-cols-3 gap-2">
+        <div className="rounded-2xl bg-white p-3 text-center shadow-sm ring-1 ring-slate-100">
+          <Heart className="mx-auto h-4 w-4 text-rose-400" />
+          <p className="mt-1 text-lg font-black text-slate-900">{creditBalance.heart}</p>
+          <p className="text-[10px] font-semibold text-slate-400">愛心</p>
+        </div>
+        <div className="rounded-2xl bg-white p-3 text-center shadow-sm ring-1 ring-slate-100">
+          <Sparkles className="mx-auto h-4 w-4 text-fuchsia-500" />
+          <p className="mt-1 text-lg font-black text-slate-900">{creditBalance.super_like}</p>
+          <p className="text-[10px] font-semibold text-slate-400">超級喜歡</p>
+        </div>
+        <div className="rounded-2xl bg-white p-3 text-center shadow-sm ring-1 ring-slate-100">
+          <Eye className="mx-auto h-4 w-4 text-sky-500" />
+          <p className="mt-1 text-lg font-black text-slate-900">{creditBalance.blur_unlock}</p>
+          <p className="text-[10px] font-semibold text-slate-400">解除模糊</p>
+        </div>
+      </div>
+
       {/* Bio */}
       {bio ? (
         <div className="mx-4 mt-3 bg-white rounded-2xl px-4 py-3.5 shadow-sm ring-1 ring-slate-100">
@@ -3300,11 +4147,19 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
         <motion.button
           whileTap={{ backgroundColor: '#f8fafc' }}
           onClick={() => setShowCompanyVerify(true)}
-          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700"
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
         >
           <Cpu className="w-4 h-4 text-slate-400" />
           <span>公司認證</span>
           <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
+        </motion.button>
+        <motion.button
+          whileTap={{ backgroundColor: '#f8fafc' }}
+          onClick={() => setShowTermsNotice(true)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700"
+        >
+          <FileText className="w-4 h-4 text-slate-400" />
+          <span>會員同意書</span>
         </motion.button>
       </div>
       </div>
@@ -3359,6 +4214,40 @@ function ProfileTab({ userId, onSignOut }: { userId: string; onSignOut: () => vo
       {/* Notification modal */}
       <AnimatePresence>
         {showNotif && <NotificationModal onClose={() => setShowNotif(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showTermsNotice && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/50 px-5"
+            onClick={() => setShowTermsNotice(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.94, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 8 }}
+              className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900">
+                <FileText className="h-6 w-6 text-white" />
+              </div>
+              <h2 className="text-base font-black text-slate-900">會員同意書</h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                你已完成目前版本的同意紀錄。當平台更新重要條款時，系統會在進入主畫面前要求你重新閱讀並同意。
+              </p>
+              <button
+                onClick={() => setShowTermsNotice(false)}
+                className="mt-5 w-full rounded-2xl bg-slate-900 py-3 text-sm font-bold text-white"
+              >
+                我知道了
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Admin screen */}
@@ -3451,21 +4340,25 @@ export default function MainScreen({ user, onSignOut }: { user?: import('@supaba
 
   return (
     <div className="max-w-md mx-auto w-full flex-1 flex flex-col min-h-0 bg-white">
-      {/* Top bar */}
-      <div className="flex-none flex items-center px-4 pb-3 pt-safe-bar border-b border-gray-200 bg-white">
-        <div className="flex items-center gap-2 flex-1">
-          <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-            <Cpu className="w-[18px] h-[18px] text-white" />
+      {activeTab !== 'messages' && (
+        <div className="flex-none flex items-center px-4 pb-3 pt-safe-bar border-b border-gray-200 bg-white">
+          <div className="flex items-center gap-2 flex-1">
+            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+              <Cpu className="w-[18px] h-[18px] text-white" />
+            </div>
+            <span className="font-bold text-slate-900 tracking-tight text-lg leading-none">tsMedia</span>
+            <span className="text-[11px] text-slate-400 ml-1 leading-none">Silicon Hearts</span>
           </div>
-          <span className="font-bold text-slate-900 tracking-tight text-lg leading-none">tsMedia</span>
-          <span className="text-[11px] text-slate-400 ml-1 leading-none">Silicon Hearts</span>
         </div>
-      </div>
+      )}
 
       {/* Scrollable content — flex-1 */}
       <main
         ref={contentScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto"
+        className={cn(
+          'flex-1 min-h-0',
+          activeTab === 'messages' ? 'overflow-hidden' : 'overflow-y-auto',
+        )}
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         <AnimatePresence mode="wait">
