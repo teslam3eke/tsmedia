@@ -326,6 +326,28 @@ export const ALL_QUESTIONS: Question[] = MALE_QUESTIONS
 
 export function getRandomQuestions(count = 5, gender: Gender = 'male'): Question[] {
   const pool = gender === 'female' ? FEMALE_QUESTIONS : MALE_QUESTIONS
-  const shuffled = [...pool].sort(() => Math.random() - 0.5)
-  return shuffled.slice(0, count)
+  const copy = [...pool]
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy.slice(0, count)
+}
+
+/** 與 getRandomQuestions 相同題池，但以固定 seed 洗牌（種子腳本用，可重現每位創始會員抽到的題）。 */
+export function getSeededRandomQuestions(count = 5, gender: Gender = 'male', seed: number): Question[] {
+  const pool = gender === 'female' ? FEMALE_QUESTIONS : MALE_QUESTIONS
+  const copy = [...pool]
+  let t = seed >>> 0
+  const rnd = () => {
+    t += 0x6d2b79f5
+    let r = Math.imul(t ^ (t >>> 15), 1 | t)
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r)
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296
+  }
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rnd() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy.slice(0, count)
 }

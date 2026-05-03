@@ -1,0 +1,59 @@
+---
+description: Avoid Supabase PostgREST 400/405 — Workbox caching, RPC volatility, unnest SQL
+alwaysApply: true
+---
+
+# Supabase PostgREST + PWA (400 / 405)
+
+When changing `vite.config.ts` Workbox `runtimeCaching`, **Supabase RPC** (`src/lib/db.ts` → `supabase.rpc`), or **discover / SQL functions** in `supabase/migrations`, follow these guards. This project already hit production **405**, **42601**, and **25006**.
+
+## 405 Method Not Allowed (fetch / Supabase)
+
+**Cause:** Service Worker (Workbox) matched only `POST` and `GET` for `*.supabase.co/rest/v1/*`. **CORS preflight uses `OPTIONS`**, which did not match → wrong handler → **405**.
+
+**Do**
+
+- One **`NetworkOnly`** entry for the whole Supabase host, **no `method` filter**, so **OPTIONS + POST + GET** all pass through.
+
+**Don’t**
+
+- Two rules with `method: 'POST'` and `method: 'GET'` only for REST paths.
+
+```javascript
+// ✅ OK — single rule, no method
+runtimeCaching: [
+  { urlPattern: ({ url }) => url.hostname.endsWith('.supabase.co'), handler: 'NetworkOnly' },
+]
+```
+
+After deploy, users may need **hard refresh** or **unregister SW** so old `sw.js` stops intercepting.
+
+---
+
+## 400 / PostgreSQL 42601 (`unnest` / “column definition list … record”)
+
+**Cause:** In some paths (PL/pgSQL + PostgREST), `FROM unnest(v_order) AS ord(region text)` can trigger **42601**.
+
+**Do**
+
+- `FROM (SELECT unnest(v_order) AS region) ord` (same semantics).
+
+---
+
+## 400 / PostgreSQL 25006 (“cannot execute INSERT in a read-only transaction”)
+
+**Cause:** Thin **`LANGUAGE sql`** wrapper RPCs were marked **`STABLE`**. PostgREST runs **STABLE / IMMUTABLE** RPCs in a **read-only** transaction. Delegated **`SECURITY DEFINER`** PL/pgSQL that **INSERT/DELETE** then fails with **25006**.
+
+**Do**
+
+- Wrappers that call mutating logic must be **`VOLATILE`** (default if omitted for side-effecting functions); **never `STABLE`** on those entrypoints.
+
+**Don’t**
+
+- Mark “passthrough” SQL RPCs `STABLE` just because the wrapper body is one `SELECT` — downstream code still writes.
+
+---
+
+## PostgREST schema cache
+
+After replacing RPC signatures or names, migrations may include **`NOTIFY pgrst, 'reload schema'`**. If REST still serves stale errors after SQL fixes, confirm reload ran or bump RPC name (e.g. `*_v2`) once.

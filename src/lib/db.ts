@@ -2,8 +2,13 @@ import { supabase } from './supabase'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
   AiConfidence, VerificationDocWithProfile, AppNotificationKind, AppNotificationRow,
-  ProfileInteractionAction, MatchRow, MessageRow,
+  ProfileInteractionAction, MatchRow, MessageRow, ReportReason, ProfileReportRow,
+  MessageReportReason, MessageReportRow, CreditBalance, CreditTransactionRow,
+  PhotoUnlockStateRow,
 } from './types'
+import { PROFILE_PHOTO_MAX } from './types'
+
+export const TERMS_VERSION = '2026-04-28'
 
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
@@ -24,6 +29,7 @@ export async function getProfile(userId: string): Promise<ProfileRow | null> {
 export interface UpsertProfilePayload {
   userId: string
   name?: string
+  nickname?: string
   gender?: 'male' | 'female'
   age?: number
   company?: Company
@@ -45,6 +51,7 @@ export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok
   // Build patch — always include id so upsert can match/insert the row
   const patch: Record<string, unknown> = { id: userId }
   if (rest.name          !== undefined) patch.name          = rest.name
+  if (rest.nickname      !== undefined) patch.nickname      = rest.nickname
   if (rest.gender        !== undefined) patch.gender        = rest.gender
   if (rest.bio           !== undefined) patch.bio           = rest.bio
   if (rest.interests     !== undefined) patch.interests     = rest.interests
@@ -52,7 +59,9 @@ export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok
   if (rest.company       !== undefined) patch.company       = rest.company
   if (rest.questionnaire !== undefined) patch.questionnaire = rest.questionnaire
   if (jobTitle           !== undefined) patch.job_title     = jobTitle
-  if (photoUrls          !== undefined) patch.photo_urls    = photoUrls
+  if (photoUrls !== undefined) {
+    patch.photo_urls = photoUrls.filter(Boolean).slice(0, PROFILE_PHOTO_MAX)
+  }
   if (workRegion         !== undefined) patch.work_region      = workRegion
   if (homeRegion         !== undefined) patch.home_region      = homeRegion
   if (preferredRegion    !== undefined) patch.preferred_region = preferredRegion
@@ -83,6 +92,26 @@ export async function saveQuestionnaire(
 
   if (error) {
     console.error('[db] saveQuestionnaire error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+export function hasAcceptedLatestTerms(profile: ProfileRow | null): boolean {
+  return profile?.terms_version === TERMS_VERSION && Boolean(profile.terms_accepted_at)
+}
+
+export async function acceptLatestTerms(userId: string): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase.from('profiles') as any)
+    .upsert({
+      id: userId,
+      terms_version: TERMS_VERSION,
+      terms_accepted_at: new Date().toISOString(),
+    }, { onConflict: 'id' })
+
+  if (error) {
+    console.error('[db] acceptLatestTerms error:', error.message)
     return { ok: false, error: error.message }
   }
   return { ok: true }
@@ -414,7 +443,7 @@ export async function approveVerificationDoc(
       userId: doc.user_id,
       kind: 'verification_approved',
       title: '收入認證已通過',
-      body: '你的收入認證已通過，可以到編輯個人資訊開啟收入邊框。',
+      body: '你的收入認證已通過，可以到編輯個人資訊開啟收入皇冠。',
     })
   }
 
@@ -512,11 +541,63 @@ export async function markAppNotificationRead(notificationId: string): Promise<{
 
 // ─── Matching / likes ────────────────────────────────────────────────────────
 
+/** `get_daily_discover_deck_v2` RPC 回傳的單筆資料（jsonb） */
+export type DailyDiscoverRpcRow = {
+  id: string
+  nickname: string | null
+  name: string | null
+  gender: 'male' | 'female' | null
+  age: number | null
+  company: string | null
+  job_title: string | null
+  department: string | null
+  bio: string | null
+  interests: string[] | null
+  questionnaire: QuestionnaireEntry[] | null
+  photo_urls: string[] | null
+  work_region: Region | null
+  home_region: Region | null
+  income_tier: IncomeTier | null
+  show_income_border: boolean | null
+  /** 是否曾對此人送過愛心（伺服器 profile_interactions，不限日期；鍵名沿用 liked_today） */
+  liked_today?: boolean
+  /** 是否曾對此人送過超級喜歡（不限日期；鍵名沿用 super_liked_today） */
+  super_liked_today?: boolean
+}
+
+/** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
+export async function getDailyDiscoverDeck(): Promise<DailyDiscoverRpcRow[]> {
+  // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
+
+  if (error) {
+    // PostgREST 常見：函式內 raise / SQL 錯誤 → 400；見 error.details / hint
+    console.error('[db] getDailyDiscoverDeck error:', error.message, error)
+    return []
+  }
+  if (data == null) return []
+  const parsed = Array.isArray(data)
+    ? data
+    : (typeof data === 'string' ? (JSON.parse(data) as unknown) : [])
+  if (!Array.isArray(parsed)) return []
+  return parsed as DailyDiscoverRpcRow[]
+}
+
 export async function recordProfileInteraction(payload: {
   targetProfileKey: string
   action: ProfileInteractionAction
   targetUserId?: string | null
-}): Promise<{ ok: boolean; matched?: boolean; error?: string }> {
+}): Promise<{
+  ok: boolean
+  matched?: boolean
+  blocked?: boolean
+  /** 曾對該對象送過 like／super_like（不限日期，不再用「當日」） */
+  alreadyLiked?: boolean
+  /** 曾對該對象送過 super_like */
+  alreadySuperLiked?: boolean
+  error?: string
+}> {
   // Server-side RPC handles notification/match creation securely. For current
   // demo profiles targetUserId is null, so it records intent only; once Discover
   // uses real profiles, super likes notify the target automatically.
@@ -531,8 +612,91 @@ export async function recordProfileInteraction(payload: {
     console.error('[db] recordProfileInteraction error:', error.message)
     return { ok: false, error: error.message }
   }
+  const row = data as {
+    matched?: boolean
+    blocked?: boolean
+    already_liked?: boolean
+    already_super_liked?: boolean
+    already_liked_today?: boolean
+    already_super_liked_today?: boolean
+  } | null
+  return {
+    ok: true,
+    matched: Boolean(row?.matched),
+    blocked: Boolean(row?.blocked),
+    alreadyLiked: Boolean(
+      row?.already_liked ?? row?.already_liked_today,
+    ),
+    alreadySuperLiked: Boolean(
+      row?.already_super_liked ?? row?.already_super_liked_today,
+    ),
+  }
+}
 
-  return { ok: true, matched: Boolean(data?.matched) }
+export async function completeMonthlyMembership(): Promise<{
+  ok: boolean
+  error?: string
+  priceNtd?: number
+  subscriptionExpiresAt?: string
+}> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('complete_monthly_membership')
+
+  if (error) {
+    console.error('[db] completeMonthlyMembership error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as { ok?: boolean; price_ntd?: number; subscription_expires_at?: string } | null
+  return {
+    ok: true,
+    priceNtd: row?.price_ntd,
+    subscriptionExpiresAt: row?.subscription_expires_at,
+  }
+}
+
+export async function claimDailyMemberHearts(): Promise<{
+  ok: boolean
+  reason?: string
+  appDayKey?: string
+}> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('claim_daily_member_hearts')
+
+  if (error) {
+    console.error('[db] claimDailyMemberHearts error:', error.message)
+    return { ok: false, reason: error.message }
+  }
+  const row = data as { ok?: boolean; reason?: string; app_day_key?: string } | null
+  if (!row?.ok) {
+    return { ok: false, reason: row?.reason ?? 'unknown', appDayKey: row?.app_day_key }
+  }
+  return { ok: true, appDayKey: row?.app_day_key }
+}
+
+export type ProfileTabStats = {
+  login_streak_days: number
+  login_total_days: number
+  hearts_received: number
+  super_likes_received: number
+}
+
+/** 更新登入 streak／累積天數，並回傳「我的」頁統計（須執行 migration 016） */
+export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('refresh_profile_tab_stats')
+
+  if (error) {
+    console.error('[db] refreshProfileTabStats error:', error.message)
+    return null
+  }
+  const row = data as ProfileTabStats | null
+  if (!row) return null
+  return {
+    login_streak_days: Number(row.login_streak_days ?? 0),
+    login_total_days: Number(row.login_total_days ?? 0),
+    hearts_received: Number(row.hearts_received ?? 0),
+    super_likes_received: Number(row.super_likes_received ?? 0),
+  }
 }
 
 export async function getMyMatches(userId: string): Promise<MatchRow[]> {
@@ -547,6 +711,36 @@ export async function getMyMatches(userId: string): Promise<MatchRow[]> {
     return []
   }
   return (data ?? []) as MatchRow[]
+}
+
+/** Realtime：監聽本人相關的新配對（public.matches 須在 publication supabase_realtime） */
+export function subscribeToNewMatches(
+  userId: string,
+  onInsert: (row: MatchRow) => void,
+): () => void {
+  const channel = supabase
+    .channel(`realtime-matches:${userId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'matches', filter: `user_a=eq.${userId}` },
+      (payload) => {
+        const row = payload.new as MatchRow | null
+        if (row) onInsert(row)
+      },
+    )
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'matches', filter: `user_b=eq.${userId}` },
+      (payload) => {
+        const row = payload.new as MatchRow | null
+        if (row) onInsert(row)
+      },
+    )
+    .subscribe()
+
+  return () => {
+    void supabase.removeChannel(channel)
+  }
 }
 
 export async function getMatchMessages(matchId: string): Promise<MessageRow[]> {
@@ -572,9 +766,317 @@ export async function sendMatchMessage(matchId: string, body: string): Promise<{
 
   if (error) {
     console.error('[db] sendMatchMessage error:', error.message)
+    const msg = error.message ?? ''
+    if (msg.includes('Message rate limit exceeded')) {
+      return { ok: false, error: '你傳送太快了，請稍等一下再傳。' }
+    }
     return { ok: false, error: error.message }
   }
   return { ok: true, message: data as MessageRow }
+}
+
+/** Maps DB row → UI chat bubble (MainScreen ChatMessage shape). */
+export function formatChatMessageFromRow(row: MessageRow, myUserId: string): {
+  id: string
+  text: string
+  from: 'me' | 'them'
+  time: string
+  date: string
+  read?: boolean
+  createdAt: string
+} {
+  const created = new Date(row.created_at)
+  const time = `${String(created.getHours()).padStart(2, '0')}:${String(created.getMinutes()).padStart(2, '0')}`
+  return {
+    id: row.id,
+    text: row.body,
+    from: row.sender_id === myUserId ? 'me' : 'them',
+    time,
+    date: formatChatDateLabel(row.created_at),
+    read: row.read_at != null ? true : undefined,
+    createdAt: row.created_at,
+  }
+}
+
+function formatChatDateLabel(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  if (startOfDay(d) === startOfDay(now)) return '今天'
+  const y = new Date(now)
+  y.setDate(y.getDate() - 1)
+  if (startOfDay(d) === startOfDay(y)) return '昨天'
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function sortChatMessagesByTime<T extends { createdAt?: string; id: string }>(a: T, b: T): number {
+  const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0
+  const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0
+  if (ta !== tb) return ta - tb
+  return a.id.localeCompare(b.id)
+}
+
+export function mergeUniqueChatMessages<T extends { id: string; createdAt?: string }>(prev: T[], incoming: T): T[] {
+  if (prev.some((m) => m.id === incoming.id)) return prev
+  return [...prev, incoming].sort(sortChatMessagesByTime)
+}
+
+/**
+ * Subscribe to new rows in `public.messages` for one match. Requires
+ * `messages` to be in publication `supabase_realtime` (see migration 012).
+ */
+export function subscribeToMatchMessages(
+  matchId: string,
+  onInsert: (row: MessageRow) => void,
+): () => void {
+  const channel = supabase
+    .channel(`match-messages:${matchId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `match_id=eq.${matchId}`,
+      },
+      (payload) => {
+        onInsert(payload.new as MessageRow)
+      },
+    )
+    .subscribe((status) => {
+      if (status === 'CHANNEL_ERROR') {
+        console.error('[db] subscribeToMatchMessages channel error', matchId)
+      }
+    })
+
+  return () => {
+    void supabase.removeChannel(channel)
+  }
+}
+
+export async function getPhotoUnlockState(matchId: string): Promise<PhotoUnlockStateRow | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('sync_photo_unlock_state', {
+    p_match_id: matchId,
+  })
+
+  if (error) {
+    console.error('[db] getPhotoUnlockState error:', error.message)
+    return null
+  }
+  return data as PhotoUnlockStateRow
+}
+
+export async function spendBlurUnlockTile(matchId: string): Promise<{ ok: boolean; state?: PhotoUnlockStateRow; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('spend_blur_unlock_tile', {
+    p_match_id: matchId,
+  })
+
+  if (error) {
+    console.error('[db] spendBlurUnlockTile error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, state: data as PhotoUnlockStateRow }
+}
+
+export async function simulatePartnerMatchMessage(matchId: string, body?: string): Promise<{ ok: boolean; message?: MessageRow; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('simulate_partner_match_message', {
+    p_match_id: matchId,
+    p_body: body ?? '我也回你一則，測試拼圖解鎖。',
+  })
+
+  if (error) {
+    console.error('[db] simulatePartnerMatchMessage error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, message: data as MessageRow }
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+
+export async function submitProfileReport(payload: {
+  reportedProfileKey: string
+  reason: ReportReason
+  details?: string
+  reportedUserId?: string | null
+  reportedDisplayName?: string | null
+}): Promise<{ ok: boolean; error?: string }> {
+  const { data: auth } = await supabase.auth.getUser()
+  const reporterUserId = auth.user?.id
+  if (!reporterUserId) return { ok: false, error: '請先登入後再檢舉。' }
+
+  const { error } = await supabase
+    .from('profile_reports')
+    .insert({
+      reporter_user_id: reporterUserId,
+      reported_user_id: payload.reportedUserId ?? null,
+      reported_profile_key: payload.reportedProfileKey,
+      reported_display_name: payload.reportedDisplayName ?? null,
+      reason: payload.reason,
+      details: payload.details?.trim() || null,
+    })
+
+  if (error) {
+    console.error('[db] submitProfileReport error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  return { ok: true }
+}
+
+export async function getMyBlockedProfileKeys(): Promise<string[]> {
+  const { data: auth } = await supabase.auth.getUser()
+  const userId = auth.user?.id
+  if (!userId) return []
+
+  const { data, error } = await supabase
+    .from('profile_blocks')
+    .select('blocked_profile_key')
+    .eq('blocker_user_id', userId)
+
+  if (error) {
+    console.error('[db] getMyBlockedProfileKeys error:', error.message)
+    return []
+  }
+  return (data ?? []).map((row) => row.blocked_profile_key).filter(Boolean)
+}
+
+export async function blockProfile(payload: {
+  blockedProfileKey: string
+  blockedUserId?: string | null
+  blockedDisplayName?: string | null
+  reason?: string
+}): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any).rpc('record_profile_block', {
+    p_blocked_profile_key: payload.blockedProfileKey,
+    p_blocked_user_id: payload.blockedUserId ?? null,
+    p_blocked_display_name: payload.blockedDisplayName ?? null,
+    p_reason: payload.reason ?? null,
+  })
+
+  if (error) {
+    console.error('[db] blockProfile error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  return { ok: true }
+}
+
+export async function submitMessageReport(payload: {
+  reason: MessageReportReason
+  details?: string
+  matchId?: string | null
+  messageId?: string | null
+  messageBody?: string | null
+  reportedUserId?: string | null
+  reportedProfileKey?: string | null
+  reportedDisplayName?: string | null
+}): Promise<{ ok: boolean; error?: string }> {
+  const { data: auth } = await supabase.auth.getUser()
+  const reporterUserId = auth.user?.id
+  if (!reporterUserId) return { ok: false, error: '請先登入後再檢舉。' }
+
+  const { error } = await supabase
+    .from('message_reports')
+    .insert({
+      reporter_user_id: reporterUserId,
+      reported_user_id: payload.reportedUserId ?? null,
+      match_id: payload.matchId ?? null,
+      message_id: payload.messageId ?? null,
+      reported_profile_key: payload.reportedProfileKey ?? null,
+      reported_display_name: payload.reportedDisplayName ?? null,
+      message_body: payload.messageBody ?? null,
+      reason: payload.reason,
+      details: payload.details?.trim() || null,
+    })
+
+  if (error) {
+    console.error('[db] submitMessageReport error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+export async function getCreditTransactions(userId: string): Promise<CreditTransactionRow[]> {
+  const { data, error } = await supabase
+    .from('credit_transactions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[db] getCreditTransactions error:', error.message)
+    return []
+  }
+  return (data ?? []) as CreditTransactionRow[]
+}
+
+export async function getCreditBalance(userId: string): Promise<CreditBalance> {
+  if (import.meta.env.VITE_TEST_DAILY_TEN === '1') {
+    const { error } = await supabase.rpc('test_ensure_daily_ten_credits')
+    if (error) console.error('[db] test_ensure_daily_ten_credits:', error.message)
+  }
+  const txs = await getCreditTransactions(userId)
+  const balance: CreditBalance = { heart: 0, super_like: 0, blur_unlock: 0, point: 0 }
+  for (const tx of txs) {
+    balance[tx.credit_type] += tx.amount
+  }
+  return balance
+}
+
+export async function getAdminProfileReports(): Promise<ProfileReportRow[]> {
+  const { data, error } = await supabase
+    .from('profile_reports')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[db] getAdminProfileReports error:', error.message)
+    return []
+  }
+  return (data ?? []) as ProfileReportRow[]
+}
+
+export async function getAdminMessageReports(): Promise<MessageReportRow[]> {
+  const { data, error } = await supabase
+    .from('message_reports')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[db] getAdminMessageReports error:', error.message)
+    return []
+  }
+  return (data ?? []) as MessageReportRow[]
+}
+
+export async function updateProfileReportStatus(reportId: string, status: ProfileReportRow['status'], reviewerNote?: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('profile_reports')
+    .update({ status, reviewed_at: new Date().toISOString(), reviewer_note: reviewerNote ?? null })
+    .eq('id', reportId)
+
+  if (error) {
+    console.error('[db] updateProfileReportStatus error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+export async function updateMessageReportStatus(reportId: string, status: MessageReportRow['status'], reviewerNote?: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('message_reports')
+    .update({ status, reviewed_at: new Date().toISOString(), reviewer_note: reviewerNote ?? null })
+    .eq('id', reportId)
+
+  if (error) {
+    console.error('[db] updateMessageReportStatus error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
 }
 
 export async function getDocSignedUrl(path: string): Promise<string | null> {

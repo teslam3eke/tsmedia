@@ -131,37 +131,51 @@ export default function PWAInstallGuide({ onDismiss, forceShow = false }: Props)
               </div>
 
               <h2 className="text-xl font-bold text-slate-900 mb-1">封裝至主畫面</h2>
-              <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+              <p className="text-sm text-slate-500 mb-3 leading-relaxed">
                 為啟用截圖防護與端對端加密隔離，請將 TsMedia 安裝至主畫面後再繼續。
               </p>
+              {effectivePlatform === 'ios' && (
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed rounded-xl bg-slate-100 px-3 py-2.5">
+                  iPhone 的 Safari 底部會因版本長得不一樣，照下面順序做即可。
+                </p>
+              )}
 
               {/* ── iOS ─────────────────────────────────────────── */}
               {effectivePlatform === 'ios' && (
                 <div className="space-y-3">
                   <StepRow
                     num="1"
-                    title="點擊底部工具列的 ⋯ 按鈕"
-                    hint="Safari 底部右側三個點的選單圖示"
+                    title="先看 Safari 最底那一列"
+                    hint={
+                      <>
+                        看<strong>右側</strong>有沒有「⋯」三個直點：有就先點開，再在出現的那一列裡找「分享」（方形加往上箭頭）。
+                        <span className="text-slate-400">
+                          {' '}
+                          若底部<strong>已經直接看得到「分享」</strong>、沒有 ⋯，這步跳過沒關係。
+                        </span>
+                      </>
+                    }
                     icon={<MoreVertical className="w-4 h-4 text-blue-500 flex-shrink-0" />}
                   />
                   <StepRow
                     num="2"
-                    title="選擇「分享」"
-                    hint="點擊分享圖示（方形加上箭頭）開啟分享選單"
+                    title="點「分享」"
+                    hint="開啟分享面板後才能加入主畫面"
                     icon={<Share className="w-4 h-4 text-blue-500 flex-shrink-0" />}
                   />
                   <StepRow
                     num="3"
-                    title='捲動找到「加入主畫面」並點擊'
-                    hint="在分享選單中向下捲動即可看到"
+                    title="往下滑，點「加入主畫面」"
+                    hint="在分享面板裡往下找，有加號或主畫面字樣"
                     icon={<Plus className="w-4 h-4 text-blue-500 flex-shrink-0" />}
                   />
                   <StepRow
                     num="4"
-                    title="點擊右上角「新增」確認"
-                    hint="TsMedia 圖示將出現在你的主畫面"
+                    title="點「新增」完成"
+                    hint="主畫面會出現 TsMedia 圖示，之後請從那個圖示開啟"
                     icon={<Smartphone className="w-4 h-4 text-blue-500 flex-shrink-0" />}
                   />
+
                   <button
                     onClick={dismiss}
                     className="w-full py-3.5 text-sm font-semibold text-slate-400 mt-1"

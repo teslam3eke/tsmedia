@@ -1,38 +1,79 @@
 {
-  "name": "tsMedia — 半導體菁英交友",
-  "short_name": "tsMedia",
-  "description": "專為台積電與聯發科工程師設計的高質感交友平台，在矽晶圓之外找到屬於你的另一半。",
+  "id": "https://www.tsmedia.tw/",
+  "name": "TsMedia",
+  "short_name": "TsMedia",
+  "description": "全台首創 AI 認證精英交友平台，結合 AI 與真實認證，在安全環境中認識高質感對象。",
   "theme_color": "#0f172a",
   "background_color": "#0f172a",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "start_url": "/",
+  "start_url": "/?utm_source=pwa_homescreen",
   "scope": "/",
   "lang": "zh-TW",
   "dir": "ltr",
   "categories": ["social", "lifestyle"],
   "icons": [
-    { "src": "/icons/icon-192.png",           "sizes": "192x192",  "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png",           "sizes": "512x512",  "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-192-maskable.png",  "sizes": "192x192",  "type": "image/png", "purpose": "maskable" },
-    { "src": "/icons/icon-512-maskable.png",  "sizes": "512x512",  "type": "image/png", "purpose": "maskable" },
-    { "src": "/icons/icon-1024.png",          "sizes": "1024x1024","type": "image/png", "purpose": "any" }
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ],
-  "screenshots": [],
+  "screenshots": [
+    {
+      "src": "/landing-photo.png",
+      "type": "image/png",
+      "sizes": "782x661",
+      "form_factor": "narrow",
+      "label": "TsMedia 探索與配對"
+    },
+    {
+      "src": "/hero.png",
+      "type": "image/png",
+      "sizes": "1024x559",
+      "form_factor": "wide",
+      "label": "TsMedia 精選體驗"
+    }
+  ],
   "shortcuts": [
     {
       "name": "探索配對",
       "short_name": "探索",
       "description": "瀏覽推薦對象",
-      "url": "/?tab=discover",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "url": "/?tab=discover&utm_source=pwa_shortcut",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "我的訊息",
       "short_name": "訊息",
       "description": "查看配對訊息",
-      "url": "/?tab=messages",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "url": "/?tab=messages&utm_source=pwa_shortcut",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

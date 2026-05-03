@@ -3,16 +3,19 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShieldCheck, Clock, CheckCircle2, XCircle, ChevronLeft,
-  Cpu, Eye, RefreshCw, AlertCircle, Building2, Gem,
+  Cpu, Eye, RefreshCw, AlertCircle, Building2, Gem, Flag, Ban,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getAllVerifications, approveVerificationDoc,
-  rejectVerificationDoc, getDocSignedUrl,
+  rejectVerificationDoc, getDocSignedUrl, getAdminProfileReports,
+  getAdminMessageReports, updateProfileReportStatus, updateMessageReportStatus,
+  blockProfile,
 } from '@/lib/db'
-import type { VerificationDocWithProfile } from '@/lib/types'
+import type { MessageReportRow, ProfileReportRow, VerificationDocWithProfile } from '@/lib/types'
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all'
+type AdminTab = 'verifications' | 'reports'
 
 interface Props {
   onBack: () => void
@@ -29,8 +32,11 @@ const TIER_LABEL: Record<string, string> = {
 }
 
 export default function AdminScreen({ onBack }: Props) {
+  const [tab, setTab]           = useState<AdminTab>('verifications')
   const [filter, setFilter]     = useState<Filter>('pending')
   const [docs, setDocs]         = useState<VerificationDocWithProfile[]>([])
+  const [profileReports, setProfileReports] = useState<ProfileReportRow[]>([])
+  const [messageReports, setMessageReports] = useState<MessageReportRow[]>([])
   const [loading, setLoading]   = useState(true)
   const [acting, setActing]     = useState<string | null>(null)   // doc id being acted on
   const [viewUrl, setViewUrl]   = useState<string | null>(null)
@@ -39,10 +45,19 @@ export default function AdminScreen({ onBack }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const data = await getAllVerifications(filter === 'all' ? undefined : filter)
-    setDocs(data)
+    if (tab === 'verifications') {
+      const data = await getAllVerifications(filter === 'all' ? undefined : filter)
+      setDocs(data)
+    } else {
+      const [profileData, messageData] = await Promise.all([
+        getAdminProfileReports(),
+        getAdminMessageReports(),
+      ])
+      setProfileReports(profileData)
+      setMessageReports(messageData)
+    }
     setLoading(false)
-  }, [filter])
+  }, [filter, tab])
 
   useEffect(() => { load() }, [load])
 
@@ -70,6 +85,7 @@ export default function AdminScreen({ onBack }: Props) {
   }
 
   const pendingCount = docs.filter(d => filter === 'all' && d.status === 'pending').length
+  const openReportCount = [...profileReports, ...messageReports].filter((r) => r.status === 'open' || r.status === 'reviewing').length
 
   return (
     <div className="flex h-[100dvh] min-h-0 flex-col bg-[#f5f5f7]">
@@ -84,7 +100,7 @@ export default function AdminScreen({ onBack }: Props) {
           </button>
           <div className="flex-1">
             <h1 className="text-base font-bold text-slate-900">管理後台</h1>
-            <p className="text-xs text-slate-400">驗證文件審核</p>
+            <p className="text-xs text-slate-400">驗證文件 / 檢舉處理</p>
           </div>
           <button
             onClick={load}
@@ -94,7 +110,25 @@ export default function AdminScreen({ onBack }: Props) {
           </button>
         </div>
 
-        {/* Filter tabs */}
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          {([
+            ['verifications', '驗證審核'],
+            ['reports', `檢舉${openReportCount ? ` ${openReportCount}` : ''}`],
+          ] as [AdminTab, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setTab(value)}
+              className={cn(
+                'py-2 rounded-xl text-xs font-bold transition-all',
+                tab === value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'verifications' && (
         <div className="grid grid-cols-4 gap-2">
           {(['pending', 'all', 'approved', 'rejected'] as Filter[]).map((f) => (
             <button
@@ -111,6 +145,7 @@ export default function AdminScreen({ onBack }: Props) {
             </button>
           ))}
         </div>
+        )}
       </div>
 
       {/* List */}
@@ -127,14 +162,14 @@ export default function AdminScreen({ onBack }: Props) {
               <Cpu className="w-6 h-6 text-slate-400" />
             </motion.div>
           </div>
-        ) : docs.length === 0 ? (
+        ) : tab === 'verifications' && docs.length === 0 ? (
           <div className="text-center py-16">
             <CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto mb-3" />
             <p className="text-sm text-slate-400">
               {filter === 'pending' ? '目前沒有待審核的申請' : '這裡還沒有資料'}
             </p>
           </div>
-        ) : (
+        ) : tab === 'verifications' ? (
           <>
             {filter === 'all' && pendingCount > 0 && (
               <div className="bg-amber-50 rounded-2xl px-4 py-3 flex items-center gap-2">
@@ -153,6 +188,35 @@ export default function AdminScreen({ onBack }: Props) {
               />
             ))}
           </>
+        ) : (
+          <ReportAdminList
+            profileReports={profileReports}
+            messageReports={messageReports}
+            acting={acting}
+            onResolveProfile={async (report, status) => {
+              setActing(report.id)
+              await updateProfileReportStatus(report.id, status)
+              setActing(null)
+              load()
+            }}
+            onResolveMessage={async (report, status) => {
+              setActing(report.id)
+              await updateMessageReportStatus(report.id, status)
+              setActing(null)
+              load()
+            }}
+            onBlock={async (target) => {
+              setActing(target.key)
+              await blockProfile({
+                blockedProfileKey: target.profileKey,
+                blockedUserId: target.userId ?? null,
+                blockedDisplayName: target.displayName ?? null,
+                reason: 'admin_report_action',
+              })
+              setActing(null)
+              load()
+            }}
+          />
         )}
       </div>
 
@@ -419,6 +483,181 @@ function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
           <p className="text-xs text-red-500 font-medium">
             已拒絕・{doc.reviewed_at ? new Date(doc.reviewed_at).toLocaleDateString('zh-TW') : ''}
           </p>
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+function reportReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    fake_profile: '假帳號 / 盜用照片',
+    married_or_not_single: '已婚或非單身',
+    harassment: '騷擾或不當訊息',
+    scam_or_sales: '詐騙 / 推銷',
+    inappropriate_content: '不當內容',
+    privacy_violation: '侵犯隱私',
+    other: '其他',
+  }
+  return labels[reason] ?? reason
+}
+
+function ReportAdminList({
+  profileReports,
+  messageReports,
+  acting,
+  onResolveProfile,
+  onResolveMessage,
+  onBlock,
+}: {
+  profileReports: ProfileReportRow[]
+  messageReports: MessageReportRow[]
+  acting: string | null
+  onResolveProfile: (report: ProfileReportRow, status: 'resolved' | 'dismissed') => void
+  onResolveMessage: (report: MessageReportRow, status: 'resolved' | 'dismissed') => void
+  onBlock: (target: { key: string; profileKey: string; userId?: string | null; displayName?: string | null }) => void
+}) {
+  const hasReports = profileReports.length > 0 || messageReports.length > 0
+  if (!hasReports) {
+    return (
+      <div className="text-center py-16">
+        <Flag className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+        <p className="text-sm text-slate-400">目前沒有檢舉案件</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {profileReports.map((report) => (
+        <ReportCard
+          key={`profile-${report.id}`}
+          title={report.reported_display_name ?? report.reported_profile_key}
+          subtitle="用戶檢舉"
+          reason={report.reason}
+          details={report.details}
+          status={report.status}
+          createdAt={report.created_at}
+          acting={acting === report.id || acting === `profile-${report.id}`}
+          onResolve={() => onResolveProfile(report, 'resolved')}
+          onDismiss={() => onResolveProfile(report, 'dismissed')}
+          onBlock={() => onBlock({
+            key: `profile-${report.id}`,
+            profileKey: report.reported_profile_key,
+            userId: report.reported_user_id,
+            displayName: report.reported_display_name,
+          })}
+        />
+      ))}
+      {messageReports.map((report) => (
+        <ReportCard
+          key={`message-${report.id}`}
+          title={report.reported_display_name ?? report.reported_profile_key ?? '未知對象'}
+          subtitle="訊息檢舉"
+          reason={report.reason}
+          details={report.details}
+          messageBody={report.message_body}
+          status={report.status}
+          createdAt={report.created_at}
+          acting={acting === report.id || acting === `message-${report.id}`}
+          onResolve={() => onResolveMessage(report, 'resolved')}
+          onDismiss={() => onResolveMessage(report, 'dismissed')}
+          onBlock={() => onBlock({
+            key: `message-${report.id}`,
+            profileKey: report.reported_profile_key ?? `message:${report.id}`,
+            userId: report.reported_user_id,
+            displayName: report.reported_display_name,
+          })}
+        />
+      ))}
+    </>
+  )
+}
+
+function ReportCard({
+  title,
+  subtitle,
+  reason,
+  details,
+  messageBody,
+  status,
+  createdAt,
+  acting,
+  onResolve,
+  onDismiss,
+  onBlock,
+}: {
+  title: string
+  subtitle: string
+  reason: string
+  details?: string | null
+  messageBody?: string | null
+  status: string
+  createdAt: string
+  acting: boolean
+  onResolve: () => void
+  onDismiss: () => void
+  onBlock: () => void
+}) {
+  const isOpen = status === 'open' || status === 'reviewing'
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-bold text-slate-900">{title}</span>
+            <span className={cn(
+              'rounded-full px-2 py-0.5 text-[10px] font-bold',
+              isOpen ? 'bg-red-50 text-red-600' : status === 'resolved' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500',
+            )}>
+              {isOpen ? '待處理' : status === 'resolved' ? '已處理' : '已駁回'}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-slate-400">{subtitle} · {new Date(createdAt).toLocaleString('zh-TW')}</p>
+        </div>
+        <Flag className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-400" />
+      </div>
+
+      <div className="rounded-xl bg-red-50 px-3 py-2">
+        <p className="text-xs font-bold text-red-600">原因：{reportReasonLabel(reason)}</p>
+        {details && <p className="mt-1 text-[11px] leading-relaxed text-red-500">{details}</p>}
+      </div>
+
+      {messageBody && (
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <p className="text-[10px] font-bold text-slate-400">被檢舉訊息</p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">{messageBody}</p>
+        </div>
+      )}
+
+      {isOpen && (
+        <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-3">
+          <button
+            onClick={onDismiss}
+            disabled={acting}
+            className="rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-500 disabled:opacity-60"
+          >
+            駁回
+          </button>
+          <button
+            onClick={onResolve}
+            disabled={acting}
+            className="rounded-xl bg-emerald-500 py-2.5 text-xs font-bold text-white disabled:opacity-60"
+          >
+            標記處理
+          </button>
+          <button
+            onClick={onBlock}
+            disabled={acting}
+            className="rounded-xl bg-red-500 py-2.5 text-xs font-bold text-white disabled:opacity-60 flex items-center justify-center gap-1"
+          >
+            <Ban className="h-3.5 w-3.5" />
+            封鎖
+          </button>
         </div>
       )}
     </motion.div>

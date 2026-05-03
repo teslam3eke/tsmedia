@@ -113,7 +113,7 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
         <h1 className="text-2xl font-extrabold text-slate-900" style={{ letterSpacing: '-0.03em' }}>
           讓對方認識你
         </h1>
-        <p className="text-sm text-slate-400 mt-1">這些資料會顯示在你的個人頁面</p>
+        <p className="text-sm text-slate-400 mt-1">真實姓名只用於認證；探索頁會顯示暱稱</p>
       </div>
 
       {/* Form — single scrollable page */}
@@ -127,7 +127,7 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
           <input
             value={form.name}
             onChange={(e) => set('name', e.target.value)}
-            placeholder="例如：陳大明"
+            placeholder="僅用於認證，不會公開顯示"
             className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none transition-all"
           />
         </motion.div>
@@ -271,7 +271,7 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
           <textarea
             value={form.bio}
             onChange={(e) => set('bio', e.target.value)}
-            placeholder="用幾句話介紹自己，讓對方對你有初步認識⋯"
+            placeholder="用幾句話介紹生活與個性即可，不必寫公司或職稱⋯"
             rows={3}
             className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none resize-none transition-all leading-relaxed"
           />

@@ -6,8 +6,21 @@ export type AuthResult =
   | { ok: false; error: string }
 
 // ── 註冊（Email + Password）────────────────────────────────────
+function emailRedirectUrl(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  const fromEnv = import.meta.env.VITE_SITE_URL?.trim().replace(/\/$/, '')
+  if (fromEnv) return `${fromEnv}/`
+  const { origin, pathname } = window.location
+  return `${origin}${pathname || '/'}`
+}
+
 export async function signUp(email: string, password: string): Promise<AuthResult> {
-  const { data, error } = await supabase.auth.signUp({ email, password })
+  const redirectTo = emailRedirectUrl()
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
+  })
   if (error || !data.user) {
     return { ok: false, error: mapError(error?.message) }
   }

@@ -10,6 +10,7 @@ import {
   submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
 } from '@/lib/db'
 import type { DocType, IncomeTier } from '@/lib/types'
+import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 
 interface Props {
@@ -39,9 +40,9 @@ const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（�
 const STEPS_FEMALE = ['生活照上傳', '收入認證（選填）']
 
 const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
-  { tier: 'silver',  range: '年收 200–299 萬', desc: '銀色金屬漸層邊框' },
-  { tier: 'gold',    range: '年收 300–399 萬', desc: '溫暖香檳金漸層邊框' },
-  { tier: 'diamond', range: '年收 400 萬以上', desc: '動態彩虹折射光效' },
+  { tier: 'silver',  range: '200萬+', desc: '銀皇冠標章' },
+  { tier: 'gold',    range: '300萬+', desc: '金皇冠標章' },
+  { tier: 'diamond', range: '400萬+', desc: '鑽石皇冠標章' },
 ]
 const AI_REVIEW_SECONDS = 15
 
@@ -148,14 +149,14 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const addPhotos = (files: FileList | null) => {
     if (!files) return
     const newPhotos: PhotoItem[] = Array.from(files)
-      .slice(0, 5 - photos.length)
+      .slice(0, PROFILE_PHOTO_MAX - photos.length)
       .map((f) => ({
         id: `${Date.now()}-${f.name}`,
         url: URL.createObjectURL(f),
         name: f.name,
         file: f,
       }))
-    setPhotos((prev) => [...prev, ...newPhotos].slice(0, 5))
+    setPhotos((prev) => [...prev, ...newPhotos].slice(0, PROFILE_PHOTO_MAX))
   }
 
   const removePhoto = (id: string) => {
@@ -193,7 +194,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   }
 
   // Step index mapping differs by gender. Build helpers to check readiness.
-  const photosReady  = photos.length >= 3
+  const photosReady  = photos.length >= PROFILE_PHOTO_MIN
   const jobReady     = selectedCompany !== '' && proofs.length > 0
   // Income step is optional — advance even with nothing selected, but if the
   // user picks a tier they must also upload a doc.
@@ -227,9 +228,13 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         const result = await uploadPhoto(userId, file)
         if (result.ok) uploadedPhotoUrls.push(result.path)
       }
-      if (uploadedPhotoUrls.length > 0) {
-        await upsertProfile({ userId, photoUrls: uploadedPhotoUrls })
+      if (uploadedPhotoUrls.length < PROFILE_PHOTO_MIN) {
+        setSubmitting(false)
+        setAiStatus('fail')
+        setAiMessage(`請至少成功上傳 ${PROFILE_PHOTO_MIN} 張生活照後再繼續。`)
+        return
       }
+      await upsertProfile({ userId, photoUrls: uploadedPhotoUrls })
 
       // 2. Male-only: employment proof
       if (selectedCompany && proofs.length > 0 && proofs[0].file) {
@@ -315,7 +320,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   <h2 className="text-xl font-bold text-slate-900">上傳你的生活照</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  請上傳 3–5 張能展現真實生活風格的照片，所有照片必須是近期本人。
+                  請上傳 {PROFILE_PHOTO_MIN}–{PROFILE_PHOTO_MAX} 張能展現真實生活風格的照片，所有照片必須是近期本人。
                 </p>
               </>
             )}
@@ -337,7 +342,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   <h2 className="text-xl font-bold text-slate-900">收入認證</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  選擇對應的收入等級並上傳證明文件，通過審核後可啟用照片邊框特效。此步驟為選填。
+                  選擇對應的收入等級並上傳證明文件，通過審核後可啟用照片皇冠特效。此步驟為選填。
                 </p>
               </>
             )}
@@ -400,7 +405,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                     ))}
 
                     {/* Add more slot */}
-                    {photos.length < 5 && (
+                    {photos.length < PROFILE_PHOTO_MAX && (
                       <button
                         onClick={() => photoInputRef.current?.click()}
                         className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 bg-white hover:border-slate-400 transition-colors"
@@ -423,7 +428,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                     </div>
                     <div className="text-center">
                       <p className="text-sm font-semibold text-slate-700">點擊上傳生活照</p>
-                      <p className="text-xs text-slate-400 mt-1">最多 5 張 · JPG / PNG / HEIC</p>
+                      <p className="text-xs text-slate-400 mt-1">至少 {PROFILE_PHOTO_MIN} 張、最多 {PROFILE_PHOTO_MAX} 張 · JPG / PNG / HEIC</p>
                     </div>
                   </button>
                 )}
@@ -434,13 +439,13 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                     <span className="text-xs text-slate-500">已上傳</span>
                     <span className={cn(
                       'text-xs font-bold',
-                      photos.length >= 3 ? 'text-emerald-500' : 'text-slate-400',
+                      photos.length >= PROFILE_PHOTO_MIN ? 'text-emerald-500' : 'text-slate-400',
                     )}>
-                      {photos.length} / 5 張 {photos.length >= 3 ? '✓ 符合最低要求' : '（需要至少 3 張）'}
+                      {photos.length} / {PROFILE_PHOTO_MAX} 張 {photos.length >= PROFILE_PHOTO_MIN ? '✓ 符合要求' : `（需要至少 ${PROFILE_PHOTO_MIN} 張）`}
                     </span>
                   </div>
                   <div className="flex gap-1 mt-2">
-                    {[1, 2, 3, 4, 5].map((n) => (
+                    {Array.from({ length: PROFILE_PHOTO_MAX }, (_, i) => i + 1).map((n) => (
                       <div
                         key={n}
                         className={cn(
@@ -780,7 +785,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 <div className="flex items-start gap-2 px-1">
                   <Sparkles className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    通過審核後，你可以到「編輯個人資訊」自行決定是否要顯示收入邊框。未通過前邊框不會顯示。
+                    通過審核後，你可以到「編輯個人資訊」自行決定是否要顯示收入皇冠。未通過前皇冠不會顯示。
                   </p>
                 </div>
               </>
@@ -832,7 +837,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           )}
         </motion.button>
 
-        <button onClick={onSkip} className="w-full text-slate-400 text-sm py-2">
+        <button type="button" onClick={onSkip} className="w-full text-slate-400 text-sm py-2">
           跳過（測試模式）
         </button>
       </div>

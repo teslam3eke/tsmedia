@@ -9,9 +9,10 @@ import ProfileSetupScreen, { type ProfileSetupData } from '@/screens/ProfileSetu
 import QuestionnaireScreen from '@/screens/QuestionnaireScreen'
 import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen from '@/screens/MainScreen'
+import TermsConsentScreen from '@/screens/TermsConsentScreen'
 
 import { supabase } from '@/lib/supabase'
-import { upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
+import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
 // profileSetupData is collected but used for future profile enrichment
@@ -22,6 +23,7 @@ type Screen =
   | 'landing'
   | 'auth'
   | 'security-check'
+  | 'terms-consent'
   | 'profile-setup'
   | 'questionnaire'
   | 'identity-verify'
@@ -32,6 +34,7 @@ const SCREEN_ORDER: Screen[] = [
   'landing',
   'auth',
   'security-check',
+  'terms-consent',
   'profile-setup',
   'questionnaire',
   'identity-verify',
@@ -69,6 +72,8 @@ export default function App() {
   const [, setProfileSetupData] = useState<ProfileSetupData | null>(null)
   const [userGender, setUserGender] = useState<'male' | 'female'>('male')
   const [currentProfileName, setCurrentProfileName] = useState<string | null>(null)
+  const [termsBusy, setTermsBusy] = useState(false)
+  const [termsError, setTermsError] = useState<string | undefined>()
 
   const getActiveUser = async () => {
     if (user) return user
@@ -76,12 +81,18 @@ export default function App() {
     return data.user ?? null
   }
 
+  /** 男性須至少送出職業驗證（verification_status 離開 pending）才可進入主畫面。 */
+  const maleNeedsIdentityVerify = (profile: import('@/lib/types').ProfileRow | null) =>
+    Boolean(profile?.gender === 'male' && profile.verification_status === 'pending')
+
   // After security check, decide where to go based on profile completeness.
   const routeAfterSecurityCheck = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (!hasAcceptedLatestTerms(profile)) return go('terms-consent')
     if (!profile?.name) return go('profile-setup')
     setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
+    if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
     go('main')
   }
 
@@ -90,6 +101,15 @@ export default function App() {
     if (profile?.gender) setUserGender(profile.gender)
     if (profile?.name) setCurrentProfileName(profile.name)
     go('security-check')
+  }
+
+  const routeAfterTermsConsent = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (!profile?.name) return go('profile-setup')
+    setCurrentProfileName(profile.name)
+    if (profile.gender) setUserGender(profile.gender)
+    if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
+    if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
+    go('main')
   }
 
   // ── iOS PWA layout recalc hack ────────────────────────────────────
@@ -186,10 +206,15 @@ export default function App() {
     })
 
     // Step 2: keep user state in sync; routing is handled in onSuccess / getSession
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
       setUser(session?.user ?? null)
       if (event === 'SIGNED_OUT') go('landing')
+      // 信箱確認信（PKCE）：首屏 getSession 仍為 null，換券完成後才會觸發 SIGNED_IN，須在此接 onboarding 路由
+      if (event === 'SIGNED_IN' && session?.user) {
+        const profile = await getProfile(session.user.id)
+        routeByProfile(profile)
+      }
     })
 
     return () => { cancelled = true; subscription.unsubscribe() }
@@ -217,6 +242,7 @@ export default function App() {
       await upsertProfile({
         userId: activeUser.id,
         name: data.name,
+        nickname: data.nickname,
         gender: data.gender,
         interests: data.interests,
         bio: data.bio,
@@ -252,6 +278,27 @@ export default function App() {
     }
   }
 
+  const handleTermsAccept = async () => {
+    setTermsBusy(true)
+    setTermsError(undefined)
+    try {
+      const activeUser = await getActiveUser()
+      if (!activeUser) {
+        go('auth')
+        return
+      }
+      const result = await acceptLatestTerms(activeUser.id)
+      if (!result.ok) {
+        setTermsError(result.error ?? '同意紀錄儲存失敗，請稍後再試。')
+        return
+      }
+      const profile = await getProfile(activeUser.id)
+      routeAfterTermsConsent(profile)
+    } finally {
+      setTermsBusy(false)
+    }
+  }
+
   if (!authReady) return <SplashScreen />
 
   // Main screen is rendered OUTSIDE AnimatePresence/motion.div so it is not
@@ -264,7 +311,7 @@ export default function App() {
         className="app-container flex flex-col bg-white overflow-hidden"
         style={{ height: 'var(--app-height, 100dvh)' }}
       >
-        <MainScreen user={user} onSignOut={() => go('landing')} />
+        <MainScreen user={user} initialDiscoverGender={userGender} onSignOut={() => go('landing')} />
       </div>
     )
   }
@@ -307,6 +354,15 @@ export default function App() {
               const profile = await getProfile(activeUser.id)
               routeAfterSecurityCheck(profile)
             }}
+          />
+        )}
+
+        {screen === 'terms-consent' && (
+          <TermsConsentScreen
+            busy={termsBusy}
+            error={termsError}
+            onAccept={handleTermsAccept}
+            onBack={() => go('security-check')}
           />
         )}
 

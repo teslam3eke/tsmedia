@@ -3,31 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- 分頁／加入主畫面名稱（搜尋結果標題仍以 og:title、description 為主） -->
+    <meta name="application-name" content="TsMedia" />
 
-    <!-- PWA essentials -->
+    <!-- PWA：manifest 必為絕對路徑 /manifest.json；圖示以 /icons/* + maskable，避免平台改用頁面縮圖或預設占位 -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#1e293b" />
     <meta name="theme-color" content="#ffffff" media="(display-mode: standalone)" />
+    <meta name="msapplication-TileColor" content="#0f172a" />
+    <meta name="msapplication-TileImage" content="/icons/icon-192.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="tsMedia" />
+    <meta name="apple-mobile-web-app-title" content="TsMedia" />
 
-    <!-- Icons -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Favicon：瀏覽器常自動請求 /favicon.ico；若缺檔或被打成 SPA HTML，分頁圖示會異常。順序：ICO → PNG → SVG -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
-    <!-- iOS home-screen icon (iOS ignores the web manifest icons field) -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <!-- iOS「加入主畫面」：預設 touch icon（建議 180×180）＋多尺寸；與 manifest icons 並存 -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
 
-    <!-- SEO & Social -->
-    <meta name="description" content="專為台積電與聯發科工程師設計的高質感交友平台，在矽晶圓之外找到屬於你的另一半。" />
-    <meta name="keywords" content="台積電, 聯發科, TSMC, MediaTek, 交友, 工程師, 半導體" />
-    <meta property="og:title" content="tsMedia — 半導體菁英交友" />
-    <meta property="og:description" content="在矽晶圓之外找到屬於你的另一半" />
+    <!-- SEO & Social (SERP / Google: index title + description) -->
+    <link rel="canonical" href="https://www.tsmedia.tw/" />
+    <meta name="description" content="TsMedia 全台首創 AI 認證精英交友平台。結合 AI 審核與真實認證，在值得信任的環境中認識高質感對象。工程師、半導體與重視真實交往者的交友選擇。" />
+    <meta name="keywords" content="TsMedia, tsmedia.tw, AI交友, AI認證交友, 精英交友, 台灣交友, 工程師交友, 半導體, 台積電, 聯發科, 交友平台" />
+    <meta name="author" content="TsMedia" />
+    <meta property="og:site_name" content="TsMedia" />
+    <meta property="og:title" content="TsMedia | 全台首創 AI 認證精英交友平台" />
+    <meta property="og:description" content="全台首創 AI 認證精英交友。結合 AI 與真實認證，在安全、高信任環境中認識志同道合對象。" />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.tsmedia.tw/" />
+    <meta property="og:locale" content="zh_TW" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="TsMedia | 全台首創 AI 認證精英交友平台" />
+    <meta name="twitter:description" content="全台首創 AI 認證精英交友。結合 AI 與真實認證，在安全、高信任環境中認識志同道合對象。" />
 
     <!-- Fonts: system default (no external font load, MacBook-style) -->
     <style>
@@ -37,7 +51,7 @@
       /* Height / background rules live in src/index.css — don't duplicate here */
     </style>
 
-    <title>tsMedia — 半導體菁英交友</title>
+    <title>TsMedia</title>
   </head>
   <body>
     <div id="root"></div>

@@ -7,6 +7,7 @@
 create table if not exists public.profiles (
   id                  uuid references auth.users on delete cascade primary key,
   name                text,
+  nickname            text,
   gender              text check (gender in ('male', 'female')),
   age                 int check (age between 18 and 80),
   company             text check (company in ('TSMC', 'MediaTek')),
@@ -19,6 +20,7 @@ create table if not exists public.profiles (
   -- 生活照的 Supabase Storage 路徑陣列
   photo_urls          text[],
   is_verified         boolean not null default false,
+  account_status      text not null default 'active' check (account_status in ('active','suspended','banned')),
   verification_status text not null default 'pending'
                         check (verification_status in ('pending','submitted','approved','rejected')),
   -- 地點欄位
@@ -132,7 +134,7 @@ create policy "docs: own insert"
 -- ── 4. Storage Buckets ───────────────────────────────────────
 -- 在 Supabase Dashboard > Storage 手動建立以下兩個 bucket（設為 private）：
 --
---   photos  — 生活照，路徑：photos/{user_id}/{filename}
+--   photos  — 生活照，路徑：photos/{user_id}/{filename}；RLS：本人可寫、已登入可讀（discover 簽名 URL）
 --   proofs  — 驗證文件，路徑：proofs/{user_id}/{filename}
 --
 -- 或執行以下 SQL（需要 storage schema 權限）：
@@ -145,9 +147,21 @@ insert into storage.buckets (id, name, public)
 values ('proofs', 'proofs', false)
 on conflict (id) do nothing;
 
--- Storage RLS：只能存取自己資料夾
-create policy "photos: own folder"
-  on storage.objects for all
+-- Storage RLS：寫入僅本人資料夾；讀取允許已登入使用者讀整個 photos（他人頭像簽名 URL）
+
+drop policy if exists "photos: own folder" on storage.objects;
+
+create policy "photos: insert own folder"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'photos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+create policy "photos: update own folder"
+  on storage.objects for update
+  to authenticated
   using (
     bucket_id = 'photos'
     and (storage.foldername(name))[1] = auth.uid()::text
@@ -156,6 +170,19 @@ create policy "photos: own folder"
     bucket_id = 'photos'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+create policy "photos: delete own folder"
+  on storage.objects for delete
+  to authenticated
+  using (
+    bucket_id = 'photos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+create policy "photos: select authenticated"
+  on storage.objects for select
+  to authenticated
+  using (bucket_id = 'photos');
 
 create policy "proofs: own folder"
   on storage.objects for all
