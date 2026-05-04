@@ -44,6 +44,11 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ url }) =>
+              url.pathname === '/api/build-id' || url.pathname.endsWith('/api/build-id'),
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: ({ url }) =>
               url.pathname === '/build-id.txt' || url.pathname.endsWith('/build-id.txt'),
             handler: 'NetworkOnly',
           },

@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/build-id.txt",
+      "destination": "/api/build-id"
+    }
+  ],
   "headers": [
     {
       "source": "/manifest.json",
