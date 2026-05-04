@@ -1278,6 +1278,9 @@ function DiscoverTab({
   const [liveDeck, setLiveDeck] = useState<Profile[]>([])
   const [liveDeckStatus, setLiveDeckStatus] = useState<'idle' | 'loading' | 'ready'>('idle')
   const [deckRefresh, setDeckRefresh] = useState(0)
+  const liveDeckRef = useRef<Profile[]>([])
+  liveDeckRef.current = liveDeck
+  const lastDeckFetchCtxRef = useRef<{ uid: string; dk: string } | null>(null)
   const discoverUiSnap = userId ? takeDiscoverUiSnapshot(userId, discoverDeckDayKey, deckRefresh) : null
   const [celebrateDeck, setCelebrateDeck] = useState(false)
   const prevRolloverTickRef = useRef(0)
@@ -1380,17 +1383,29 @@ function DiscoverTab({
     setDeckRefresh((r) => r + 1)
   }, [foregroundReloadNonce])
 
-  // 探索名單：每次 effect 皆打 RPC（已取消 RAM session cache 省流）；換日／手動重新載入／前景 wake 時 deckRefresh bump 仍會重設卡片進度。
+  // 探索名單：每次都打 RPC；若為同一 user／同日且畫面上已有 deck（例如回前景），不清空 UI — stale-while-revalidate。
   useEffect(() => {
     if (!userId) {
+      lastDeckFetchCtxRef.current = null
       setLiveDeckStatus('idle')
       setLiveDeck([])
       return
     }
 
+    const ctx = { uid: userId, dk: discoverDeckDayKey }
+    const ctxChanged =
+      lastDeckFetchCtxRef.current?.uid !== ctx.uid ||
+      lastDeckFetchCtxRef.current?.dk !== ctx.dk
+    lastDeckFetchCtxRef.current = ctx
+
+    const keepStaleVisible = !ctxChanged && liveDeckRef.current.length > 0
+
     let cancelled = false
-    setLiveDeckStatus('loading')
-    setLiveDeck([])
+    if (!keepStaleVisible) {
+      setLiveDeckStatus('loading')
+      setLiveDeck([])
+    }
+
     ;(async () => {
       try {
         const rows = await getDailyDiscoverDeck()
@@ -1402,7 +1417,7 @@ function DiscoverTab({
       } catch (e) {
         console.error('[DiscoverTab] getDailyDiscoverDeck failed:', e)
         if (!cancelled) {
-          setLiveDeck([])
+          if (!keepStaleVisible) setLiveDeck([])
           setLiveDeckStatus('ready')
         }
       }
@@ -1586,7 +1601,7 @@ function DiscoverTab({
     goNext()
   }
 
-  if (userId && liveDeckStatus === 'loading') {
+  if (userId && liveDeckStatus === 'loading' && visibleProfiles.length === 0) {
     return (
       <div className="relative flex min-h-[50vh] flex-col">
         <DiscoverDeckRolloverOverlay open={celebrateDeck} tick={discoverDeckRolloverTick} />
@@ -2109,7 +2124,9 @@ function MatchesTab({
   const isLoggedIn = Boolean(currentUserId)
   const count = isLoggedIn ? liveConversations.length : MATCHES.length
 
-  if (isLoggedIn && liveConversationsLoading) {
+  const blockingMatchesLoad = isLoggedIn && liveConversationsLoading && liveConversations.length === 0
+
+  if (blockingMatchesLoad) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-8">
         <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-slate-700 animate-spin mb-3" />
@@ -2120,6 +2137,11 @@ function MatchesTab({
 
   return (
     <div className="flex flex-col h-full">
+      {isLoggedIn && liveConversationsLoading && liveConversations.length > 0 && (
+        <div className="mx-5 mt-2 shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-center text-[11px] font-medium text-slate-500 ring-1 ring-slate-100">
+          正在同步最新配對…
+        </div>
+      )}
       <div className="px-5 pt-4 pb-2">
         <h1 className="text-[22px] font-bold text-slate-900 tracking-tight">配對</h1>
         <p className="text-xs text-slate-400 mt-0.5">你的 {count} 個配對</p>
@@ -2548,6 +2570,35 @@ interface Conversation {
   /** Supabase match id — when set, ChatRoomView loads DB messages + Realtime */
   matchId?: string
   peerUserId?: string
+}
+
+const LIVE_CONV_CACHE_PREFIX = 'tsmedia:live-conversations:v1:'
+
+function readLiveConvSessionCache(userId: string): Conversation[] | null {
+  try {
+    const raw = sessionStorage.getItem(LIVE_CONV_CACHE_PREFIX + userId)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Conversation[]
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function writeLiveConvSessionCache(userId: string, rows: Conversation[]) {
+  try {
+    sessionStorage.setItem(LIVE_CONV_CACHE_PREFIX + userId, JSON.stringify(rows))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearLiveConvSessionCache(userId: string) {
+  try {
+    sessionStorage.removeItem(LIVE_CONV_CACHE_PREFIX + userId)
+  } catch {
+    /* ignore */
+  }
 }
 
 const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
@@ -5656,6 +5707,14 @@ export default function MainScreen({
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
 
+  /** PWA／記憶體回收後冷啟：先顯示上次配對列表骨架，再由網路結果覆寫（soft reload 也不清空 UI）。 */
+  useEffect(() => {
+    if (!user?.id) return
+    const cached = readLiveConvSessionCache(user.id)
+    if (!cached?.length) return
+    setLiveMatchThreads((prev) => (prev.length === 0 ? cached : prev))
+  }, [user?.id])
+
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -5768,14 +5827,15 @@ export default function MainScreen({
   /** 避免連續觸發 load 時舊請求晚到覆寫新資料；懸置請求時安全逾時仍會關閉 spinner */
   const liveMatchThreadsLoadGenRef = useRef(0)
 
-  const loadLiveMatchThreads = useCallback(async () => {
+  const loadLiveMatchThreads = useCallback(async (mode: 'full' | 'soft' = 'full') => {
     if (!user?.id) {
       setLiveMatchThreads([])
       setLiveMatchThreadsLoading(false)
       return
     }
     const gen = ++liveMatchThreadsLoadGenRef.current
-    setLiveMatchThreadsLoading(true)
+    const blockSpinner = mode === 'full'
+    if (blockSpinner) setLiveMatchThreadsLoading(true)
     const SAFETY_MS = 22_000
     const safetyTimer = window.setTimeout(() => {
       if (liveMatchThreadsLoadGenRef.current !== gen) return
@@ -5827,6 +5887,7 @@ export default function MainScreen({
       }
       if (liveMatchThreadsLoadGenRef.current !== gen) return
       setLiveMatchThreads(rows)
+      writeLiveConvSessionCache(user.id, rows)
     } finally {
       window.clearTimeout(safetyTimer)
       if (liveMatchThreadsLoadGenRef.current === gen) setLiveMatchThreadsLoading(false)
@@ -5834,12 +5895,12 @@ export default function MainScreen({
   }, [user?.id])
 
   useEffect(() => {
-    void loadLiveMatchThreads()
+    void loadLiveMatchThreads('full')
   }, [loadLiveMatchThreads])
 
   useEffect(() => {
     if (!user?.id || foregroundReloadNonce === 0) return
-    void loadLiveMatchThreads()
+    void loadLiveMatchThreads('soft')
   }, [user?.id, foregroundReloadNonce, loadLiveMatchThreads])
 
   useEffect(() => {
@@ -5860,7 +5921,7 @@ export default function MainScreen({
     return subscribeToNewMatches(user.id, (row) => {
       const peerId = row.user_a === user.id ? row.user_b : row.user_a
       setMatchSplash({ matchId: row.id, peerUserId: peerId })
-      void loadLiveMatchThreads()
+      void loadLiveMatchThreads('soft')
     })
   }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce])
 
@@ -5911,6 +5972,7 @@ export default function MainScreen({
   }, [photoGateToast])
 
   const handleSignOut = async () => {
+    if (user?.id) clearLiveConvSessionCache(user.id)
     await signOut()
     onSignOut?.()
   }
@@ -5929,7 +5991,7 @@ export default function MainScreen({
         onOpenSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
         onDiscoverMatch={() => {
-          void loadLiveMatchThreads()
+          void loadLiveMatchThreads('soft')
         }}
         onCreditAction={(kind) => {
           setRewardFlash({
