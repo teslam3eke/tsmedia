@@ -357,21 +357,24 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
 function formatDiscoverDeckLoadError(e: unknown): string {
   if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'TimeoutError') {
     return [
-      '這段載入在時間上限內沒跑完（登入換發 → 探索名單 → 多張相片簽章）。',
-      'iOS／主畫面 PWA 從背景回來時，常是計時器或 fetch 卡住，看起來像逾時，不一定是網路斷線。',
-      '可試：點下方重試，或滑掉 App 完全重開。',
-    ].join(' ')
+      '載入步驟（換發登入 → 取得探索名單 → 簽相片網址）在時間內未完成。',
+      '常發生於：從背景回到 iPhone／主畫面 Web App 時，系統暫停計時器或請求，因而逾時；不一定是網路壞掉。',
+      '請按下方「重試載入」，或滑掉 App 後再開一次。',
+    ].join('\n\n')
   }
   if (e instanceof DOMException && e.name === 'AbortError') {
     return [
-      '請求被中止（Abort）。常見是客戶端逾時保護、或 WebKit 暫停執行，不一定是 Wi‑Fi 問題。',
-      '請點重試；仍發生可重開 App。',
-    ].join(' ')
+      '請求被中止（Abort）。多半是這個 App 設定的逾時，或系統暫停網頁執行。',
+      '不一定是 Wi‑Fi 斷線。請按「重試載入」，必要時重開 App。',
+    ].join('\n\n')
   }
   if (e instanceof Error) {
     const m = e.message.trim()
     if (m === '探索載入逾時' || m.toLowerCase().includes('timeout')) {
-      return '整段探索載入逾時。若您確認網路正常，多半是手機/Web App 回前景後腳本或請求卡住，請重試或重開 App。'
+      return [
+        '整段探索載入逾時。',
+        '若網路明明正常，多半是回到前景後程式卡住；請重試或重開 App。',
+      ].join('\n\n')
     }
     return m.length > 320 ? `${m.slice(0, 320)}…` : m
   }
@@ -1465,7 +1468,7 @@ function DiscoverTab({
           const { rows, rpcError } = await fetchDailyDiscoverDeck()
           if (cancelled) return
           if (rpcError) {
-            setDeckLoadDiagnostic(`探索名單（伺服器）：${rpcError}`)
+            setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', rpcError].join('\n\n'))
             if (!keepStaleVisible) setLiveDeck([])
             setLiveDeckStatus('ready')
             return
@@ -1488,8 +1491,13 @@ function DiscoverTab({
       } catch (e) {
         console.error('[DiscoverTab] deck load failed:', e)
         if (!cancelled) {
-          const where = phase === 'rpc' ? '探索名單' : '相片簽章／Storage'
-          setDeckLoadDiagnostic(`${where}：${formatDiscoverDeckLoadError(e)}`)
+          const msg = formatDiscoverDeckLoadError(e)
+          const noPhasePrefix =
+            (e && typeof e === 'object' && (e as { name?: string }).name === 'TimeoutError') ||
+            (e instanceof DOMException && e.name === 'AbortError')
+          setDeckLoadDiagnostic(
+            noPhasePrefix ? msg : `${phase === 'rpc' ? '【探索名單】' : '【相片網址簽章】'}\n\n${msg}`,
+          )
           if (!keepStaleVisible) setLiveDeck([])
           setLiveDeckStatus('ready')
         }
@@ -1711,9 +1719,13 @@ function DiscoverTab({
         <div className="flex flex-col items-center justify-center h-full text-center px-8">
         {deckLoadFailed ? (
           <div className="w-full max-w-sm">
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-left shadow-sm ring-1 ring-rose-100/80">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-rose-900/80">無法載入探索（除錯資訊）</p>
-              <p className="mt-2 whitespace-pre-wrap break-words text-[13px] font-semibold leading-relaxed text-rose-950">
+            <div
+              className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-left shadow-sm ring-1 ring-rose-100/80 [unicode-bidi:plaintext]"
+              lang="zh-Hant"
+            >
+              <p className="text-[13px] font-bold text-rose-950">無法載入探索</p>
+              <p className="mt-1 text-[11px] font-medium text-rose-800/85">請截圖以下說明以便回報</p>
+              <p className="mt-3 whitespace-pre-wrap break-words text-[13px] font-normal leading-relaxed text-rose-950">
                 {deckLoadDiagnostic}
               </p>
             </div>
