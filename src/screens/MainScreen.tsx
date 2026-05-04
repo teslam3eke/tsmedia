@@ -356,29 +356,36 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
 
 function formatDiscoverDeckLoadError(e: unknown): string {
   if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'TimeoutError') {
+    /** 字串僅用中文與全形標點，避免 iOS 混入英文或斜線時雙向排版打亂順序 */
     return [
-      '載入步驟（換發登入 → 取得探索名單 → 簽相片網址）在時間內未完成。',
-      '常發生於：從背景回到 iPhone／主畫面 Web App 時，系統暫停計時器或請求，因而逾時；不一定是網路壞掉。',
-      '請按下方「重試載入」，或滑掉 App 後再開一次。',
+      '載入要先換發登入，再取探索名單，再簽相片網址，須在時間內做完。這次沒做完。',
+      '若是剛從背景回到本程式，系統可能暫停計時或請求，因而逾時。這通常與無線網路無關。',
+      '請按下方重試載入。或關掉程式後再開一次。',
     ].join('\n\n')
   }
   if (e instanceof DOMException && e.name === 'AbortError') {
     return [
-      '請求被中止（Abort）。多半是這個 App 設定的逾時，或系統暫停網頁執行。',
-      '不一定是 Wi‑Fi 斷線。請按「重試載入」，必要時重開 App。',
+      '連線被程式主動中止。多半是逾時限制或系統暫停了網頁。',
+      '不一定是無線網路斷線。請按下方重試載入。必要時關掉程式再開。',
     ].join('\n\n')
   }
   if (e instanceof Error) {
     const m = e.message.trim()
+    if (!m) {
+      return '發生錯誤但沒有詳細訊息。請按下方重試載入。仍失敗請關掉程式後重開。'
+    }
     if (m === '探索載入逾時' || m.toLowerCase().includes('timeout')) {
       return [
         '整段探索載入逾時。',
-        '若網路明明正常，多半是回到前景後程式卡住；請重試或重開 App。',
+        '若您覺得網路正常，多半是回到前景後程式卡住。請重試或關掉程式再開。',
       ].join('\n\n')
     }
     return m.length > 320 ? `${m.slice(0, 320)}…` : m
   }
-  const s = String(e)
+  const s = String(e).trim()
+  if (!s || s === '[object Object]') {
+    return '發生未知錯誤。請按下方重試載入。仍失敗請關掉程式後重開。'
+  }
   return s.length > 320 ? `${s.slice(0, 320)}…` : s
 }
 
@@ -1468,7 +1475,8 @@ function DiscoverTab({
           const { rows, rpcError } = await fetchDailyDiscoverDeck()
           if (cancelled) return
           if (rpcError) {
-            setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', rpcError].join('\n\n'))
+            const detail = rpcError.trim() || '（伺服器未附說明）'
+            setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', detail].join('\n\n'))
             if (!keepStaleVisible) setLiveDeck([])
             setLiveDeckStatus('ready')
             return
@@ -1495,8 +1503,9 @@ function DiscoverTab({
           const noPhasePrefix =
             (e && typeof e === 'object' && (e as { name?: string }).name === 'TimeoutError') ||
             (e instanceof DOMException && e.name === 'AbortError')
+          const combined = noPhasePrefix ? msg : `${phase === 'rpc' ? '【探索名單】' : '【相片網址簽章】'}\n\n${msg}`
           setDeckLoadDiagnostic(
-            noPhasePrefix ? msg : `${phase === 'rpc' ? '【探索名單】' : '【相片網址簽章】'}\n\n${msg}`,
+            combined.trim() || '載入失敗，沒有詳細說明。請按下方重試或關掉程式再開。',
           )
           if (!keepStaleVisible) setLiveDeck([])
           setLiveDeckStatus('ready')
@@ -1698,7 +1707,7 @@ function DiscoverTab({
         <p className="text-slate-600 font-semibold text-sm">載入今日探索名單</p>
         <p className="text-slate-400 text-xs mt-2 max-w-[18rem]">每晚 10 點更新。</p>
         <p className="text-slate-400 text-[11px] mt-3 max-w-[19rem] leading-relaxed">
-          若超過約 12 秒仍停在此畫面，會顯示錯誤說明（正常載入通常更快）。
+          若超過十餘秒仍停在此畫面，會顯示錯誤說明。正常載入通常更快。
         </p>
         </div>
       </div>
@@ -1709,6 +1718,9 @@ function DiscoverTab({
     const deckLoadFailed = Boolean(
       userId && deckLoadDiagnostic && liveDeckStatus === 'ready' && visibleProfiles.length === 0 && !done,
     )
+    const deckFailureDetail =
+      (deckLoadDiagnostic ?? '').trim() ||
+      '未收到詳細原因。請先按下方重試載入。若仍只有這行字，請關掉程式後再試。'
     const emptyLive = Boolean(
       userId && liveDeckStatus === 'ready' && visibleProfiles.length === 0 && !done && !deckLoadDiagnostic,
     )
@@ -1723,10 +1735,9 @@ function DiscoverTab({
               className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-left shadow-sm ring-1 ring-rose-100/80 [unicode-bidi:plaintext]"
               lang="zh-Hant"
             >
-              <p className="text-[13px] font-bold text-rose-950">無法載入探索</p>
-              <p className="mt-1 text-[11px] font-medium text-rose-800/85">請截圖以下說明以便回報</p>
-              <p className="mt-3 whitespace-pre-wrap break-words text-[13px] font-normal leading-relaxed text-rose-950">
-                {deckLoadDiagnostic}
+              <p className="text-[13px] font-bold text-rose-950">探索暫時載入失敗</p>
+              <p className="mt-3 whitespace-pre-wrap break-words text-[13px] font-normal leading-relaxed text-slate-900">
+                {deckFailureDetail}
               </p>
             </div>
             <button
@@ -3560,6 +3571,7 @@ function ChatRoomView({
     ;(async () => {
       const rows = await getMatchMessages(conversation.matchId!)
       if (cancelled) return
+      if (rows === null) return
       const mapped = rows
         .map((r) => formatChatMessageFromRow(r, currentUserId))
         .sort(compareChatMessageTime)
@@ -5872,7 +5884,7 @@ export default function MainScreen({
           void queryClient.invalidateQueries()
           setForegroundReloadNonce((n) => n + 1)
         })
-      }, 280)
+      }, 160)
     }
 
     document.addEventListener('visibilitychange', schedule)
@@ -5975,6 +5987,9 @@ export default function MainScreen({
       setLiveMatchThreadsLoading(false)
       return
     }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      await wakeSupabaseAuthFromBackground()
+    }
     const gen = ++liveMatchThreadsLoadGenRef.current
     const blockSpinner = mode === 'full'
     if (blockSpinner) setLiveMatchThreadsLoading(true)
@@ -5986,6 +6001,7 @@ export default function MainScreen({
     try {
       const matches = await getMyMatches(user.id)
       if (liveMatchThreadsLoadGenRef.current !== gen) return
+      if (matches === null) return
       const rows: Conversation[] = []
       for (const m of matches) {
         if (liveMatchThreadsLoadGenRef.current !== gen) return
@@ -6042,7 +6058,7 @@ export default function MainScreen({
 
   useEffect(() => {
     if (!user?.id || foregroundReloadNonce === 0) return
-    void loadLiveMatchThreads('soft')
+    void loadLiveMatchThreads('full')
   }, [user?.id, foregroundReloadNonce, loadLiveMatchThreads])
 
   useEffect(() => {

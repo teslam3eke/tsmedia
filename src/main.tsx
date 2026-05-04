@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { focusManager } from '@tanstack/react-query'
+import { defaultShouldDehydrateQuery, focusManager, onlineManager } from '@tanstack/react-query'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
 import { registerSW } from 'virtual:pwa-register'
@@ -16,13 +16,20 @@ registerSW({
   onOfflineReady() {},
 })
 
-/** iOS 常不會觸發 window focus；靠 visibility + pageshow 讓 Query 知道回到前景該 refetch。 */
+/**
+ * iOS PWA 常不觸發 window focus；同步前景／離線，讓 TanStack `refetchOnWindowFocus` /
+ * `refetchOnReconnect`（見 `queryClient.ts`）與 networkMode 在手機上確實會跑。
+ */
 function syncReactQueryFocusFromPageVisibility() {
-  focusManager.setFocused(document.visibilityState === 'visible')
+  const visible = document.visibilityState === 'visible'
+  focusManager.setFocused(visible)
+  onlineManager.setOnline(navigator.onLine)
 }
 syncReactQueryFocusFromPageVisibility()
 document.addEventListener('visibilitychange', syncReactQueryFocusFromPageVisibility)
 window.addEventListener('pageshow', syncReactQueryFocusFromPageVisibility)
+window.addEventListener('online', () => onlineManager.setOnline(true))
+window.addEventListener('offline', () => onlineManager.setOnline(false))
 
 const queryPersister = createSyncStoragePersister({
   storage: window.localStorage,
@@ -38,6 +45,12 @@ createRoot(document.getElementById('root')!).render(
         persister: queryPersister,
         maxAge: 86_400_000,
         buster: __APP_BUILD_ID__,
+        dehydrateOptions: {
+          /** 預設會 dehydrate；敏感資料請 `meta: { persistOffline: false }` 排除 */
+          shouldDehydrateQuery: (query) =>
+            defaultShouldDehydrateQuery(query) &&
+            (query.meta as { persistOffline?: boolean } | undefined)?.persistOffline !== false,
+        },
       }}
     >
       <App />
