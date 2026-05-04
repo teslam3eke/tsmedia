@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { clearAppQueryCache } from './queryClient'
 import type { User, Session } from '@supabase/supabase-js'
 
 export type AuthResult =
@@ -38,6 +39,7 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 
 // ── 登出 ──────────────────────────────────────────────────────
 export async function signOut(): Promise<void> {
+  clearAppQueryCache()
   await supabase.auth.signOut()
 }
 

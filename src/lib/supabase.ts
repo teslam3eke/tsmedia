@@ -95,3 +95,10 @@ export function wakeSupabaseAuthFromBackground(): Promise<void> {
   }
   return wakeMutex
 }
+
+/** 與 TanStack `refetchOnReconnect` 對齊：網路自離線恢復時若已在前景，再跑一次 session／Realtime 恢復 */
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (document.visibilityState === 'visible') void wakeSupabaseAuthFromBackground()
+  })
+}

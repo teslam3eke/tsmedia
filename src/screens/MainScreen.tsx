@@ -13,6 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
 import { wakeSupabaseAuthFromBackground } from '@/lib/supabase'
+import { queryClient } from '@/lib/queryClient'
 import {
   getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification,
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
@@ -5728,6 +5729,7 @@ export default function MainScreen({
           setRewardFlash(null)
           setMatchSplash(null)
           setShowDiscoverPuzzleIntro(false)
+          void queryClient.invalidateQueries()
           setForegroundReloadNonce((n) => n + 1)
         })
       }, 280)
