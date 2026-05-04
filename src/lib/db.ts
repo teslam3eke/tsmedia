@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+import { supabase, wakeSupabaseAuthFromBackground } from './supabase'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
@@ -568,9 +568,22 @@ export type DailyDiscoverRpcRow = {
 
 /** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
 export async function getDailyDiscoverDeck(): Promise<DailyDiscoverRpcRow[]> {
+  /**
+   * iOS／PWA：使用者可能在 visibility debounce 完成前就切到探索；此時 JWT 尚未換發，RPC 失敗會被吃成 []，
+   * 畫面像「後端沒資料」。先與前景 wake 對齊（mutex 會合併並發），必要時再 wake 重試一次。
+   */
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
   // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
+  let { data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
+
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;({ data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {}))
+  }
 
   if (error) {
     // PostgREST 常見：函式內 raise / SQL 錯誤 → 400；見 error.details / hint
