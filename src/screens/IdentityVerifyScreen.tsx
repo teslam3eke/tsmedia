@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, FileText, Trash2, ChevronRight, ChevronLeft,
@@ -8,10 +9,12 @@ import { cn } from '@/lib/utils'
 import {
   uploadPhoto, uploadProofDoc, submitVerificationDoc,
   submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
+  type AiResult,
 } from '@/lib/db'
 import type { DocType, IncomeTier } from '@/lib/types'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
+import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 
 interface Props {
   userId?: string
@@ -37,15 +40,14 @@ interface ProofItem {
 }
 
 const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（選填）']
-const STEPS_FEMALE = ['生活照上傳', '收入認證（選填）']
+/** 女生 onboarding 僅生活照；收入／薪資認證改由站內「編輯個人資訊」處理 */
+const STEPS_FEMALE = ['生活照上傳']
 
 const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
   { tier: 'silver',  range: '200萬+', desc: '銀皇冠標章' },
   { tier: 'gold',    range: '300萬+', desc: '金皇冠標章' },
   { tier: 'diamond', range: '400萬+', desc: '鑽石皇冠標章' },
 ]
-const AI_REVIEW_SECONDS = 15
-
 export default function IdentityVerifyScreen({ userId, claimedName, gender = 'male', onComplete, onSkip }: Props) {
   const steps = gender === 'female' ? STEPS_FEMALE : STEPS_MALE
   const [step, setStep] = useState(0)
@@ -59,10 +61,33 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const [incomeDoc, setIncomeDoc]       = useState<ProofItem | null>(null)
 
   // ── AI verification state ────────────────────────────────────────
-  const [aiStatus,     setAiStatus]     = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle')
+  const [aiStatus,     setAiStatus]     = useState<'idle' | 'ok' | 'fail'>('idle')
   const [aiMessage,    setAiMessage]    = useState('')
-  const [aiReviewCountdown, setAiReviewCountdown] = useState(0)
   const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: 'TSMC' | 'MediaTek' | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
+
+  type EmploymentHold =
+    | null
+    | { phase: 'running'; countdown: number }
+    | { phase: 'done'; ok: boolean; message: string }
+
+  const [employmentHold, setEmploymentHold] = useState<EmploymentHold>(null)
+  type IncomeRunningHold = { phase: 'running'; countdown: number }
+  const [incomeHold, setIncomeHold] = useState<IncomeRunningHold | null>(null)
+
+  const employmentAiOutcomeRef = useRef<{
+    passed: boolean
+    message: string
+    company: 'TSMC' | 'MediaTek' | null
+    confidence: 'high' | 'medium' | 'low' | null
+    reason: string | null
+  } | null>(null)
+
+  const incomeAiOutcomeRef = useRef<{
+    aiResult: AiResult
+    reviewMode: 'ai_auto' | 'manual'
+    manualReason: string
+  } | null>(null)
+  const incomeHoldResolveRef = useRef<(() => void) | null>(null)
 
   const photoInputRef  = useRef<HTMLInputElement>(null)
   const proofInputRef  = useRef<HTMLInputElement>(null)
@@ -76,24 +101,12 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       reader.readAsDataURL(file)
     })
 
-  useEffect(() => {
-    if (aiReviewCountdown <= 0) return
-    const timer = window.setTimeout(() => setAiReviewCountdown((value) => Math.max(0, value - 1)), 1000)
-    return () => window.clearTimeout(timer)
-  }, [aiReviewCountdown])
-
-  const verifyProofWithAI = async (file: File): Promise<boolean> => {
-    if (!file.type.startsWith('image/')) {
-      // PDF files skip AI check; proceed to human review
-      setAiStatus('ok')
-      setAiMessage('PDF 文件將由人工審核確認')
-      return true
-    }
-    setAiStatus('checking')
-    setAiMessage('')
-    setAiReviewCountdown(AI_REVIEW_SECONDS)
+  const fetchEmploymentAiOutcome = async (file: File) => {
+    employmentAiOutcomeRef.current = null
     try {
       const imageBase64 = await fileToBase64(file)
+      const docTypeHint: 'employee_id' | 'tax_return' | 'other' =
+        file.type === 'application/pdf' ? 'tax_return' : file.type.startsWith('image/') ? 'employee_id' : 'other'
       const res = await fetch('/api/verify-id', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -102,31 +115,146 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           verificationKind: 'employment',
           claimedName: claimedName?.trim() || undefined,
           claimedCompany: selectedCompany || undefined,
-          docType: 'other',
+          docType: docTypeHint,
         }),
       })
       const data = await res.json() as { ok: boolean; company?: string; confidence?: string; message: string; reason?: string }
-      if (data.ok) {
-        setAiStatus('ok')
-        setAiMessage(data.message)
-        const aiCompany = (data.company === 'TSMC' || data.company === 'MediaTek') ? data.company : null
-        const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low') ? data.confidence : null
-        setAiResultData({ passed: true, company: aiCompany, confidence: aiConf, reason: data.reason ?? null })
-        if (aiCompany) setSelectedCompany(aiCompany)
-        return true
-      } else {
-        setAiStatus('fail')
-        setAiMessage(`${data.message}。已轉人工審核，人工審核時間可能大於 12 小時。`)
-        setAiResultData({ passed: false, company: null, confidence: null, reason: data.message })
-        return true
+      const aiCompany = (data.company === 'TSMC' || data.company === 'MediaTek') ? data.company : null
+      const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low') ? data.confidence : null
+      employmentAiOutcomeRef.current = {
+        passed: data.ok,
+        message: data.message,
+        company: aiCompany,
+        confidence: aiConf,
+        reason: data.reason ?? null,
       }
     } catch {
-      setAiStatus('fail')
-      setAiMessage('AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。')
-      setAiResultData({ passed: false, company: null, confidence: null, reason: 'AI 暫時無法完成審核，已轉人工審核。' })
-      return true
+      employmentAiOutcomeRef.current = {
+        passed: false,
+        message: 'AI 暫時無法完成審核，已轉人工審核。',
+        company: null,
+        confidence: null,
+        reason: 'AI 暫時無法完成審核，已轉人工審核。',
+      }
     }
   }
+
+  const fetchIncomeAiOutcome = async (file: File, tier: IncomeTier) => {
+    incomeAiOutcomeRef.current = null
+    try {
+      const imageBase64 = await fileToBase64(file)
+      const res = await fetch('/api/verify-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          verificationKind: 'income',
+          claimedIncomeTier: tier,
+          claimedName: claimedName?.trim() || undefined,
+          claimedCompany: selectedCompany || undefined,
+          docType: 'other',
+        }),
+      })
+      const data = await res.json() as { ok: boolean; confidence?: string; message: string; reason?: string }
+      const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low')
+        ? data.confidence
+        : null
+      const aiResult: AiResult = {
+        passed: data.ok,
+        company: null,
+        confidence: aiConf,
+        reason: data.reason ?? data.message,
+      }
+      incomeAiOutcomeRef.current = {
+        aiResult,
+        reviewMode: data.ok ? 'ai_auto' : 'manual',
+        manualReason: data.ok ? '' : (aiResult.reason ?? 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'),
+      }
+    } catch {
+      incomeAiOutcomeRef.current = {
+        aiResult: {
+          passed: false,
+          company: null,
+          confidence: null,
+          reason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+        },
+        reviewMode: 'manual',
+        manualReason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!employmentHold || employmentHold.phase !== 'running') return
+    if (employmentHold.countdown <= 0) return
+    const t = window.setTimeout(() => {
+      setEmploymentHold((h) =>
+        h?.phase === 'running' ? { ...h, countdown: h.countdown - 1 } : h,
+      )
+    }, 1000)
+    return () => window.clearTimeout(t)
+  }, [employmentHold])
+
+  useEffect(() => {
+    if (!employmentHold || employmentHold.phase !== 'running' || employmentHold.countdown !== 0) return
+    let cancelled = false
+    ;(async () => {
+      while (!employmentAiOutcomeRef.current && !cancelled) {
+        await new Promise((r) => setTimeout(r, 80))
+      }
+      if (cancelled || !employmentAiOutcomeRef.current) return
+      const o = employmentAiOutcomeRef.current
+      const passed = o.passed
+      const aiCompany = o.company
+      const aiConf = o.confidence
+      setAiResultData({
+        passed,
+        company: aiCompany,
+        confidence: aiConf,
+        reason: o.reason,
+      })
+      if (aiCompany) setSelectedCompany(aiCompany)
+      if (passed) {
+        setAiStatus('ok')
+        setAiMessage(o.message)
+      } else {
+        setAiStatus('fail')
+        setAiMessage(`${o.message}。已轉人工審核，人工審核時間可能大於 12 小時。`)
+      }
+      setEmploymentHold({
+        phase: 'done',
+        ok: passed,
+        message: passed ? o.message : `${o.message}。已轉人工審核，人工審核時間可能大於 12 小時。`,
+      })
+    })()
+    return () => { cancelled = true }
+  }, [employmentHold])
+
+  useEffect(() => {
+    if (!incomeHold || incomeHold.phase !== 'running') return
+    if (incomeHold.countdown <= 0) return
+    const t = window.setTimeout(() => {
+      setIncomeHold((h) =>
+        h ? { ...h, countdown: h.countdown - 1 } : h,
+      )
+    }, 1000)
+    return () => window.clearTimeout(t)
+  }, [incomeHold])
+
+  useEffect(() => {
+    if (!incomeHold || incomeHold.phase !== 'running' || incomeHold.countdown !== 0) return
+    let cancelled = false
+    ;(async () => {
+      while (!incomeAiOutcomeRef.current && !cancelled) {
+        await new Promise((r) => setTimeout(r, 80))
+      }
+      if (cancelled) return
+      incomeHoldResolveRef.current?.()
+      incomeHoldResolveRef.current = null
+      setIncomeHold(null)
+    })()
+    return () => { cancelled = true }
+  }, [incomeHold])
 
   const addIncomeDoc = (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -257,12 +385,47 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         }
       }
 
-      // 3. Optional: income verification (both genders)
+      // 3. Optional: income verification (male onboarding optional step)
       if (selectedTier && incomeDoc) {
+        let extraAi: AiResult | undefined
+        let reviewMode: 'ai_auto' | 'manual' = 'manual'
+        let manualReason = '收入文件由人工審核。人工審核時間可能大於 12 小時。'
+
+        if (incomeDoc.file.type.startsWith('image/')) {
+          incomeAiOutcomeRef.current = null
+          void fetchIncomeAiOutcome(incomeDoc.file, selectedTier)
+          setIncomeHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
+          await new Promise<void>((resolve) => {
+            incomeHoldResolveRef.current = resolve
+          })
+          const boxed = incomeAiOutcomeRef.current as {
+            aiResult: AiResult
+            reviewMode: 'ai_auto' | 'manual'
+            manualReason: string
+          } | null
+          if (boxed) {
+            extraAi = boxed.aiResult
+            reviewMode = boxed.reviewMode
+            if (boxed.reviewMode === 'manual') {
+              manualReason = boxed.manualReason || manualReason
+            }
+          }
+        }
+
         const r = await uploadProofDoc(userId, incomeDoc.file)
         if (r.ok) {
           const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
-          await submitIncomeVerification(userId, selectedTier, docType, r.path, undefined, 'manual', '收入文件由人工審核。人工審核時間可能大於 12 小時。')
+          await submitIncomeVerification(
+            userId,
+            selectedTier,
+            docType,
+            r.path,
+            extraAi,
+            reviewMode,
+            reviewMode === 'manual'
+              ? (manualReason || 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。')
+              : undefined,
+          )
         }
       }
     } else {
@@ -277,6 +440,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const stepLabel = steps[step]
 
   return (
+    <>
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
       <div className="px-5 pt-safe pb-5">
@@ -315,6 +479,11 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           >
             {stepLabel === '生活照上傳' && (
               <>
+                {gender === 'female' && (
+                  <p className="text-[11px] font-semibold text-indigo-600 mb-2">
+                    已完成價值觀評估，請接著上傳生活照（至少 {PROFILE_PHOTO_MIN} 張）。
+                  </p>
+                )}
                 <div className="flex items-center gap-2 mb-1">
                   <Camera className="w-4 h-4 text-slate-400" />
                   <h2 className="text-xl font-bold text-slate-900">上傳你的生活照</h2>
@@ -550,7 +719,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                       <p className="text-sm font-semibold text-slate-700">
                         {selectedCompany ? `上傳 ${selectedCompany} 驗證文件` : '請先選擇公司'}
                       </p>
-                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · AI 審核時間為 {AI_REVIEW_SECONDS} 秒</p>
+                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · AI 審核時間約 {AI_AUTO_REVIEW_UI_SECONDS} 秒</p>
                     </div>
                   </button>
                 ) : (
@@ -575,38 +744,25 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   </motion.div>
                 )}
 
-                {/* AI verification status */}
+                {/* AI verification status — shown after full-screen review completes */}
                 {aiStatus !== 'idle' && (
                   <motion.div
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={cn(
                       'rounded-2xl p-4 flex items-start gap-3',
-                      aiStatus === 'checking' && 'bg-slate-50 ring-1 ring-slate-100',
-                      aiStatus === 'ok'       && 'bg-emerald-50 ring-1 ring-emerald-100',
-                      aiStatus === 'fail'     && 'bg-red-50 ring-1 ring-red-100',
+                      aiStatus === 'ok'   && 'bg-emerald-50 ring-1 ring-emerald-100',
+                      aiStatus === 'fail' && 'bg-red-50 ring-1 ring-red-100',
                     )}
                   >
-                    {aiStatus === 'checking' && (
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                        className="flex-shrink-0 mt-0.5"
-                      >
-                        <Cpu className="w-4 h-4 text-slate-500" />
-                      </motion.div>
-                    )}
                     {aiStatus === 'ok'   && <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />}
                     {aiStatus === 'fail' && <AlertCircle  className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5"    />}
                     <p className={cn(
                       'text-xs leading-relaxed',
-                      aiStatus === 'checking' && 'text-slate-500',
-                      aiStatus === 'ok'       && 'text-emerald-700 font-medium',
-                      aiStatus === 'fail'     && 'text-red-600',
+                      aiStatus === 'ok'   && 'text-emerald-700 font-medium',
+                      aiStatus === 'fail' && 'text-red-600',
                     )}>
-                      {aiStatus === 'checking'
-                        ? `AI 審核倒數 ${aiReviewCountdown || AI_REVIEW_SECONDS} 秒`
-                        : aiMessage}
+                      {aiMessage}
                     </p>
                   </motion.div>
                 )}
@@ -803,13 +959,22 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
             if (isLastStep) {
               handleSubmit()
             } else if (stepLabel === '職業驗證文件' && proofs.length > 0 && aiStatus !== 'ok') {
-              const passed = await verifyProofWithAI(proofs[0].file)
-              if (passed) setStep(step + 1)
+              const file = proofs[0].file
+              if (!file.type.startsWith('image/')) {
+                setAiStatus('ok')
+                setAiMessage('PDF 文件將由人工審核確認')
+                setAiResultData(null)
+                setStep(step + 1)
+                return
+              }
+              employmentAiOutcomeRef.current = null
+              void fetchEmploymentAiOutcome(file)
+              setEmploymentHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
             } else {
               setStep(step + 1)
             }
           }}
-          disabled={submitting || !canAdvance || aiStatus === 'checking'}
+          disabled={submitting || !canAdvance || employmentHold !== null}
           className={cn(
             'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
             canAdvance && !submitting
@@ -817,7 +982,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
               : 'bg-slate-100 text-slate-300',
           )}
         >
-          {submitting || aiStatus === 'checking' ? (
+          {submitting ? (
             <>
               <motion.div
                 animate={{ rotate: 360 }}
@@ -825,7 +990,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
               >
                 <Cpu className="w-5 h-5" />
               </motion.div>
-              {aiStatus === 'checking' ? `AI 審核倒數 ${aiReviewCountdown || AI_REVIEW_SECONDS} 秒` : '提交中⋯'}
+              提交中⋯
             </>
           ) : (
             <>
@@ -837,11 +1002,73 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           )}
         </motion.button>
 
+        {gender !== 'female' && (
         <button type="button" onClick={onSkip} className="w-full text-slate-400 text-sm py-2">
           跳過（測試模式）
         </button>
+        )}
       </div>
     </div>
+    {employmentHold
+      ? createPortal(
+          <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe">
+            {employmentHold.phase === 'running' ? (
+              <>
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                  className="mb-5"
+                >
+                  <Cpu className="w-10 h-10 text-slate-400" />
+                </motion.div>
+                <p className="text-lg font-bold text-slate-900 mb-2">職業文件 AI 審核</p>
+                <p className="text-5xl font-black text-slate-900 tabular-nums mb-3">{employmentHold.countdown}</p>
+                <p className="text-sm text-slate-500 text-center leading-relaxed max-w-[280px]">
+                  送出後即開始後端辨識；倒數結束後會立刻顯示通過與否。
+                </p>
+              </>
+            ) : (
+              <>
+                {employmentHold.ok ? (
+                  <ShieldCheck className="w-12 h-12 text-emerald-500 mb-4" />
+                ) : (
+                  <AlertCircle className="w-12 h-12 text-amber-500 mb-4" />
+                )}
+                <p className="text-lg font-bold text-slate-900 mb-3 text-center">
+                  {employmentHold.ok ? 'AI 審核結果' : '需人工複核'}
+                </p>
+                <p className="text-sm text-slate-600 text-center leading-relaxed mb-8 max-w-[300px]">{employmentHold.message}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmploymentHold(null)
+                    setStep((s) => s + 1)
+                  }}
+                  className="w-full max-w-xs rounded-2xl bg-slate-900 text-white py-4 font-bold text-base shadow-lg shadow-slate-900/15"
+                >
+                  繼續
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        )
+      : null}
+    {incomeHold
+      ? createPortal(
+          <div className="fixed inset-0 z-[200] bg-[#fafafa]/95 backdrop-blur-sm flex flex-col items-center justify-center px-6 pt-safe pb-safe">
+            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="mb-5">
+              <Cpu className="w-10 h-10 text-slate-400" />
+            </motion.div>
+            <p className="text-lg font-bold text-slate-900 mb-2">收入證明 AI 審核</p>
+            <p className="text-5xl font-black text-slate-900 tabular-nums mb-3">{incomeHold.countdown}</p>
+            <p className="text-sm text-slate-500 text-center leading-relaxed max-w-[280px]">
+              送出後即開始辨識；倒數結束後會繼續上傳並送出審核。
+            </p>
+          </div>,
+          document.body,
+        )
+      : null}
+    </>
   )
 }
-

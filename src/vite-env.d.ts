@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+/** 由 vite.config define 注入，供 `src/lib/appVersion.ts` 與 `/build-id.txt` 比對 */
+declare const __APP_BUILD_ID__: string
+
 interface ImportMetaEnv {
   /** 正式站建議設為 https://www.tsmedia.tw — 註冊確認信 redirect 與 Supabase Redirect URLs 一致 */
   readonly VITE_SITE_URL?: string

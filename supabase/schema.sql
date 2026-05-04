@@ -194,3 +194,12 @@ create policy "proofs: own folder"
     bucket_id = 'proofs'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- 後台預覽：管理員需能對任意 proofs 路徑建立簽名 URL（與 migration 040 一致）
+create policy "proofs: admin select all"
+  on storage.objects for select
+  to authenticated
+  using (
+    bucket_id = 'proofs'
+    and public.current_user_is_admin()
+  );

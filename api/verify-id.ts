@@ -11,11 +11,21 @@ function normalizeNameForCompare(name: string | null | undefined): string {
     .toLowerCase()
 }
 
-function namesMatchStrictly(claimedName: string, detectedName: string | null | undefined): boolean {
+/** 員工證常見「中文／English」多行或多欄 — 先切段再各自正規化（勿整段 normalize，否則／會被吃掉無法拆） */
+function extractDetectedNameCandidates(detected: string | null | undefined): string[] {
+  if (detected == null || detected.trim() === '') return []
+  const trimmed = detected.trim()
+  const pieces = trimmed.split(/[/／｜|\n\r]+/).map((s) => s.trim()).filter(Boolean)
+  const rawPieces = pieces.length > 0 ? pieces : [trimmed]
+  return [...new Set(rawPieces.map((s) => normalizeNameForCompare(s)).filter(Boolean))]
+}
+
+/** 使用者資料姓名須與證件上任一可辨識姓名片段一致（支援中英並列員工證） */
+function claimedNameMatchesDetected(claimedName: string, detectedName: string | null | undefined): boolean {
   const claimed = normalizeNameForCompare(claimedName)
-  const detected = normalizeNameForCompare(detectedName)
-  if (!claimed || !detected) return false
-  return claimed === detected
+  if (!claimed) return false
+  const candidates = extractDetectedNameCandidates(detectedName)
+  return candidates.some((c) => c === claimed)
 }
 
 function normalizeCompanyForCompare(value: string | null | undefined): string {
@@ -63,8 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : docType === 'payslip'
       ? '這張文件類型是薪資單。姓名請讀員工姓名/姓名欄位，公司請看雇主、公司、發薪單位。'
       : docType === 'employee_id'
-        ? '這張文件類型是員工證/識別證。姓名請讀證件上的姓名欄位。'
-        : '若文件是扣繳憑單，姓名請讀「所得人姓名」；若是薪資單，姓名請讀員工姓名；若是員工證，姓名請讀證件姓名。'
+        ? '這張文件類型是員工證/識別證。證件若同時有中文姓名與英文姓名（或羅馬拼音），detectedName 必須優先包含清晰的中文姓名（與使用者資料比對以中文為準）；不得僅填英文而忽略可看見的中文。若中英文並列，請填「中文姓名／英文姓名」同一字串（例如「陳怡君／CHEN YI-CHUN」）。'
+        : '若文件是扣繳憑單，姓名請讀「所得人姓名」；若是薪資單，姓名請讀員工姓名；若是員工證，請優先讀中文姓名；中英文並列時以「中文／英文」填入 detectedName。'
   if (verificationKind === 'employment' && !normalizedClaimedName) {
     return res.status(200).json({
       ok: false,
@@ -103,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 判斷標準：
 - 若圖片模糊、不清楚、不是收入/薪資/稅務/銀行收入文件，isEmployeeId 為 false
 - 若文件明顯無法支持申請的收入等級，isEmployeeId 為 false
-- 若使用者姓名有提供，文件上的姓名必須與使用者姓名相同或高度一致；若不同、看不到姓名、或無法判斷姓名，isEmployeeId 為 false 且 nameMatches 為 false
+- 若使用者姓名有提供，文件上的姓名必須與使用者姓名相同或高度一致；員工證／薪資類文件若中英文姓名並列，detectedName 請優先含中文並以「中文／英文」格式填入，只要中文與使用者姓名一致即可；若不同、看不到姓名、或無法判斷姓名，isEmployeeId 為 false 且 nameMatches 為 false
 - 扣繳憑單必須讀「所得人姓名」作為 detectedName，不要把扣繳單位、公司名稱、負責人或統編誤當成姓名
 - detectedName 必須填入你從文件看到的姓名；若看不到姓名，detectedName 為 null
 - detectedEmployer 必須逐字填入扣繳單位/給付單位/雇主名稱；不可推測、不可填使用者選擇公司
@@ -147,8 +157,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 需看到公司名稱、logo、雇主名稱或明顯識別特徵
 - 如果證件、職稱、備註、公司欄位、識別證類別出現「廠商」、「承攬商」、「外包」、「駐廠」、「vendor」、「contractor」、「外部人員」等字眼，必須 isEmployeeId 為 false
 - 如果只是台積電/聯發科廠區通行證、訪客證、廠商工作證、施工證、臨時證，而非正式員工證，必須 isEmployeeId 為 false
-- 文件上的姓名必須與使用者姓名「${normalizedClaimedName}」相同或高度一致；若不同、看不到姓名、或無法判斷姓名，isEmployeeId 為 false 且 nameMatches 為 false
-- detectedName 必須填入你從文件上看到的使用者姓名；扣繳憑單請填「所得人姓名」；若看不到姓名，detectedName 為 null 且 nameMatches 為 false
+- 文件上的姓名必須與使用者姓名「${normalizedClaimedName}」相同或高度一致（員工證若中英文並列，只要中文姓名與使用者姓名一致即可通過 nameMatches）
+- detectedName 必須填入你從文件上看到的使用者姓名；員工識別證請優先抄錄中文姓名，並與英文並列時使用「中文／英文」格式；扣繳憑單請填「所得人姓名」；若看不到姓名，detectedName 為 null 且 nameMatches 為 false
 - detectedEmployer 必須填入你從文件上看到的公司、扣繳單位、給付單位或雇主名稱
 - 若年收入 200–299 萬，suggestedIncomeTier 為 silver；300–399 萬為 gold；400 萬以上為 diamond；低於 200 萬或無法判斷為 null
 - 若只能看到公司 logo 但看不到姓名與正式員工身份，不可通過
@@ -208,11 +218,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reason: string
     }
 
-    const strictNameMismatch = normalizedClaimedName
-      ? !namesMatchStrictly(normalizedClaimedName, parsed.detectedName)
+    const serverNameMatches = normalizedClaimedName
+      ? claimedNameMatchesDetected(normalizedClaimedName, parsed.detectedName)
       : false
     const isLowConfidenceEmployment = verificationKind === 'employment' && parsed.confidence !== 'high'
-    const employmentNameMismatch = verificationKind === 'employment' && (parsed.nameMatches !== true || strictNameMismatch)
+    const employmentNameMismatch = verificationKind === 'employment' && Boolean(normalizedClaimedName) && !serverNameMatches
     const employmentVendorDoc = verificationKind === 'employment' && parsed.containsVendorTerms === true
     const taxOrPayslipNeedsEmployer = verificationKind === 'employment'
       && (docType === 'tax_return' || docType === 'payslip')
@@ -222,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const employerEvidenceMissing = verificationKind === 'employment'
       && taxOrPayslipNeedsEmployer
       && !employerMatchesCompany(parsed.company, parsed.employerEvidenceQuote)
-    const incomeNameMismatch = verificationKind === 'income' && Boolean(normalizedClaimedName) && (parsed.nameMatches !== true || strictNameMismatch)
+    const incomeNameMismatch = verificationKind === 'income' && Boolean(normalizedClaimedName) && !serverNameMatches
     if (
       !parsed.isEmployeeId
       || incomeNameMismatch

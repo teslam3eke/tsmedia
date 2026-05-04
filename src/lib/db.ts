@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
   AiConfidence, VerificationDocWithProfile, AppNotificationKind, AppNotificationRow,
@@ -252,7 +253,7 @@ export async function submitVerificationDoc(
       status: 'pending',
       verification_kind: 'employment',
       review_mode: reviewMode,
-      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), 15) : null,
+      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), AI_AUTO_REVIEW_UI_SECONDS) : null,
       manual_review_reason: manualReviewReason ?? null,
       ...(aiResult && {
         ai_passed:     aiResult.passed,
@@ -299,7 +300,7 @@ export async function submitIncomeVerification(
       verification_kind: 'income',
       claimed_income_tier: claimedTier,
       review_mode: reviewMode,
-      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), 15) : null,
+      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), AI_AUTO_REVIEW_UI_SECONDS) : null,
       manual_review_reason: manualReviewReason ?? null,
       ...(aiResult && {
         ai_passed:     aiResult.passed,
@@ -1079,12 +1080,43 @@ export async function updateMessageReportStatus(reportId: string, status: Messag
   return { ok: true }
 }
 
+/** Normalize stored path (bucket-relative) — tolerate accidental `proofs/` prefix or absolute object URLs */
+export function normalizeProofStoragePath(pathOrUrl: string): string {
+  let path = pathOrUrl.trim()
+  if (!path) return path
+  try {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      const u = new URL(path)
+      const pub = '/public/proofs/'
+      const sign = '/sign/proofs/'
+      let idx = u.pathname.indexOf(pub)
+      if (idx !== -1) path = decodeURIComponent(u.pathname.slice(idx + pub.length))
+      else {
+        idx = u.pathname.indexOf(sign)
+        if (idx !== -1) path = decodeURIComponent(u.pathname.slice(idx + sign.length))
+        else {
+          idx = u.pathname.indexOf('/proofs/')
+          if (idx !== -1) path = decodeURIComponent(u.pathname.slice(idx + '/proofs/'.length))
+        }
+      }
+    }
+  } catch {
+    /* keep path */
+  }
+  if (path.startsWith('proofs/')) path = path.slice('proofs/'.length)
+  return path
+}
+
 export async function getDocSignedUrl(path: string): Promise<string | null> {
+  const normalized = normalizeProofStoragePath(path)
   const { data, error } = await supabase.storage
     .from('proofs')
-    .createSignedUrl(path, 60 * 30)
+    .createSignedUrl(normalized, 60 * 30)
 
-  if (error || !data?.signedUrl) return null
+  if (error || !data?.signedUrl) {
+    console.error('[db] getDocSignedUrl failed:', error?.message ?? 'no url', normalized)
+    return null
+  }
   return data.signedUrl
 }
 

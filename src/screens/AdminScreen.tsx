@@ -40,6 +40,8 @@ export default function AdminScreen({ onBack }: Props) {
   const [loading, setLoading]   = useState(true)
   const [acting, setActing]     = useState<string | null>(null)   // doc id being acted on
   const [viewUrl, setViewUrl]   = useState<string | null>(null)
+  /** PDF 無法用 img 顯示，需 iframe */
+  const [viewKind, setViewKind] = useState<'image' | 'pdf' | null>(null)
   const [rejectNote, setRejectNote] = useState('')
   const [rejectTarget, setRejectTarget] = useState<VerificationDocWithProfile | null>(null)
 
@@ -80,8 +82,22 @@ export default function AdminScreen({ onBack }: Props) {
 
   const handleViewDoc = async (doc: VerificationDocWithProfile) => {
     if (!doc.doc_url) return
+    const lower = doc.doc_url.split('?')[0].toLowerCase()
+    const isPdf = lower.endsWith('.pdf')
     const url = await getDocSignedUrl(doc.doc_url)
-    if (url) setViewUrl(url)
+    if (!url) {
+      window.alert(
+        '無法載入驗證文件（簽名連結失敗）。若您為管理員，請確認已在資料庫套用 Storage 政策「proofs: admin select all」（見 supabase/migrations/040_storage_proofs_admin_select.sql）。',
+      )
+      return
+    }
+    setViewKind(isPdf ? 'pdf' : 'image')
+    setViewUrl(url)
+  }
+
+  const closeViewer = () => {
+    setViewUrl(null)
+    setViewKind(null)
   }
 
   const pendingCount = docs.filter(d => filter === 'all' && d.status === 'pending').length
@@ -222,21 +238,23 @@ export default function AdminScreen({ onBack }: Props) {
 
       {/* Document viewer overlay */}
       <AnimatePresence>
-        {viewUrl && (
+        {viewUrl && viewKind && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[120] bg-black/90"
-            onClick={() => setViewUrl(null)}
+            onClick={closeViewer}
           >
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-[2] h-28 bg-gradient-to-b from-black/80 to-transparent">
-              <p className="absolute left-5 top-16 text-white text-sm font-semibold">驗證文件</p>
+              <p className="absolute left-5 top-16 text-white text-sm font-semibold">
+                驗證文件{viewKind === 'pdf' ? '（PDF）' : ''}
+              </p>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation()
-                  setViewUrl(null)
+                  closeViewer()
                 }}
                 className="pointer-events-auto absolute right-5 top-16 min-h-12 rounded-full bg-white px-6 py-3 text-sm font-bold text-slate-900 shadow-xl ring-1 ring-white/30"
               >
@@ -244,17 +262,25 @@ export default function AdminScreen({ onBack }: Props) {
               </button>
             </div>
             <div className="flex h-full items-center justify-center px-5 py-24" onClick={(e) => e.stopPropagation()}>
-              <img
-                src={viewUrl}
-                alt="驗證文件"
-                className="max-h-[72dvh] max-w-[92vw] rounded-2xl bg-white object-contain shadow-2xl"
-              />
+              {viewKind === 'pdf' ? (
+                <iframe
+                  title="驗證文件 PDF"
+                  src={viewUrl}
+                  className="h-[72dvh] w-[92vw] max-w-3xl rounded-2xl bg-white shadow-2xl"
+                />
+              ) : (
+                <img
+                  src={viewUrl}
+                  alt="驗證文件"
+                  className="max-h-[72dvh] max-w-[92vw] rounded-2xl bg-white object-contain shadow-2xl"
+                />
+              )}
             </div>
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation()
-                setViewUrl(null)
+                closeViewer()
               }}
               className="absolute left-1/2 z-[3] min-h-12 -translate-x-1/2 rounded-full bg-white px-8 py-3 text-sm font-bold text-slate-900 shadow-xl ring-1 ring-black/5"
               style={{ bottom: 'calc(env(safe-area-inset-bottom) + 5rem)' }}

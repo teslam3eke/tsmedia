@@ -25,14 +25,18 @@ import {
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches,
 } from '@/lib/db'
 import { getAppDayKey, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
+import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
+import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
+import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import AdminScreen from '@/screens/AdminScreen'
+import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -41,7 +45,6 @@ import AdminScreen from '@/screens/AdminScreen'
 const HARDCORE_MARKERS = [
   '絕對', '硬核', '絕不', '我付', '當然', '肯定', '一定', '必須', '毫不', '不可能', '死都', '最硬',
 ]
-const AI_REVIEW_SECONDS = 15
 const REPORT_REASONS: { value: ReportReason; label: string; desc: string }[] = [
   { value: 'fake_profile', label: '假帳號 / 盜用照片', desc: '資料或照片疑似不屬於本人' },
   { value: 'married_or_not_single', label: '已婚或非單身', desc: '疑似不符合單身交友規範' },
@@ -104,7 +107,8 @@ interface Profile {
   superLikedToday?: boolean
 }
 
-type Tab = 'discover' | 'matches' | 'messages' | 'profile'
+export type MainScreenTab = 'discover' | 'matches' | 'messages' | 'profile'
+type Tab = MainScreenTab
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -534,7 +538,7 @@ function NotificationModal({ onClose }: { onClose: () => void }) {
   const allOff = !Object.values(settings).some(Boolean)
 
   const items: { key: NotifKey; icon: React.ElementType; label: string; desc: string }[] = [
-    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '超級喜歡或配對成功時通知你' },
+    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '配對成功時通知你' },
     { key: 'messages',      icon: MessageCircle, label: '新訊息通知', desc: '收到新訊息時通知你' },
     { key: 'newProfile',    icon: Users,    label: '新推薦通知',   desc: '有新的高契合度對象時通知你' },
     { key: 'weeklyDigest',  icon: Star,     label: '每週精選摘要', desc: '每週一匯總你的配對概況' },
@@ -980,6 +984,10 @@ function collectProfilePhotoUrls(p: Profile): string[] {
 
 const DEMO_PUZZLE_CLEARED_KEY = 'tsm-demo-puzzle-cleared-slots'
 
+function discoverChatPuzzleIntroStorageKey(userId: string) {
+  return `tsm-discover-chat-puzzle-intro:v1:${userId}`
+}
+
 function loadDemoPuzzleClearedSlots(): Record<number, number[]> {
   try {
     const raw = sessionStorage.getItem(DEMO_PUZZLE_CLEARED_KEY)
@@ -1173,6 +1181,33 @@ function BlurredProfilePhotoSlideshow({
   )
 }
 
+/** 探索名單記憶體快取：離開分頁會卸載 DiscoverTab，命中時不重打 RPC／不重簽生活照網址 */
+let discoverDeckSessionCache: {
+  userId: string
+  dayKey: string
+  deckRefresh: number
+  profiles: Profile[]
+} | null = null
+
+function syncDiscoverDeckSessionCacheProfiles(
+  uid: string | undefined,
+  dayKey: string,
+  refreshTick: number,
+  nextProfiles: Profile[],
+) {
+  const c = discoverDeckSessionCache
+  if (
+    !uid ||
+    !c ||
+    c.userId !== uid ||
+    c.dayKey !== dayKey ||
+    c.deckRefresh !== refreshTick
+  ) {
+    return
+  }
+  discoverDeckSessionCache = { ...c, profiles: nextProfiles }
+}
+
 /** 每晚 10 點換日後，探索名單重載時的短暫慶祝動畫（置於相對定位容器內） */
 function DiscoverDeckRolloverOverlay({ open, tick }: { open: boolean; tick: number }) {
   return (
@@ -1214,7 +1249,6 @@ function DiscoverDeckRolloverOverlay({ open, tick }: { open: boolean; tick: numb
 // ─── Discover Tab ─────────────────────────────────────────────────────────────
 function DiscoverTab({
   userId,
-  discoverTabVisible,
   discoverDeckDayKey,
   discoverDeckRolloverTick,
   currentUserGender,
@@ -1224,10 +1258,9 @@ function DiscoverTab({
   onOpenSubscription,
   refreshCredits,
   onCreditAction,
+  onDiscoverMatch,
 }: {
   userId?: string
-  /** 探索分頁是否為當前可見（用於切回分頁時重新載入名單，帶上已送愛心狀態） */
-  discoverTabVisible: boolean
   /** 與主畫面同步的 app 日（每晚 10 點換日），換日時會重抓探索名單 */
   discoverDeckDayKey: string
   /** 每次換日遞增，供換日動畫只播一次 */
@@ -1240,6 +1273,8 @@ function DiscoverTab({
   refreshCredits: () => void
   /** 成功送出愛心／超級喜歡後（扣款成功），供全螢幕獎勵動畫。 */
   onCreditAction?: (kind: 'like' | 'super_like') => void
+  /** 伺服器回傳已配對時刷新配對／聊天列表（Realtime 亦會更新） */
+  onDiscoverMatch?: () => void
 }) {
   // Men see female profiles, women see male profiles (demo 另以 preferredRegion 篩選；已登入者由伺服器每日 6 人＋區域邏輯）
   const [blockedKeys, setBlockedKeys] = useState<string[]>([])
@@ -1307,12 +1342,26 @@ function DiscoverTab({
     getMyBlockedProfileKeys().then(setBlockedKeys)
   }, [userId])
 
+  // 探索名單：換日／手動「重新載入」／換帳號才請求 RPC；切回探索頁沿用記憶體快取（見 discoverDeckSessionCache）
   useEffect(() => {
     if (!userId) {
       setLiveDeckStatus('idle')
       setLiveDeck([])
       return
     }
+
+    const cached = discoverDeckSessionCache
+    if (
+      cached &&
+      cached.userId === userId &&
+      cached.dayKey === discoverDeckDayKey &&
+      cached.deckRefresh === deckRefresh
+    ) {
+      setLiveDeck(cached.profiles)
+      setLiveDeckStatus('ready')
+      return () => {}
+    }
+
     let cancelled = false
     setLiveDeckStatus('loading')
     setLiveDeck([])
@@ -1324,6 +1373,12 @@ function DiscoverTab({
         if (cancelled) return
         setLiveDeck(profiles)
         setLiveDeckStatus('ready')
+        discoverDeckSessionCache = {
+          userId,
+          dayKey: discoverDeckDayKey,
+          deckRefresh,
+          profiles,
+        }
       } catch (e) {
         console.error('[DiscoverTab] getDailyDiscoverDeck failed:', e)
         if (!cancelled) {
@@ -1335,7 +1390,7 @@ function DiscoverTab({
     return () => {
       cancelled = true
     }
-  }, [userId, discoverDeckDayKey, deckRefresh, discoverTabVisible])
+  }, [userId, discoverDeckDayKey, deckRefresh])
 
   useEffect(() => {
     if (!userId) {
@@ -1416,19 +1471,32 @@ function DiscoverTab({
     }
     if (result.ok && userId && profile.userId) {
       if (action === 'like') {
-        setLiveDeck((prev) => prev.map((p) =>
-          p.userId === profile.userId ? { ...p, likedToday: true } : p
-        ))
+        setLiveDeck((prev) => {
+          const next = prev.map((p) =>
+            p.userId === profile.userId ? { ...p, likedToday: true } : p
+          )
+          syncDiscoverDeckSessionCacheProfiles(userId, discoverDeckDayKey, deckRefresh, next)
+          return next
+        })
       }
       if (action === 'super_like') {
-        setLiveDeck((prev) => prev.map((p) =>
-          p.userId === profile.userId ? { ...p, superLikedToday: true } : p
-        ))
+        setLiveDeck((prev) => {
+          const next = prev.map((p) =>
+            p.userId === profile.userId ? { ...p, superLikedToday: true } : p
+          )
+          syncDiscoverDeckSessionCacheProfiles(userId, discoverDeckDayKey, deckRefresh, next)
+          return next
+        })
       }
     }
     if (result.ok) {
-      if (action === 'like') onCreditAction?.('like')
-      if (action === 'super_like') onCreditAction?.('super_like')
+      if (result.matched) {
+        onDiscoverMatch?.()
+      }
+      if (!result.matched) {
+        if (action === 'like') onCreditAction?.('like')
+        if (action === 'super_like') onCreditAction?.('super_like')
+      }
       goNext()
     }
   }
@@ -1740,7 +1808,7 @@ function DiscoverTab({
                   {index > 0 && <div className="w-12 h-12" />}
                 </div>
                 <p className="mt-8 text-center text-[11px] leading-relaxed text-slate-400">
-                  一般愛心不會通知對方；超級喜歡會讓對方知道你對他有興趣。
+                  一般愛心不會通知對方；超級喜歡將與對方立即配對，雙方可開始聊天。
                 </p>
               </div>
             </div>
@@ -1794,7 +1862,7 @@ function DiscoverTab({
                 </p>
                 {confirmIntent === 'super_like' && (
                   <p className="text-[13px] text-slate-500">
-                    超級喜歡為另行取得的道具；送出後將扣減 1 次。
+                    超級喜歡為另行取得的道具；送出後扣減 1 次，並與對方立即配對（與互相喜歡相同，可開聊天室）。
                   </p>
                 )}
                 <p className="font-semibold text-slate-800">真的要送出嗎？</p>
@@ -1893,7 +1961,7 @@ function NotifEnablePrompt({
         // Fire a welcome ping so the user immediately sees it works
         try {
           const options: NotificationOptions = {
-            body: '通知已啟用，有人對你按超級喜歡、配對成功或傳訊息時會第一時間通知你',
+            body: '通知已啟用，配對成功或收到訊息時會第一時間通知你',
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
             tag: 'tsmedia-welcome',
@@ -1938,7 +2006,7 @@ function NotifEnablePrompt({
         </div>
         <h3 className="text-[19px] font-bold text-slate-900 tracking-tight mb-2">開啟通知，不錯過任何配對</h3>
         <p className="text-[13px] text-slate-500 leading-relaxed mb-5">
-          一般愛心不會通知對方；當有人對你按超級喜歡、配對成功或傳訊息時，我們會立即通知你。
+          一般愛心不會通知對方；配對成功或有人傳訊息給你時，我們會立即通知你。
         </p>
         <button
           onClick={enableNow}
@@ -2581,37 +2649,6 @@ function puzzleMulberry32(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
-}
-
-function getPuzzleTilePath(tile: number) {
-  const col = tile % 4
-  const row = Math.floor(tile / 4)
-  const x = col * 100
-  const y = row * 150
-  const w = 100
-  const h = 150
-  const cx = x + w / 2
-  const cy = y + h / 2
-  const rightTab = col < 3
-  const bottomTab = row < 3
-  const leftTab = col > 0
-  const topTab = row > 0
-
-  return [
-    `M ${x} ${y}`,
-    `L ${cx - 10} ${y}`,
-    topTab ? `C ${cx - 5} ${y - 20}, ${cx + 5} ${y - 20}, ${cx + 10} ${y}` : `L ${cx + 10} ${y}`,
-    `L ${x + w} ${y}`,
-    `L ${x + w} ${cy - 12}`,
-    rightTab ? `C ${x + w + 18} ${cy - 6}, ${x + w + 18} ${cy + 6}, ${x + w} ${cy + 12}` : `L ${x + w} ${cy + 12}`,
-    `L ${x + w} ${y + h}`,
-    `L ${cx + 10} ${y + h}`,
-    bottomTab ? `C ${cx + 5} ${y + h + 20}, ${cx - 5} ${y + h + 20}, ${cx - 10} ${y + h}` : `L ${cx - 10} ${y + h}`,
-    `L ${x} ${y + h}`,
-    `L ${x} ${cy + 12}`,
-    leftTab ? `C ${x - 18} ${cy + 6}, ${x - 18} ${cy - 6}, ${x} ${cy - 12}` : `L ${x} ${cy - 12}`,
-    'Z',
-  ].join(' ')
 }
 
 function formatPuzzleBoostCountdown(ms: number) {
@@ -3914,6 +3951,7 @@ function EditProfileScreen({
   const [uploadingIncome, setUploadingIncome] = useState(false)
   const [incomeSubmitMsg, setIncomeSubmitMsg] = useState('')
   const [incomeReviewCountdown, setIncomeReviewCountdown] = useState(0)
+  const incomeAiFinalizePendingRef = useRef(false)
   const incomeDocRef = useRef<HTMLInputElement>(null)
   const canSubmitIncomeVerification =
     profile.gender === 'female' || profile.verification_status === 'approved'
@@ -3923,6 +3961,34 @@ function EditProfileScreen({
     const timer = window.setTimeout(() => setIncomeReviewCountdown((value) => Math.max(0, value - 1)), 1000)
     return () => window.clearTimeout(timer)
   }, [incomeReviewCountdown])
+
+  useEffect(() => {
+    if (incomeReviewCountdown > 0) return
+    if (!incomeAiFinalizePendingRef.current) return
+    incomeAiFinalizePendingRef.current = false
+    let cancelled = false
+    ;(async () => {
+      await finalizeDueAiReviews()
+      const latestProfile = await getProfile(userId)
+      const row = await getIncomeVerification(userId)
+      if (cancelled) return
+      if (row && typeof row === 'object' && 'status' in row && 'claimed_income_tier' in row) {
+        const r = row as { status: 'pending' | 'approved' | 'rejected'; claimed_income_tier: IncomeTier | null }
+        setIncomeStatus({ status: r.status, claimed: r.claimed_income_tier })
+      }
+      if (latestProfile) {
+        onSaved(latestProfile)
+        if (latestProfile.income_tier) {
+          setIncomeSubmitMsg('AI 審核已通過，收入認證完成。')
+        } else {
+          setIncomeSubmitMsg((prev) =>
+            prev.trim() !== '' ? prev : '若 AI 無法確認將轉人工審核，人工審核時間可能大於 12 小時。',
+          )
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  }, [incomeReviewCountdown, userId])
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -4032,9 +4098,10 @@ function EditProfileScreen({
     }
 
     const optimisticIncomeTier = incomeUploadTier
+    incomeAiFinalizePendingRef.current = false
     setIncomeStatus({ status: 'pending', claimed: optimisticIncomeTier })
-    setIncomeReviewCountdown(AI_REVIEW_SECONDS)
-    setIncomeSubmitMsg(`AI 審核倒數 ${AI_REVIEW_SECONDS} 秒。`)
+    setIncomeReviewCountdown(0)
+    setIncomeSubmitMsg('正在上傳並送審⋯')
 
     let aiResult: Awaited<ReturnType<typeof reviewIncomeWithAI>>
     let reviewMode: 'ai_auto' | 'manual' = 'manual'
@@ -4043,7 +4110,6 @@ function EditProfileScreen({
       aiResult = await reviewIncomeWithAI(incomeUploadFile, incomeUploadTier)
       if (aiResult.passed) {
         reviewMode = 'ai_auto'
-        setIncomeSubmitMsg(`AI 審核中，AI 審核時間為 ${AI_REVIEW_SECONDS} 秒。`)
       } else {
         manualReason = aiResult.reason || 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
         setIncomeSubmitMsg(manualReason)
@@ -4065,7 +4131,13 @@ function EditProfileScreen({
       await submitIncomeVerification(userId, incomeUploadTier, 'payslip', res.path, aiResult, reviewMode, manualReason)
       setIncomeUploadFile(null)
       setIncomeUploadTier(null)
+      if (reviewMode === 'ai_auto') {
+        incomeAiFinalizePendingRef.current = true
+        setIncomeReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
+        setIncomeSubmitMsg(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
+      }
     } else {
+      incomeAiFinalizePendingRef.current = false
       setIncomeStatus(null)
       setIncomeReviewCountdown(0)
       setIncomeSubmitMsg(`文件上傳失敗：${res.error ?? '請稍後再試'}`)
@@ -4392,7 +4464,7 @@ function EditProfileScreen({
                 收入認證審核中
               </p>
               <p className="text-xs text-amber-700/70 mt-1 leading-relaxed">
-                你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。{incomeReviewCountdown > 0 ? `AI 審核倒數 ${incomeReviewCountdown} 秒。` : `AI 審核時間為 ${AI_REVIEW_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`}
+                你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。{incomeReviewCountdown > 0 ? `AI 審核倒數 ${incomeReviewCountdown} 秒。` : `AI 審核時間為 ${AI_AUTO_REVIEW_UI_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`}
               </p>
             </div>
           ) : (
@@ -4414,7 +4486,7 @@ function EditProfileScreen({
                   上傳收入證明文件
                 </p>
                 <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
-                  可上傳薪資單、扣繳憑單、銀行對帳單等。AI 審核時間為 {AI_REVIEW_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
+                  可上傳薪資單、扣繳憑單、銀行對帳單等。AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
                 </p>
 
                 {/* Tier picker */}
@@ -4466,7 +4538,7 @@ function EditProfileScreen({
                     <>
                       <Upload className="w-5 h-5 text-slate-300" />
                       <p className="text-xs text-slate-400 font-medium">點擊上傳照片或 PDF</p>
-                      <p className="text-[10px] text-slate-300">AI 審核時間為 {AI_REVIEW_SECONDS} 秒，送出後倒數</p>
+                      <p className="text-[10px] text-slate-300">AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒，送出後倒數</p>
                     </>
                   )}
                 </button>
@@ -4567,6 +4639,7 @@ function CompanyVerifyScreen({
   const [aiMessage, setAiMessage] = useState('')
   const [companyReviewCountdown, setCompanyReviewCountdown] = useState(0)
   const [linkedIncomeTier, setLinkedIncomeTier] = useState<IncomeTier | null>(null)
+  const companyAiFinalizePendingRef = useRef(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const canLinkIncomeVerification = selectedDocType === 'tax_return' || selectedDocType === 'payslip'
 
@@ -4575,6 +4648,28 @@ function CompanyVerifyScreen({
     const timer = window.setTimeout(() => setCompanyReviewCountdown((value) => Math.max(0, value - 1)), 1000)
     return () => window.clearTimeout(timer)
   }, [companyReviewCountdown])
+
+  useEffect(() => {
+    if (companyReviewCountdown > 0) return
+    if (!submitted) return
+    if (!companyAiFinalizePendingRef.current) return
+    companyAiFinalizePendingRef.current = false
+    let cancelled = false
+    ;(async () => {
+      await finalizeDueAiReviews()
+      const latest = await getProfile(userId)
+      if (cancelled || !latest) return
+      onVerified(latest)
+      if (latest.verification_status === 'approved') {
+        setAiMessage('AI 審核已通過，公司認證完成。')
+      } else {
+        setAiMessage((prev) =>
+          prev.trim() !== '' ? prev : '若 AI 無法確認將轉人工審核，人工審核時間可能大於 12 小時。',
+        )
+      }
+    })()
+    return () => { cancelled = true }
+  }, [companyReviewCountdown, submitted, userId])
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -4733,9 +4828,10 @@ function CompanyVerifyScreen({
     }
 
     const optimisticCompany = selectedCompany
+    companyAiFinalizePendingRef.current = false
     setSubmitted(true)
-    setCompanyReviewCountdown(AI_REVIEW_SECONDS)
-    setAiMessage(`AI 審核倒數 ${AI_REVIEW_SECONDS} 秒。`)
+    setCompanyReviewCountdown(0)
+    setAiMessage('正在上傳並送審⋯')
     onVerified({ ...profile, company: optimisticCompany, verification_status: 'submitted' })
 
     let aiResult: Awaited<ReturnType<typeof verifyCompanyDocWithAI>>
@@ -4756,15 +4852,12 @@ function CompanyVerifyScreen({
     if (!aiResult.passed) {
       manualReason = aiResult.reason || 'AI 初審未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
       setAiMessage(manualReason)
+    } else if (selectedDocType === 'employee_id') {
+      reviewMode = 'ai_auto'
     } else {
-      if (selectedDocType === 'employee_id') {
-        reviewMode = 'ai_auto'
-        setAiMessage(`AI 審核中，AI 審核時間為 ${AI_REVIEW_SECONDS} 秒。`)
-      } else {
-        reviewMode = 'manual'
-        manualReason = 'AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。人工審核時間可能大於 12 小時。'
-        setAiMessage(manualReason)
-      }
+      reviewMode = 'manual'
+      manualReason = 'AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。人工審核時間可能大於 12 小時。'
+      setAiMessage(manualReason)
     }
 
     if (aiResult.company) setSelectedCompany(aiResult.company)
@@ -4772,6 +4865,7 @@ function CompanyVerifyScreen({
     const res = await uploadProofDoc(userId, docFile)
     if (!res.ok) {
       setSubmitError(`文件上傳失敗：${res.error}`)
+      companyAiFinalizePendingRef.current = false
       setSubmitted(false)
       setCompanyReviewCountdown(0)
       setSubmitting(false)
@@ -4790,6 +4884,7 @@ function CompanyVerifyScreen({
     )
     if (!docResult.ok) {
       setSubmitError(`送出審核失敗：${docResult.error ?? '請稍後再試'}`)
+      companyAiFinalizePendingRef.current = false
       setSubmitted(false)
       setCompanyReviewCountdown(0)
       setSubmitting(false)
@@ -4834,7 +4929,11 @@ function CompanyVerifyScreen({
 
     onVerified({ ...profile, company: aiResult.company ?? selectedCompany, verification_status: 'submitted' })
     setSubmitting(false)
-    if (reviewMode === 'ai_auto') setAiMessage('')
+    if (reviewMode === 'ai_auto') {
+      companyAiFinalizePendingRef.current = true
+      setCompanyReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
+      setAiMessage(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
+    }
   }
 
   return createPortal(
@@ -4873,7 +4972,7 @@ function CompanyVerifyScreen({
             <div>
               <p className="text-sm font-bold text-amber-800">審核中</p>
               <p className="text-xs text-amber-600 mt-0.5">
-                文件已送出。{companyReviewCountdown > 0 ? `AI 審核倒數 ${companyReviewCountdown} 秒。` : (aiMessage || `AI 審核時間為 ${AI_REVIEW_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`)}
+                文件已送出。{companyReviewCountdown > 0 ? `AI 審核倒數 ${companyReviewCountdown} 秒。` : (aiMessage || `AI 審核時間為 ${AI_AUTO_REVIEW_UI_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`)}
               </p>
             </div>
           </div>
@@ -4881,7 +4980,7 @@ function CompanyVerifyScreen({
           <div className="bg-blue-50 rounded-2xl p-4 ring-1 ring-blue-100">
             <p className="text-sm font-bold text-blue-800">上傳公司驗證文件</p>
             <p className="text-xs text-blue-600 mt-1 leading-relaxed">
-              上傳員工識別證、扣繳憑單或薪資單。AI 審核時間為 {AI_REVIEW_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
+              上傳員工識別證、扣繳憑單或薪資單。AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
             </p>
           </div>
         )}
@@ -4940,7 +5039,7 @@ function CompanyVerifyScreen({
               <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
                 <p className="text-xs font-bold text-slate-700 mb-1.5">同步收入認證</p>
                 <p className="text-[11px] text-slate-400 leading-relaxed mb-3">
-                  這份文件若能看出薪資，可同時審核收入等級。AI 通過後收入認證也會進入 {AI_REVIEW_SECONDS} 秒倒數。
+                  這份文件若能看出薪資，可同時審核收入等級。AI 通過後收入認證也會進入 {AI_AUTO_REVIEW_UI_SECONDS} 秒倒數。
                 </p>
                 <div className="grid grid-cols-3 gap-2">
                   {(['silver','gold','diamond'] as IncomeTier[]).map((tier) => (
@@ -4988,7 +5087,7 @@ function CompanyVerifyScreen({
                   <>
                     <Upload className="w-6 h-6 text-slate-300" />
                     <p className="text-sm text-slate-400 font-medium">點擊上傳照片或 PDF</p>
-                    <p className="text-[11px] text-slate-300">AI 審核時間為 {AI_REVIEW_SECONDS} 秒，送出後倒數</p>
+                    <p className="text-[11px] text-slate-300">AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒，送出後倒數</p>
                   </>
                 )}
               </button>
@@ -5058,7 +5157,6 @@ function ProfileTab({
 }) {
   const [profile, setProfile] = useState<ProfileRow | null>(null)
   const [editing, setEditing] = useState(false)
-  const [photoUrls, setPhotoUrls] = useState<string[]>([])
   const [showNotif, setShowNotif] = useState(false)
   const [showCompanyVerify, setShowCompanyVerify] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
@@ -5084,7 +5182,11 @@ function ProfileTab({
       const latest = await getProfile(userId)
       if (latest) setProfile(latest)
       const notifications = await getUnreadAppNotifications(userId)
-      setAppNotifications(notifications)
+      const legacySuperLikes = notifications.filter((n) => n.kind === 'super_like_received')
+      if (legacySuperLikes.length > 0) {
+        await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
+      }
+      setAppNotifications(notifications.filter((n) => n.kind !== 'super_like_received'))
       onRefreshCredits()
       const stats = await refreshProfileTabStats()
       if (stats) setTabStats(stats)
@@ -5098,24 +5200,6 @@ function ProfileTab({
     setAppNotifications((prev) => prev.filter((n) => n.id !== notificationId))
     await markAppNotificationRead(notificationId)
   }
-
-  useEffect(() => {
-    let cancelled = false
-
-    const loadPhotoUrls = async () => {
-      const paths = profile?.photo_urls ?? []
-      if (paths.length === 0) {
-        setPhotoUrls([])
-        return
-      }
-
-      const urls = await resolvePhotoUrls(paths)
-      if (!cancelled) setPhotoUrls(urls)
-    }
-
-    loadPhotoUrls()
-    return () => { cancelled = true }
-  }, [profile?.photo_urls])
 
   const displayName = profile?.name ?? '—'
   const interests = profile?.interests ?? []
@@ -5295,20 +5379,6 @@ function ProfileTab({
           <p className="text-sm text-slate-700 leading-relaxed">{bio}</p>
         </div>
       ) : null}
-
-      {/* Photos */}
-      {photoUrls.length > 0 && (
-        <div className="mx-4 mt-3 bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">生活照</p>
-          <div className="grid grid-cols-3 gap-2">
-            {photoUrls.map((url, i) => (
-              <div key={`${url}-${i}`} className="aspect-square rounded-2xl overflow-hidden bg-slate-100">
-                <img src={url} alt="" className="w-full h-full object-cover" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Interests */}
       {interests.length > 0 && (
@@ -5491,13 +5561,16 @@ export default function MainScreen({
   user,
   onSignOut,
   initialDiscoverGender = 'male',
+  initialTab = 'discover',
 }: {
   user?: import('@supabase/supabase-js').User | null
   /** 與 App 問卷／個資同步，避免探索分頁預設 male 在 getProfile 前誤濾掉異性名單 */
   initialDiscoverGender?: 'male' | 'female'
+  /** 登入後預設分頁；生活照未達標時由 App 設為 profile */
+  initialTab?: MainScreenTab
   onSignOut?: () => void
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>('discover')
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const prevTab = useRef<Tab>('discover')
   const [currentUserGender, setCurrentUserGender] = useState<'male' | 'female'>(initialDiscoverGender)
   const [currentUserPreferredRegion, setCurrentUserPreferredRegion] = useState<import('@/lib/types').Region | null>(null)
@@ -5520,6 +5593,10 @@ export default function MainScreen({
     subtitle?: string
   }>(null)
   const [matchSplash, setMatchSplash] = useState<{ matchId: string; peerUserId: string } | null>(null)
+  /** 已登入者是否已有規定張數生活照（探索門檻） */
+  const [selfPhotoOk, setSelfPhotoOk] = useState(true)
+  const [showDiscoverPuzzleIntro, setShowDiscoverPuzzleIntro] = useState(false)
+  const [photoGateToast, setPhotoGateToast] = useState(false)
 
   useEffect(() => {
     if (!user?.id) {
@@ -5661,6 +5738,10 @@ export default function MainScreen({
   }, [loadLiveMatchThreads])
 
   useEffect(() => {
+    void checkRemoteBuildIdAndReload()
+  }, [activeTab])
+
+  useEffect(() => {
     if (activeTab !== 'messages') setHideTabBarForChatKeyboard(false)
   }, [activeTab])
 
@@ -5682,14 +5763,37 @@ export default function MainScreen({
     setPendingChatId(id)
   }
 
-  // Fetch current user's gender + preferred region to filter discover profiles
+  // Fetch current user's gender + preferred region + 生活照（切換分頁時重抓，以便「我的」上傳後可進探索）
   useEffect(() => {
-    if (!user?.id) return
-    getProfile(user.id).then((profile) => {
+    if (!user?.id) {
+      setSelfPhotoOk(true)
+      return
+    }
+    let cancelled = false
+    void getProfile(user.id).then((profile) => {
+      if (cancelled) return
       if (profile?.gender) setCurrentUserGender(profile.gender)
       setCurrentUserPreferredRegion((profile?.preferred_region as import('@/lib/types').Region | null) ?? null)
+      const n = (profile?.photo_urls ?? []).filter(Boolean).length
+      setSelfPhotoOk(n >= PROFILE_PHOTO_MIN)
     })
-  }, [user?.id])
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, activeTab])
+
+  // 首次進入探索：聊天拼圖解鎖說明（每帳號一次）
+  useEffect(() => {
+    if (!user?.id || activeTab !== 'discover' || !selfPhotoOk) return
+    if (localStorage.getItem(discoverChatPuzzleIntroStorageKey(user.id))) return
+    setShowDiscoverPuzzleIntro(true)
+  }, [user?.id, activeTab, selfPhotoOk])
+
+  useEffect(() => {
+    if (!photoGateToast) return
+    const t = window.setTimeout(() => setPhotoGateToast(false), 4500)
+    return () => window.clearTimeout(t)
+  }, [photoGateToast])
 
   const handleSignOut = async () => {
     await signOut()
@@ -5700,7 +5804,6 @@ export default function MainScreen({
     discover: (
       <DiscoverTab
         userId={user?.id}
-        discoverTabVisible={activeTab === 'discover'}
         discoverDeckDayKey={discoverDeckDayKey}
         discoverDeckRolloverTick={discoverDeckRolloverTick}
         currentUserGender={currentUserGender}
@@ -5709,6 +5812,9 @@ export default function MainScreen({
         creditBalance={creditBalance}
         onOpenSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
+        onDiscoverMatch={() => {
+          void loadLiveMatchThreads()
+        }}
         onCreditAction={(kind) => {
           setRewardFlash({
             variant: kind === 'like' ? 'heart_sent' : 'super_sent',
@@ -5782,6 +5888,12 @@ export default function MainScreen({
         </div>
       )}
 
+      {photoGateToast && user?.id && (
+        <div className="flex-none px-4 py-2.5 bg-amber-50 border-b border-amber-100 text-center text-xs font-semibold text-amber-950">
+          請先在「我的」上傳至少 {PROFILE_PHOTO_MIN} 張生活照，再使用探索。
+        </div>
+      )}
+
       {/* Scrollable content — flex-1 */}
       <main
         ref={contentScrollRef}
@@ -5817,7 +5929,22 @@ export default function MainScreen({
               <button
                 key={tab}
                 type="button"
-                onClick={() => { prevTab.current = activeTab; setActiveTab(tab) }}
+                onClick={() => {
+                  void (async () => {
+                    if (user?.id && tab === 'discover') {
+                      const profile = await getProfile(user.id)
+                      const ok = (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
+                      setSelfPhotoOk(ok)
+                      if (!ok) {
+                        setPhotoGateToast(true)
+                        setActiveTab('profile')
+                        return
+                      }
+                    }
+                    prevTab.current = activeTab
+                    setActiveTab(tab)
+                  })()
+                }}
                 className="flex-1 h-full flex flex-col items-center justify-center gap-0.5 relative"
               >
                 {activeTab === tab && (
@@ -5909,6 +6036,16 @@ export default function MainScreen({
           startChatWith(mid)
         }}
       />
+
+      {user?.id && (
+        <DiscoverPuzzleIntroModal
+          open={showDiscoverPuzzleIntro}
+          onGotIt={() => {
+            localStorage.setItem(discoverChatPuzzleIntroStorageKey(user.id), '1')
+            setShowDiscoverPuzzleIntro(false)
+          }}
+        />
+      )}
     </div>
   )
 }

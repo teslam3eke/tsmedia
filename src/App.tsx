@@ -8,11 +8,12 @@ import SecurityCheckScreen from '@/screens/SecurityCheckScreen'
 import ProfileSetupScreen, { type ProfileSetupData } from '@/screens/ProfileSetupScreen'
 import QuestionnaireScreen from '@/screens/QuestionnaireScreen'
 import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
-import MainScreen from '@/screens/MainScreen'
+import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 
 import { supabase } from '@/lib/supabase'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
+import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
 // profileSetupData is collected but used for future profile enrichment
@@ -74,6 +75,8 @@ export default function App() {
   const [currentProfileName, setCurrentProfileName] = useState<string | null>(null)
   const [termsBusy, setTermsBusy] = useState(false)
   const [termsError, setTermsError] = useState<string | undefined>()
+  /** 進入主畫面時預設分頁：生活照未達標時強制「我的」以便上傳 */
+  const [mainInitialTab, setMainInitialTab] = useState<MainScreenTab>('discover')
 
   const getActiveUser = async () => {
     if (user) return user
@@ -85,6 +88,23 @@ export default function App() {
   const maleNeedsIdentityVerify = (profile: import('@/lib/types').ProfileRow | null) =>
     Boolean(profile?.gender === 'male' && profile.verification_status === 'pending')
 
+  const profileHasMinPhotos = (profile: import('@/lib/types').ProfileRow | null) =>
+    (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
+
+  /** 女生須先完成生活照（使用 Identity 流程中的「生活照上傳」步驟） */
+  const femaleNeedsLifePhotoOnboarding = (profile: import('@/lib/types').ProfileRow | null) =>
+    Boolean(profile?.gender === 'female' && !profileHasMinPhotos(profile))
+
+  const launchMainFromProfile = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (!profile) {
+      setMainInitialTab('discover')
+      go('main')
+      return
+    }
+    setMainInitialTab(profileHasMinPhotos(profile) ? 'discover' : 'profile')
+    go('main')
+  }
+
   // After security check, decide where to go based on profile completeness.
   const routeAfterSecurityCheck = (profile: import('@/lib/types').ProfileRow | null) => {
     if (!hasAcceptedLatestTerms(profile)) return go('terms-consent')
@@ -92,8 +112,9 @@ export default function App() {
     setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
+    if (femaleNeedsLifePhotoOnboarding(profile)) return go('identity-verify')
     if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
-    go('main')
+    launchMainFromProfile(profile)
   }
 
   // Always go through security check first, regardless of progress.
@@ -108,8 +129,9 @@ export default function App() {
     setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
+    if (femaleNeedsLifePhotoOnboarding(profile)) return go('identity-verify')
     if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
-    go('main')
+    launchMainFromProfile(profile)
   }
 
   // ── iOS PWA layout recalc hack ────────────────────────────────────
@@ -270,12 +292,8 @@ export default function App() {
     if (activeUser) {
       await saveQuestionnaire(activeUser.id, entries)
     }
-    // 女生不需要職業驗證，直接進主畫面
-    if (userGender === 'female') {
-      go('main')
-    } else {
-      go('identity-verify')
-    }
+    // 女生：僅生活照（無 onboarding 收入頁）；男生：職業驗證等（皆走 Identity 流程）
+    go('identity-verify')
   }
 
   const handleTermsAccept = async () => {
@@ -311,7 +329,12 @@ export default function App() {
         className="app-container flex flex-col bg-white overflow-hidden"
         style={{ height: 'var(--app-height, 100dvh)' }}
       >
-        <MainScreen user={user} initialDiscoverGender={userGender} onSignOut={() => go('landing')} />
+        <MainScreen
+          user={user}
+          initialDiscoverGender={userGender}
+          initialTab={mainInitialTab}
+          onSignOut={() => go('landing')}
+        />
       </div>
     )
   }
@@ -329,7 +352,7 @@ export default function App() {
         {screen === 'landing' && (
           <LandingScreen
             onStart={() => go('auth')}
-            onSkip={() => go('main')}
+            onSkip={() => launchMainFromProfile(null)}
           />
         )}
 
@@ -386,8 +409,16 @@ export default function App() {
             userId={user?.id}
             claimedName={currentProfileName}
             gender={userGender}
-            onComplete={() => go('main')}
-            onSkip={() => go('main')}
+            onComplete={async () => {
+              const u = await getActiveUser()
+              const profile = u ? await getProfile(u.id) : null
+              launchMainFromProfile(profile)
+            }}
+            onSkip={async () => {
+              const u = await getActiveUser()
+              const profile = u ? await getProfile(u.id) : null
+              launchMainFromProfile(profile)
+            }}
           />
         )}
       </motion.div>
