@@ -6147,20 +6147,20 @@ export default function MainScreen({
                 key={tab}
                 type="button"
                 onClick={() => {
-                  void (async () => {
-                    if (user?.id && tab === 'discover') {
-                      const profile = await getProfile(user.id)
+                  const targetTab = tab
+                  if (user?.id && targetTab === 'discover') {
+                    // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
+                    void getProfile(user.id).then((profile) => {
                       const ok = (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
                       setSelfPhotoOk(ok)
                       if (!ok) {
                         setPhotoGateToast(true)
-                        setActiveTab('profile')
-                        return
+                        setActiveTab((current) => (current === 'discover' ? 'profile' : current))
                       }
-                    }
-                    prevTab.current = activeTab
-                    setActiveTab(tab)
-                  })()
+                    })
+                  }
+                  prevTab.current = activeTab
+                  setActiveTab(targetTab)
                 }}
                 className="flex-1 h-full flex flex-col items-center justify-center gap-0.5 relative"
               >

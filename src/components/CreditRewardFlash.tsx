@@ -49,8 +49,9 @@ export function CreditRewardFlash({
 
   return createPortal(
     <AnimatePresence>
-      {open && (
+      {open ? (
         <motion.div
+          key="credit-reward-flash"
           role="dialog"
           aria-modal="true"
           aria-label={title}
@@ -99,7 +100,7 @@ export function CreditRewardFlash({
             />
           </motion.div>
         </motion.div>
-      )}
+      ) : null}
     </AnimatePresence>,
     document.body,
   )
