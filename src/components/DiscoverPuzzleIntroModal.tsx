@@ -77,8 +77,9 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
 
   return createPortal(
     <AnimatePresence>
-      {open && (
+      {open ? (
         <motion.div
+          key="discover-puzzle-intro-backdrop"
           className="fixed inset-0 z-[360] flex items-end justify-center bg-slate-950/60 px-4 pb-safe pt-10 sm:items-center sm:p-5"
           role="dialog"
           aria-modal="true"
@@ -87,9 +88,11 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
+          onClick={onGotIt}
         >
           <motion.div
             className="relative w-full max-w-[min(100%,380px)] overflow-hidden rounded-[1.75rem] bg-white shadow-2xl shadow-slate-900/25 ring-1 ring-slate-200/90"
+            onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, y: 28, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
@@ -308,7 +311,7 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
             </div>
           </motion.div>
         </motion.div>
-      )}
+      ) : null}
     </AnimatePresence>,
     document.body,
   )

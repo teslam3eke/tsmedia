@@ -990,6 +990,23 @@ function discoverChatPuzzleIntroStorageKey(userId: string) {
   return `tsm-discover-chat-puzzle-intro:v1:${userId}`
 }
 
+function hasSeenDiscoverChatPuzzleIntro(userId: string): boolean {
+  try {
+    return Boolean(localStorage.getItem(discoverChatPuzzleIntroStorageKey(userId)))
+  } catch {
+    return false
+  }
+}
+
+/** iOS 無痕／容量滿時 setItem 可能拋錯；關 modal 不應依賴寫入成功。 */
+function markDiscoverChatPuzzleIntroSeen(userId: string): void {
+  try {
+    localStorage.setItem(discoverChatPuzzleIntroStorageKey(userId), '1')
+  } catch {
+    /* ignore */
+  }
+}
+
 function loadDemoPuzzleClearedSlots(): Record<number, number[]> {
   try {
     const raw = sessionStorage.getItem(DEMO_PUZZLE_CLEARED_KEY)
@@ -5981,7 +5998,7 @@ export default function MainScreen({
   // 首次進入探索：聊天拼圖解鎖說明（每帳號一次）
   useEffect(() => {
     if (!user?.id || activeTab !== 'discover' || !selfPhotoOk) return
-    if (localStorage.getItem(discoverChatPuzzleIntroStorageKey(user.id))) return
+    if (hasSeenDiscoverChatPuzzleIntro(user.id)) return
     setShowDiscoverPuzzleIntro(true)
   }, [user?.id, activeTab, selfPhotoOk])
 
@@ -6241,8 +6258,8 @@ export default function MainScreen({
         <DiscoverPuzzleIntroModal
           open={showDiscoverPuzzleIntro}
           onGotIt={() => {
-            localStorage.setItem(discoverChatPuzzleIntroStorageKey(user.id), '1')
             setShowDiscoverPuzzleIntro(false)
+            markDiscoverChatPuzzleIntroSeen(user.id)
           }}
         />
       )}
