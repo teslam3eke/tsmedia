@@ -1,4 +1,3 @@
-import fs from 'fs'
 import path from 'path'
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
@@ -10,13 +9,17 @@ import { VitePWA } from 'vite-plugin-pwa'
 const APP_BUILD_ID =
   process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? `local-${Date.now()}`
 
+/** 用 Rollup emitFile 納入正式輸出；勿只用 closeBundle 手寫 dist（易與 VitePWA 輸出順序錯開，線上曾出現 build-id.txt 404）。 */
 function emitBuildIdPlugin(): Plugin {
   return {
     name: 'emit-build-id',
-    closeBundle() {
-      const dir = path.resolve(process.cwd(), 'dist')
-      fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(path.join(dir, 'build-id.txt'), `${APP_BUILD_ID}\n`, 'utf8')
+    generateBundle(_opts, _bundle, isWrite) {
+      if (!isWrite) return
+      this.emitFile({
+        type: 'asset',
+        fileName: 'build-id.txt',
+        source: `${APP_BUILD_ID}\n`,
+      })
     },
   }
 }
