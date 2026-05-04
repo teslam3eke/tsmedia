@@ -1208,6 +1208,26 @@ function syncDiscoverDeckSessionCacheProfiles(
   discoverDeckSessionCache = { ...c, profiles: nextProfiles }
 }
 
+/** 探索卡片 UI（目前第幾張、是否看完、是否已捲過說明）：切開分頁時 DiscoverTab 會卸載，用此還原避免每次都回到第一張。 */
+let discoverUiSessionCache: {
+  userId: string
+  dayKey: string
+  deckRefresh: number
+  cardIndex: number
+  done: boolean
+  scrolled: boolean
+} | null = null
+
+function takeDiscoverUiSnapshot(
+  uid: string | undefined,
+  dayKey: string,
+  refreshTick: number,
+): { cardIndex: number; done: boolean; scrolled: boolean } | null {
+  const c = discoverUiSessionCache
+  if (!uid || !c || c.userId !== uid || c.dayKey !== dayKey || c.deckRefresh !== refreshTick) return null
+  return { cardIndex: c.cardIndex, done: c.done, scrolled: c.scrolled }
+}
+
 /** 每晚 10 點換日後，探索名單重載時的短暫慶祝動畫（置於相對定位容器內） */
 function DiscoverDeckRolloverOverlay({ open, tick }: { open: boolean; tick: number }) {
   return (
@@ -1281,9 +1301,11 @@ function DiscoverTab({
   const [liveDeck, setLiveDeck] = useState<Profile[]>([])
   const [liveDeckStatus, setLiveDeckStatus] = useState<'idle' | 'loading' | 'ready'>('idle')
   const [deckRefresh, setDeckRefresh] = useState(0)
+  const discoverUiSnap = userId ? takeDiscoverUiSnapshot(userId, discoverDeckDayKey, deckRefresh) : null
   const [celebrateDeck, setCelebrateDeck] = useState(false)
   const prevRolloverTickRef = useRef(0)
   const prevDiscoverUserIdRef = useRef(userId)
+  const prevDeckRefreshRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (prevDiscoverUserIdRef.current !== userId) {
@@ -1315,16 +1337,22 @@ function DiscoverTab({
     [baseList, blockedKeys, currentUserGender, userId],
   )
 
-  const [index, setIndex] = useState(0)
+  const [index, setIndex] = useState(() => discoverUiSnap?.cardIndex ?? 0)
   const [direction, setDirection] = useState<'next' | 'prev'>('next')
-  const [done, setDone] = useState(false)
-  const [scrolled, setScrolled] = useState(false)
+  const [done, setDone] = useState(() => discoverUiSnap?.done ?? false)
+  const [scrolled, setScrolled] = useState(() => discoverUiSnap?.scrolled ?? false)
   const [showNotifModal, setShowNotifModal] = useState(false)
   const [showNotifPrompt, setShowNotifPrompt] = useState(false)
   const [confirmIntent, setConfirmIntent] = useState<null | 'like' | 'super_like'>(null)
   const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
+  const skipDiscoverIndexScrollResetRef = useRef(true)
+
+  useEffect(() => {
+    if (visibleProfiles.length === 0) return
+    setIndex((i) => Math.min(i, visibleProfiles.length - 1))
+  }, [visibleProfiles.length])
 
   // On first visit to Discover each session, prompt user to enable notifications
   // until they actually grant permission.
@@ -1393,6 +1421,31 @@ function DiscoverTab({
   }, [userId, discoverDeckDayKey, deckRefresh])
 
   useEffect(() => {
+    if (prevDeckRefreshRef.current === null) {
+      prevDeckRefreshRef.current = deckRefresh
+      return
+    }
+    if (prevDeckRefreshRef.current !== deckRefresh) {
+      prevDeckRefreshRef.current = deckRefresh
+      setIndex(0)
+      setDone(false)
+      setScrolled(false)
+    }
+  }, [deckRefresh])
+
+  useEffect(() => {
+    if (!userId) return
+    discoverUiSessionCache = {
+      userId,
+      dayKey: discoverDeckDayKey,
+      deckRefresh,
+      cardIndex: index,
+      done,
+      scrolled,
+    }
+  }, [userId, discoverDeckDayKey, deckRefresh, index, done, scrolled])
+
+  useEffect(() => {
     if (!userId) {
       prevRolloverTickRef.current = discoverDeckRolloverTick
       return
@@ -1403,12 +1456,17 @@ function DiscoverTab({
     setCelebrateDeck(true)
     setIndex(0)
     setDone(false)
+    setScrolled(false)
     const t = window.setTimeout(() => setCelebrateDeck(false), 2800)
     return () => window.clearTimeout(t)
   }, [discoverDeckRolloverTick, userId])
 
-  // Reset hint + card scroll position whenever we switch to a new card
+  // Reset hint + card scroll position when switching cards (skip initial mount so session restore keeps scrolled / scrollTop)
   useEffect(() => {
+    if (skipDiscoverIndexScrollResetRef.current) {
+      skipDiscoverIndexScrollResetRef.current = false
+      return
+    }
     setScrolled(false)
     // Reset outer main scroll too, in case user scrolled outer by mistake
     if (contentScrollRef?.current) contentScrollRef.current.scrollTop = 0
@@ -5308,6 +5366,21 @@ function ProfileTab({
             </motion.button>
           </div>
         </div>
+
+        {profile && (
+          <div className="rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-100">
+            <div className="flex items-start gap-3">
+              <Camera className="mt-0.5 h-5 w-5 shrink-0 text-slate-300" aria-hidden />
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">生活照</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  已上傳 <span className="font-bold text-slate-900">{(profile.photo_urls ?? []).filter(Boolean).length}</span> 張。
+                  預覽、更換與刪除請點下方「編輯個人資訊」—此頁不重複顯示相片縮圖。
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Bio */}
@@ -5739,7 +5812,12 @@ export default function MainScreen({
 
   useEffect(() => {
     void checkRemoteBuildIdAndReload()
-  }, [activeTab])
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void checkRemoteBuildIdAndReload()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
 
   useEffect(() => {
     if (activeTab !== 'messages') setHideTabBarForChatKeyboard(false)
