@@ -358,8 +358,8 @@ function formatDiscoverDeckLoadError(e: unknown): string {
   if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'TimeoutError') {
     /** 字串僅用中文與全形標點，避免 iOS 混入英文或斜線時雙向排版打亂順序 */
     return [
-      '載入要先換發登入，再取探索名單，再簽相片網址，須在時間內做完。這次沒做完。',
-      '若是剛從背景回到本程式，系統可能暫停計時或請求，因而逾時。這通常與無線網路無關。',
+      '取得探索名單與相片簽章須在時間內做完，這次逾時。',
+      '若是剛從背景回到本程式，請求可能較慢或暫停過。這不一定與無線網路品質有關。',
       '請按下方重試載入。或關掉程式後再開一次。',
     ].join('\n\n')
   }
@@ -1458,8 +1458,8 @@ function DiscoverTab({
 
     let cancelled = false
     let timeoutId: ReturnType<typeof setTimeout> | null = null
-    /** 正常冷開約數秒；若前端卡住不必讓使用者乾等一分鐘才看得到錯誤 */
-    const DECK_LOAD_DEADLINE_MS = 12_000
+    /** 僅涵蓋 RPC＋相片簽章；換發登入在 race 外 await，見 `work` 開頭 */
+    const DECK_LOAD_DEADLINE_MS = 22_000
 
     if (!keepStaleVisible) {
       setLiveDeckStatus('loading')
@@ -1472,7 +1472,10 @@ function DiscoverTab({
     ;(async () => {
       try {
         const work = async () => {
-          const { rows, rpcError } = await fetchDailyDiscoverDeck()
+          if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+            await wakeSupabaseAuthFromBackground()
+          }
+          const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
           if (cancelled) return
           if (rpcError) {
             const detail = rpcError.trim() || '（伺服器未附說明）'

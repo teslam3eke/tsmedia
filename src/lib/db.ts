@@ -567,7 +567,7 @@ export type DailyDiscoverRpcRow = {
 }
 
 /** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
-export async function fetchDailyDiscoverDeck(): Promise<{
+export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): Promise<{
   rows: DailyDiscoverRpcRow[]
   /** PostgREST／RPC 失敗時供 UI 顯示；成功為 null */
   rpcError: string | null
@@ -575,9 +575,10 @@ export async function fetchDailyDiscoverDeck(): Promise<{
   /**
    * iOS／PWA：使用者可能在 visibility debounce 完成前就切到探索；此時 JWT 尚未換發，RPC 失敗會吃成空陣列。
    * 先與前景 wake 對齊（mutex 會合併並發），必要時再 wake 重試一次。
+   * `skipWake`：呼叫端已 await 過 wake 時設為 true，避免換發耗時併入 UI 逾時競賽。
    */
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible && !options?.skipWake) await wakeSupabaseAuthFromBackground()
 
   // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
