@@ -3389,6 +3389,7 @@ function ChatRoomView({
   onDemoBlurSpent,
   onDemoPuzzleSlotCleared,
   onBlurUnlockSpent,
+  foregroundReloadNonce,
 }: {
   conversation: Conversation
   currentUserId: string | null
@@ -3402,6 +3403,8 @@ function ChatRoomView({
   onDemoPuzzleSlotCleared?: (profileId: number, slotIndex: number) => void
   /** 拼圖道具成功消耗並解鎖 1 格後。 */
   onBlurUnlockSpent?: () => void
+  /** 前景 wake 後遞增：重綁 Realtime、重抓訊息（避免 WS 僵死後聊天／列表不出貨）。 */
+  foregroundReloadNonce: number
 }) {
   const isLive = Boolean(conversation.matchId && currentUserId)
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -3438,7 +3441,7 @@ function ChatRoomView({
     return () => {
       cancelled = true
     }
-  }, [isLive, conversation.matchId, currentUserId])
+  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId || !currentUserId) return
@@ -3446,7 +3449,7 @@ function ChatRoomView({
       const msg = formatChatMessageFromRow(row, currentUserId)
       setMessages((prev) => mergeUniqueChatMessages(prev, msg))
     })
-  }, [isLive, conversation.matchId, currentUserId])
+  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
@@ -3459,7 +3462,7 @@ function ChatRoomView({
     return () => {
       cancelled = true
     }
-  }, [isLive, conversation.matchId])
+  }, [isLive, conversation.matchId, foregroundReloadNonce])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -3866,6 +3869,7 @@ function MessagesTab({
   onOpenPerson,
   onDemoPuzzleSlotCleared,
   onBlurUnlockSpent,
+  foregroundReloadNonce,
 }: {
   currentUserId: string | null
   liveConversations: Conversation[]
@@ -3881,6 +3885,7 @@ function MessagesTab({
   onOpenPerson?: (p: PersonSummary) => void
   onDemoPuzzleSlotCleared?: (profileId: number, slotIndex: number) => void
   onBlurUnlockSpent?: () => void
+  foregroundReloadNonce: number
 }) {
   const [active, setActive] = useState<Conversation | null>(null)
 
@@ -3914,6 +3919,7 @@ function MessagesTab({
         onChatInputBlur={onChatInputBlur}
         onDemoPuzzleSlotCleared={onDemoPuzzleSlotCleared}
         onBlurUnlockSpent={onBlurUnlockSpent}
+        foregroundReloadNonce={foregroundReloadNonce}
       />
     )
   }
@@ -6004,6 +6010,7 @@ export default function MainScreen({
         blurUnlockBalance={creditBalance.blur_unlock}
         onNeedSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
+        foregroundReloadNonce={foregroundReloadNonce}
         onDemoBlurSpent={() =>
           setCreditBalance((b) => ({
             ...b,
