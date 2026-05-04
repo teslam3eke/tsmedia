@@ -5708,6 +5708,24 @@ export default function MainScreen({
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
 
+  /**
+   * 首次進入主殼（SPA 內導航無新 `pageshow`）：使用者在 onboarding／驗證頁停留過久時 JWT 可能已過期；
+   * 僅依賴「背景↔前景」wake 會漏掉此情況（iOS 特別明顯）。
+   */
+  useEffect(() => {
+    if (!user?.id) return
+    if (document.visibilityState !== 'visible') return
+    let cancelled = false
+    void wakeSupabaseAuthFromBackground().finally(() => {
+      if (cancelled) return
+      void queryClient.invalidateQueries()
+      setForegroundReloadNonce((n) => n + 1)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
+
   /** PWA／記憶體回收後冷啟：先顯示上次配對列表骨架，再由網路結果覆寫（soft reload 也不清空 UI）。 */
   useEffect(() => {
     if (!user?.id) return
