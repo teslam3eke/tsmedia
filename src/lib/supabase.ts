@@ -45,6 +45,14 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
     autoRefreshToken: true,
     detectSessionInUrl: true,
     flowType: 'pkce',
+    /**
+     * 預設使用 Web Locks（navigator.locks）做跨分頁同步。React Strict Mode 會雙掛載、
+     * 加上 wake／invalidate 並發 getSession／refresh 時，容易出現 console：
+     * 「Lock broken by steal」→ 連鎖 Abort → `[db] getProfile error` 其實不是 RLS。
+     * PWA／單頁為主時改用行程內直接執行（不通過 Web Locks）。
+     * 若使用者常開多個同源分頁同時操作登入，再改回預設或自訂較安全的 lock。
+     */
+    lock: async (_name, _acquireTimeout, fn) => fn(),
   },
   db: {
     /** PostgREST：官方逾時；與 global.fetch 並用避免只靠其中一層 */
