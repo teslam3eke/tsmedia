@@ -1182,7 +1182,7 @@ function BlurredProfilePhotoSlideshow({
   )
 }
 
-/** 探索名單記憶體快取：離開分頁會卸載 DiscoverTab，命中時不重打 RPC／不重簽生活照網址 */
+/** 探索名單記憶體快取：離開分頁會卸載 DiscoverTab；命中時不重打 RPC。前景 wake 時 MainScreen 會清空此 cache（見 foregroundReloadNonce effect）。 */
 let discoverDeckSessionCache: {
   userId: string
   dayKey: string
@@ -1352,7 +1352,8 @@ function DiscoverTab({
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
   const skipDiscoverIndexScrollResetRef = useRef(true)
-  const lastDeckWakeNonceRef = useRef(0)
+  /** 與 foregroundReloadNonce 對齊：每次前景喚醒 bump deckRefresh，強制重新打探索 RPC（等同先前「每次更新」行為） */
+  const lastDiscoverWakeBumpNonceRef = useRef(0)
 
   useEffect(() => {
     if (visibleProfiles.length === 0) return
@@ -1399,23 +1400,19 @@ function DiscoverTab({
     })
   }, [foregroundReloadNonce, contentScrollRef])
 
-  // 探索名單：換日／手動「重新載入」／換帳號才請求 RPC；切回探索頁沿用記憶體快取（見 discoverDeckSessionCache）
+  useEffect(() => {
+    if (foregroundReloadNonce === 0) return
+    if (foregroundReloadNonce === lastDiscoverWakeBumpNonceRef.current) return
+    lastDiscoverWakeBumpNonceRef.current = foregroundReloadNonce
+    setDeckRefresh((r) => r + 1)
+  }, [foregroundReloadNonce])
+
+  // 探索名單：換日／手動「重新載入」／換帳號／前景 wake（deckRefresh bump）才請求 RPC；其餘切回探索沿用 session cache
   useEffect(() => {
     if (!userId) {
       setLiveDeckStatus('idle')
       setLiveDeck([])
       return
-    }
-
-    if (
-      foregroundReloadNonce > 0 &&
-      foregroundReloadNonce !== lastDeckWakeNonceRef.current
-    ) {
-      lastDeckWakeNonceRef.current = foregroundReloadNonce
-      const c = discoverDeckSessionCache
-      if (c && c.userId === userId && c.dayKey === discoverDeckDayKey) {
-        discoverDeckSessionCache = null
-      }
     }
 
     const cached = discoverDeckSessionCache
@@ -1458,7 +1455,7 @@ function DiscoverTab({
     return () => {
       cancelled = true
     }
-  }, [userId, discoverDeckDayKey, deckRefresh, foregroundReloadNonce])
+  }, [userId, discoverDeckDayKey, deckRefresh])
 
   useEffect(() => {
     if (prevDeckRefreshRef.current === null) {
@@ -5700,6 +5697,13 @@ export default function MainScreen({
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
 
+  // 探索 RAM cache 的清理由 DiscoverTab effect 負責「只有探索已掛載」時；使用者在聊天／配對時 DiscoverTab 會卸載，
+  // 若只在 DiscoverTab 裡清 cache，回前景後再進探索仍會命中 deckRefresh=0 的舊快取 → 易與過期 JWT／簽名不一致。
+  useEffect(() => {
+    if (foregroundReloadNonce === 0) return
+    discoverDeckSessionCache = null
+  }, [foregroundReloadNonce])
+
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -5809,19 +5813,31 @@ export default function MainScreen({
     }
   }, [user?.id, refreshCredits])
 
+  /** 避免連續觸發 load 時舊請求晚到覆寫新資料；懸置請求時安全逾時仍會關閉 spinner */
+  const liveMatchThreadsLoadGenRef = useRef(0)
+
   const loadLiveMatchThreads = useCallback(async () => {
     if (!user?.id) {
       setLiveMatchThreads([])
       setLiveMatchThreadsLoading(false)
       return
     }
+    const gen = ++liveMatchThreadsLoadGenRef.current
     setLiveMatchThreadsLoading(true)
+    const SAFETY_MS = 22_000
+    const safetyTimer = window.setTimeout(() => {
+      if (liveMatchThreadsLoadGenRef.current !== gen) return
+      setLiveMatchThreadsLoading(false)
+    }, SAFETY_MS)
     try {
       const matches = await getMyMatches(user.id)
+      if (liveMatchThreadsLoadGenRef.current !== gen) return
       const rows: Conversation[] = []
       for (const m of matches) {
+        if (liveMatchThreadsLoadGenRef.current !== gen) return
         const peerId = m.user_a === user.id ? m.user_b : m.user_a
         const p = await getProfile(peerId)
+        if (liveMatchThreadsLoadGenRef.current !== gen) return
         const display = p?.nickname?.trim() || p?.name?.trim() || '配對對象'
         const subtitle =
           p?.company && p?.job_title
@@ -5835,6 +5851,7 @@ export default function MainScreen({
         let photoUrls: string[] | undefined
         if (rawUrls.length > 0) {
           const resolved = await resolvePhotoUrls(rawUrls)
+          if (liveMatchThreadsLoadGenRef.current !== gen) return
           const cleaned = resolved.filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)
           if (cleaned.length > 0) {
             photoUrls = cleaned
@@ -5856,9 +5873,11 @@ export default function MainScreen({
           messages: [],
         })
       }
+      if (liveMatchThreadsLoadGenRef.current !== gen) return
       setLiveMatchThreads(rows)
     } finally {
-      setLiveMatchThreadsLoading(false)
+      window.clearTimeout(safetyTimer)
+      if (liveMatchThreadsLoadGenRef.current === gen) setLiveMatchThreadsLoading(false)
     }
   }, [user?.id])
 
@@ -5891,7 +5910,7 @@ export default function MainScreen({
       setMatchSplash({ matchId: row.id, peerUserId: peerId })
       void loadLiveMatchThreads()
     })
-  }, [user?.id, loadLiveMatchThreads])
+  }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce])
 
   // "Start chat with <id>" — jump to messages tab and tell MessagesTab which
   // conversation to auto-open. If the id isn't a known conversation yet (e.g.
