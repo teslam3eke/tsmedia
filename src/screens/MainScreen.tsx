@@ -1182,33 +1182,6 @@ function BlurredProfilePhotoSlideshow({
   )
 }
 
-/** 探索名單記憶體快取：離開分頁會卸載 DiscoverTab；命中時不重打 RPC。前景 wake 時 MainScreen 會清空此 cache（見 foregroundReloadNonce effect）。 */
-let discoverDeckSessionCache: {
-  userId: string
-  dayKey: string
-  deckRefresh: number
-  profiles: Profile[]
-} | null = null
-
-function syncDiscoverDeckSessionCacheProfiles(
-  uid: string | undefined,
-  dayKey: string,
-  refreshTick: number,
-  nextProfiles: Profile[],
-) {
-  const c = discoverDeckSessionCache
-  if (
-    !uid ||
-    !c ||
-    c.userId !== uid ||
-    c.dayKey !== dayKey ||
-    c.deckRefresh !== refreshTick
-  ) {
-    return
-  }
-  discoverDeckSessionCache = { ...c, profiles: nextProfiles }
-}
-
 /** 探索卡片 UI（目前第幾張、是否看完、是否已捲過說明）：切開分頁時 DiscoverTab 會卸載，用此還原避免每次都回到第一張。 */
 let discoverUiSessionCache: {
   userId: string
@@ -1287,7 +1260,7 @@ function DiscoverTab({
   discoverDeckDayKey: string
   /** 每次換日遞增，供換日動畫只播一次 */
   discoverDeckRolloverTick: number
-  /** 回前景喚醒 auth 後遞增；略過探索 RAM cache 以免過期 JWT 留下的空名單 */
+  /** 回前景喚醒 auth 後遞增；搭配 deckRefresh bump 重抓探索並重設卡片進度 */
   foregroundReloadNonce: number
   currentUserGender: 'male' | 'female'
   preferredRegion: import('@/lib/types').Region | null
@@ -1407,24 +1380,12 @@ function DiscoverTab({
     setDeckRefresh((r) => r + 1)
   }, [foregroundReloadNonce])
 
-  // 探索名單：換日／手動「重新載入」／換帳號／前景 wake（deckRefresh bump）才請求 RPC；其餘切回探索沿用 session cache
+  // 探索名單：每次 effect 皆打 RPC（已取消 RAM session cache 省流）；換日／手動重新載入／前景 wake 時 deckRefresh bump 仍會重設卡片進度。
   useEffect(() => {
     if (!userId) {
       setLiveDeckStatus('idle')
       setLiveDeck([])
       return
-    }
-
-    const cached = discoverDeckSessionCache
-    if (
-      cached &&
-      cached.userId === userId &&
-      cached.dayKey === discoverDeckDayKey &&
-      cached.deckRefresh === deckRefresh
-    ) {
-      setLiveDeck(cached.profiles)
-      setLiveDeckStatus('ready')
-      return () => {}
     }
 
     let cancelled = false
@@ -1438,12 +1399,6 @@ function DiscoverTab({
         if (cancelled) return
         setLiveDeck(profiles)
         setLiveDeckStatus('ready')
-        discoverDeckSessionCache = {
-          userId,
-          dayKey: discoverDeckDayKey,
-          deckRefresh,
-          profiles,
-        }
       } catch (e) {
         console.error('[DiscoverTab] getDailyDiscoverDeck failed:', e)
         if (!cancelled) {
@@ -1570,7 +1525,6 @@ function DiscoverTab({
           const next = prev.map((p) =>
             p.userId === profile.userId ? { ...p, likedToday: true } : p
           )
-          syncDiscoverDeckSessionCacheProfiles(userId, discoverDeckDayKey, deckRefresh, next)
           return next
         })
       }
@@ -1579,7 +1533,6 @@ function DiscoverTab({
           const next = prev.map((p) =>
             p.userId === profile.userId ? { ...p, superLikedToday: true } : p
           )
-          syncDiscoverDeckSessionCacheProfiles(userId, discoverDeckDayKey, deckRefresh, next)
           return next
         })
       }
@@ -5702,13 +5655,6 @@ export default function MainScreen({
   const [photoGateToast, setPhotoGateToast] = useState(false)
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
-
-  // 探索 RAM cache 的清理由 DiscoverTab effect 負責「只有探索已掛載」時；使用者在聊天／配對時 DiscoverTab 會卸載，
-  // 若只在 DiscoverTab 裡清 cache，回前景後再進探索仍會命中 deckRefresh=0 的舊快取 → 易與過期 JWT／簽名不一致。
-  useEffect(() => {
-    if (foregroundReloadNonce === 0) return
-    discoverDeckSessionCache = null
-  }, [foregroundReloadNonce])
 
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
