@@ -19,7 +19,7 @@ import {
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
   getUnreadAppNotifications, markAppNotificationRead,
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
-  recordProfileInteraction, getDailyDiscoverDeck, submitProfileReport, blockProfile,
+  recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   getPhotoUnlockState,
   getMyMatches, getMatchMessages, sendMatchMessage, subscribeToMatchMessages,
@@ -352,6 +352,24 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
     likedToday: Boolean(row.liked_today),
     superLikedToday: Boolean(row.super_liked_today),
   }
+}
+
+function formatDiscoverDeckLoadError(e: unknown): string {
+  if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'TimeoutError') {
+    return '等待逾時（網路或登入狀態過慢）。可開飛航再關閉、滑掉 App 重開，或點下方重試。'
+  }
+  if (e instanceof DOMException && e.name === 'AbortError') {
+    return '連線中斷或逾時（Abort）。請確認網路後重試。'
+  }
+  if (e instanceof Error) {
+    const m = e.message.trim()
+    if (m === '探索載入逾時' || m.toLowerCase().includes('timeout')) {
+      return '載入逾時。請重試或稍後再試。'
+    }
+    return m.length > 320 ? `${m.slice(0, 320)}…` : m
+  }
+  const s = String(e)
+  return s.length > 320 ? `${s.slice(0, 320)}…` : s
 }
 
 /** 將資料庫個人檔案轉成配對／聊天詳情用的 Profile（與探索卡版面一致）。 */
@@ -1295,6 +1313,8 @@ function DiscoverTab({
   const [blockedKeys, setBlockedKeys] = useState<string[]>([])
   const [liveDeck, setLiveDeck] = useState<Profile[]>([])
   const [liveDeckStatus, setLiveDeckStatus] = useState<'idle' | 'loading' | 'ready'>('idle')
+  /** RPC／逾時／例外時直接顯示在探索頁，方便 iOS 使用者回報 */
+  const [deckLoadDiagnostic, setDeckLoadDiagnostic] = useState<string | null>(null)
   const [deckRefresh, setDeckRefresh] = useState(0)
   const liveDeckRef = useRef<Profile[]>([])
   liveDeckRef.current = liveDeck
@@ -1407,6 +1427,7 @@ function DiscoverTab({
       lastDeckFetchCtxRef.current = null
       setLiveDeckStatus('idle')
       setLiveDeck([])
+      setDeckLoadDiagnostic(null)
       return
     }
 
@@ -1419,29 +1440,62 @@ function DiscoverTab({
     const keepStaleVisible = !ctxChanged && liveDeckRef.current.length > 0
 
     let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const DECK_LOAD_DEADLINE_MS = 48_000
+
     if (!keepStaleVisible) {
       setLiveDeckStatus('loading')
       setLiveDeck([])
+      setDeckLoadDiagnostic(null)
     }
+
+    let phase: 'rpc' | 'photos' = 'rpc'
 
     ;(async () => {
       try {
-        const rows = await getDailyDiscoverDeck()
-        if (cancelled) return
-        const profiles = await Promise.all(rows.map((r, i) => mapDailyDiscoverRow(r, i)))
-        if (cancelled) return
-        setLiveDeck(profiles)
-        setLiveDeckStatus('ready')
+        const work = async () => {
+          const { rows, rpcError } = await fetchDailyDiscoverDeck()
+          if (cancelled) return
+          if (rpcError) {
+            setDeckLoadDiagnostic(`探索名單（伺服器）：${rpcError}`)
+            if (!keepStaleVisible) setLiveDeck([])
+            setLiveDeckStatus('ready')
+            return
+          }
+          phase = 'photos'
+          const profiles = await Promise.all(rows.map((r, i) => mapDailyDiscoverRow(r, i)))
+          if (cancelled) return
+          setDeckLoadDiagnostic(null)
+          setLiveDeck(profiles)
+          setLiveDeckStatus('ready')
+        }
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = window.setTimeout(() => {
+            reject(Object.assign(new Error('探索載入逾時'), { name: 'TimeoutError' }))
+          }, DECK_LOAD_DEADLINE_MS)
+        })
+
+        await Promise.race([work(), timeoutPromise])
       } catch (e) {
-        console.error('[DiscoverTab] getDailyDiscoverDeck failed:', e)
+        console.error('[DiscoverTab] deck load failed:', e)
         if (!cancelled) {
+          const where = phase === 'rpc' ? '探索名單' : '相片簽章／Storage'
+          setDeckLoadDiagnostic(`${where}：${formatDiscoverDeckLoadError(e)}`)
           if (!keepStaleVisible) setLiveDeck([])
           setLiveDeckStatus('ready')
         }
+      } finally {
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId)
+          timeoutId = null
+        }
       }
     })()
+
     return () => {
       cancelled = true
+      if (timeoutId != null) window.clearTimeout(timeoutId)
     }
   }, [userId, discoverDeckDayKey, deckRefresh])
 
@@ -1627,18 +1681,47 @@ function DiscoverTab({
         <div className="w-12 h-12 rounded-full border-2 border-slate-200 border-t-slate-700 animate-spin mb-4" />
         <p className="text-slate-600 font-semibold text-sm">載入今日探索名單</p>
         <p className="text-slate-400 text-xs mt-2 max-w-[18rem]">每晚 10 點更新。</p>
+        <p className="text-slate-400 text-[11px] mt-3 max-w-[19rem] leading-relaxed">
+          若超過約 48 秒仍停在此畫面，會自動改為顯示錯誤說明（可截圖回報）。
+        </p>
         </div>
       </div>
     )
   }
 
   if (visibleProfiles.length === 0 || done || !profile) {
-    const emptyLive = Boolean(userId && liveDeckStatus === 'ready' && visibleProfiles.length === 0 && !done)
+    const deckLoadFailed = Boolean(
+      userId && deckLoadDiagnostic && liveDeckStatus === 'ready' && visibleProfiles.length === 0 && !done,
+    )
+    const emptyLive = Boolean(
+      userId && liveDeckStatus === 'ready' && visibleProfiles.length === 0 && !done && !deckLoadDiagnostic,
+    )
     const emptyDemo = !userId && visibleProfiles.length === 0 && !done
     return (
       <div className="relative flex flex-col h-full">
         <DiscoverDeckRolloverOverlay open={celebrateDeck} tick={discoverDeckRolloverTick} />
         <div className="flex flex-col items-center justify-center h-full text-center px-8">
+        {deckLoadFailed ? (
+          <div className="w-full max-w-sm">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-left shadow-sm ring-1 ring-rose-100/80">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-rose-900/80">無法載入探索（除錯資訊）</p>
+              <p className="mt-2 whitespace-pre-wrap break-words text-[13px] font-semibold leading-relaxed text-rose-950">
+                {deckLoadDiagnostic}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDeckLoadDiagnostic(null)
+                setDeckRefresh((n) => n + 1)
+              }}
+              className="mt-6 w-full px-5 py-3 bg-slate-900 text-white text-sm font-semibold rounded-2xl"
+            >
+              重試載入
+            </button>
+          </div>
+        ) : (
+          <>
         <div className="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4">
           <Sparkles className="w-9 h-9 text-slate-300" />
         </div>
@@ -1668,6 +1751,8 @@ function DiscoverTab({
             >
               重新瀏覽
             </button>
+          </>
+        )}
           </>
         )}
         </div>

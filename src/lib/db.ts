@@ -567,10 +567,14 @@ export type DailyDiscoverRpcRow = {
 }
 
 /** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
-export async function getDailyDiscoverDeck(): Promise<DailyDiscoverRpcRow[]> {
+export async function fetchDailyDiscoverDeck(): Promise<{
+  rows: DailyDiscoverRpcRow[]
+  /** PostgREST／RPC 失敗時供 UI 顯示；成功為 null */
+  rpcError: string | null
+}> {
   /**
-   * iOS／PWA：使用者可能在 visibility debounce 完成前就切到探索；此時 JWT 尚未換發，RPC 失敗會被吃成 []，
-   * 畫面像「後端沒資料」。先與前景 wake 對齊（mutex 會合併並發），必要時再 wake 重試一次。
+   * iOS／PWA：使用者可能在 visibility debounce 完成前就切到探索；此時 JWT 尚未換發，RPC 失敗會吃成空陣列。
+   * 先與前景 wake 對齊（mutex 會合併並發），必要時再 wake 重試一次。
    */
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
   if (visible) await wakeSupabaseAuthFromBackground()
@@ -586,16 +590,32 @@ export async function getDailyDiscoverDeck(): Promise<DailyDiscoverRpcRow[]> {
   }
 
   if (error) {
-    // PostgREST 常見：函式內 raise / SQL 錯誤 → 400；見 error.details / hint
     console.error('[db] getDailyDiscoverDeck error:', error.message, error)
-    return []
+    const errObj = error as { message?: string; details?: string; hint?: string; code?: string }
+    const detail = [errObj.message, errObj.details, errObj.hint, errObj.code ? `code:${errObj.code}` : '']
+      .filter(Boolean)
+      .join(' · ')
+    return { rows: [], rpcError: detail || '無法取得探索名單（RPC 錯誤）' }
   }
-  if (data == null) return []
-  const parsed = Array.isArray(data)
-    ? data
-    : (typeof data === 'string' ? (JSON.parse(data) as unknown) : [])
-  if (!Array.isArray(parsed)) return []
-  return parsed as DailyDiscoverRpcRow[]
+  if (data == null) return { rows: [], rpcError: null }
+  try {
+    const parsed = Array.isArray(data)
+      ? data
+      : (typeof data === 'string' ? (JSON.parse(data) as unknown) : [])
+    if (!Array.isArray(parsed)) {
+      return { rows: [], rpcError: '伺服器回傳格式異常（預期為陣列）' }
+    }
+    return { rows: parsed as DailyDiscoverRpcRow[], rpcError: null }
+  } catch (parseErr) {
+    const msg = parseErr instanceof Error ? parseErr.message : String(parseErr)
+    return { rows: [], rpcError: `解析探索名單失敗：${msg}` }
+  }
+}
+
+/** 與 {@link fetchDailyDiscoverDeck} 相同來源；不需錯誤字串時用此簡寫。 */
+export async function getDailyDiscoverDeck(): Promise<DailyDiscoverRpcRow[]> {
+  const { rows } = await fetchDailyDiscoverDeck()
+  return rows
 }
 
 export async function recordProfileInteraction(payload: {
