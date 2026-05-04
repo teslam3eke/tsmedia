@@ -733,7 +733,8 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
   }
 }
 
-export async function getMyMatches(userId: string): Promise<MatchRow[]> {
+/** 成功為陣列（可能為空）；失敗為 null — 勿覆寫畫面上既有資料（PWA 回前景時 JWT 尚未好常誤判成「沒配對」）。 */
+export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
   const { data, error } = await supabase
     .from('matches')
     .select('*')
@@ -742,7 +743,7 @@ export async function getMyMatches(userId: string): Promise<MatchRow[]> {
 
   if (error) {
     console.error('[db] getMyMatches error:', error.message)
-    return []
+    return null
   }
   return (data ?? []) as MatchRow[]
 }
@@ -777,7 +778,8 @@ export function subscribeToNewMatches(
   }
 }
 
-export async function getMatchMessages(matchId: string): Promise<MessageRow[]> {
+/** 成功為陣列（可能為空）；失敗為 null — 前景重載時勿清空聊天（避免誤以為訊息遺失）。 */
+export async function getMatchMessages(matchId: string): Promise<MessageRow[] | null> {
   const { data, error } = await supabase
     .from('messages')
     .select('*')
@@ -786,7 +788,7 @@ export async function getMatchMessages(matchId: string): Promise<MessageRow[]> {
 
   if (error) {
     console.error('[db] getMatchMessages error:', error.message)
-    return []
+    return null
   }
   return (data ?? []) as MessageRow[]
 }

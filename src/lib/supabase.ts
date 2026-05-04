@@ -73,6 +73,8 @@ let wakeMutex: Promise<void> | null = null
  * 務必 **await 整段 refresh 結束** 才釋放 mutex：先前用 `Promise.race` 提前 resolve 時，
  * mutex 已清空但 `refreshSession()` 仍在跑 → 下次前景又開一輪 refresh → auth／請求互卡。
  * 換發後對 Realtime `setAuth`，並 **disconnect→connect** 甩掉進背景後僵死的 WS（否則只有 REST 正常、訂閱／部分流程仍像全壞）。
+ *
+ * 與 TanStack Query（`refetchOnWindowFocus` 等）分工：此函式負責 JWT／Realtime；Query 負責已掛 `useQuery` 的資料。
  */
 export function wakeSupabaseAuthFromBackground(): Promise<void> {
   if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {

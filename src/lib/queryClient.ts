@@ -4,12 +4,23 @@ import { QueryClient } from '@tanstack/react-query'
 export const QUERY_CACHE_STORAGE_KEY = 'tsmedia-tanstack-query'
 
 /**
- * TanStack Query 全域預設（之後遷移 `useQuery` 時會自動套用）：
- * - refetchOnWindowFocus：文件 visibility 回到 visible 時 refetch（含多數手機 PWA）
- * - refetchOnReconnect：`online` 事件
+ * ── PWA／前景資料策略（與 MainScreen 手動抓取並存）────────────────────────────
  *
- * **Persist（localStorage）**：被系統殺掉後冷啟可先還原「已快取的 queries」；容量有限、敏感資料勿進 cache。
- * 登出時務必 `clearAppQueryCache()` 以免下一位使用者看到殘留 dehydrated 資料。
+ * 1. **全域 Refetch（TanStack Query）**
+ *    `refetchOnWindowFocus` + `refetchOnReconnect` 已開啟；手機 PWA 未必會觸發 window
+ *    focus，故見 `main.tsx` 用 `focusManager` + `visibilitychange`／`pageshow` 對齊。
+ *
+ * 2. **Session 恢復（Supabase）**
+ *    GoTrue `autoRefreshToken` + `persistSession` 見 `supabase.ts`；iOS 進背景計時器暫停
+ *    時不足以換發 JWT，須再呼叫 `wakeSupabaseAuthFromBackground`（同上檔；MainScreen
+ *    `visibility`／`online` 已接）。
+ *
+ * 3. **持久化 Cache（可選）**
+ *    `PersistQueryClientProvider` + `createSyncStoragePersister` 見 `main.tsx`；冷啟可先還原
+ *    已快取的 `useQuery`（敏感資料請在 query `meta.persistOffline === false` 排除）。
+ *    主殼探索／配對／聊天仍多以元件 state + sessionStorage 為主，與此並行。
+ *
+ * 登出務必 `clearAppQueryCache()`，避免下一使用者看到 dehydrated 資料。
  */
 export const queryClient = new QueryClient({
   defaultOptions: {
