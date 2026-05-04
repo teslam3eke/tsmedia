@@ -356,15 +356,22 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
 
 function formatDiscoverDeckLoadError(e: unknown): string {
   if (e && typeof e === 'object' && 'name' in e && (e as { name?: string }).name === 'TimeoutError') {
-    return '等待逾時（網路或登入狀態過慢）。可開飛航再關閉、滑掉 App 重開，或點下方重試。'
+    return [
+      '這段載入在時間上限內沒跑完（登入換發 → 探索名單 → 多張相片簽章）。',
+      'iOS／主畫面 PWA 從背景回來時，常是計時器或 fetch 卡住，看起來像逾時，不一定是網路斷線。',
+      '可試：點下方重試，或滑掉 App 完全重開。',
+    ].join(' ')
   }
   if (e instanceof DOMException && e.name === 'AbortError') {
-    return '連線中斷或逾時（Abort）。請確認網路後重試。'
+    return [
+      '請求被中止（Abort）。常見是客戶端逾時保護、或 WebKit 暫停執行，不一定是 Wi‑Fi 問題。',
+      '請點重試；仍發生可重開 App。',
+    ].join(' ')
   }
   if (e instanceof Error) {
     const m = e.message.trim()
     if (m === '探索載入逾時' || m.toLowerCase().includes('timeout')) {
-      return '載入逾時。請重試或稍後再試。'
+      return '整段探索載入逾時。若您確認網路正常，多半是手機/Web App 回前景後腳本或請求卡住，請重試或重開 App。'
     }
     return m.length > 320 ? `${m.slice(0, 320)}…` : m
   }
@@ -1441,7 +1448,8 @@ function DiscoverTab({
 
     let cancelled = false
     let timeoutId: ReturnType<typeof setTimeout> | null = null
-    const DECK_LOAD_DEADLINE_MS = 48_000
+    /** 正常冷開約數秒；若前端卡住不必讓使用者乾等一分鐘才看得到錯誤 */
+    const DECK_LOAD_DEADLINE_MS = 12_000
 
     if (!keepStaleVisible) {
       setLiveDeckStatus('loading')
@@ -1682,7 +1690,7 @@ function DiscoverTab({
         <p className="text-slate-600 font-semibold text-sm">載入今日探索名單</p>
         <p className="text-slate-400 text-xs mt-2 max-w-[18rem]">每晚 10 點更新。</p>
         <p className="text-slate-400 text-[11px] mt-3 max-w-[19rem] leading-relaxed">
-          若超過約 48 秒仍停在此畫面，會自動改為顯示錯誤說明（可截圖回報）。
+          若超過約 12 秒仍停在此畫面，會顯示錯誤說明（正常載入通常更快）。
         </p>
         </div>
       </div>
