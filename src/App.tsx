@@ -162,7 +162,11 @@ export default function App() {
     }
 
     const update = () => {
-      document.documentElement.style.setProperty('--app-height', `${vv.height}px`)
+      // 切回前景瞬間 vv.height 偶為 0／極小，會把主殼壓扁且觸控區錯位。
+      const raw = vv.height
+      const fallback = window.innerHeight || document.documentElement.clientHeight || 600
+      const h = raw > 96 ? raw : fallback
+      document.documentElement.style.setProperty('--app-height', `${h}px`)
       // Additionally, forcibly un-scroll the document. While typing, iOS
       // likes to scroll html/body to keep the caret on-screen — since our
       // container already matches the visible viewport, any such scroll
@@ -179,6 +183,10 @@ export default function App() {
     const onResume = () => {
       if (document.visibilityState !== 'visible') return
       update()
+      requestAnimationFrame(() => {
+        update()
+        window.dispatchEvent(new Event('resize'))
+      })
     }
     document.addEventListener('visibilitychange', onResume)
     window.addEventListener('pageshow', onResume)

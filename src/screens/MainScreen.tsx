@@ -1375,32 +1375,29 @@ function DiscoverTab({
     getMyBlockedProfileKeys().then(setBlockedKeys)
   }, [userId])
 
-  // iOS PWA：背景切回後 WebKit 捲動命中／overlay 偶爾異常；僅輕推 scroll，避免與前景 auth refresh 並發搶 Supabase lock。
+  // 父層 foreground nonce 在 JWT 換發後才遞增：關浮層 + 輕推 scroll（合併減少與 auth / vv 競態）。
   useEffect(() => {
-    const onResume = () => {
-      if (document.visibilityState !== 'visible') return
-      requestAnimationFrame(() => {
-        const el = cardScrollRef.current
-        if (el) {
-          const t = el.scrollTop
-          el.scrollTop = t > 0 ? t - 1 : 1
-          el.scrollTop = t
-        }
-        const outer = contentScrollRef?.current
-        if (outer) {
-          const ot = outer.scrollTop
-          outer.scrollTop = ot > 0 ? ot - 1 : 1
-          outer.scrollTop = ot
-        }
-      })
-    }
-    document.addEventListener('visibilitychange', onResume)
-    window.addEventListener('pageshow', onResume)
-    return () => {
-      document.removeEventListener('visibilitychange', onResume)
-      window.removeEventListener('pageshow', onResume)
-    }
-  }, [contentScrollRef])
+    if (foregroundReloadNonce === 0) return
+    setConfirmIntent(null)
+    setShowNotifModal(false)
+    setShowNotifPrompt(false)
+    setReportTarget(null)
+    setBlockTarget(null)
+    requestAnimationFrame(() => {
+      const el = cardScrollRef.current
+      if (el) {
+        const t = el.scrollTop
+        el.scrollTop = t > 0 ? t - 1 : 1
+        el.scrollTop = t
+      }
+      const outer = contentScrollRef?.current
+      if (outer) {
+        const ot = outer.scrollTop
+        outer.scrollTop = ot > 0 ? ot - 1 : 1
+        outer.scrollTop = ot
+      }
+    })
+  }, [foregroundReloadNonce, contentScrollRef])
 
   // 探索名單：換日／手動「重新載入」／換帳號才請求 RPC；切回探索頁沿用記憶體快取（見 discoverDeckSessionCache）
   useEffect(() => {
@@ -5297,7 +5294,7 @@ function ProfileTab({
     loadNotifications()
     const intervalId = window.setInterval(loadNotifications, 5_000)
     return () => window.clearInterval(intervalId)
-  }, [userId, profile?.verification_status, profile?.income_tier, foregroundReloadNonce])
+  }, [userId, profile?.verification_status, profile?.income_tier])
 
   const dismissAppNotification = async (notificationId: string) => {
     setAppNotifications((prev) => prev.filter((n) => n.id !== notificationId))
@@ -5712,9 +5709,13 @@ export default function MainScreen({
       debounceTimer = setTimeout(() => {
         debounceTimer = null
         void wakeSupabaseAuthFromBackground().finally(() => {
+          // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
+          setRewardFlash(null)
+          setMatchSplash(null)
+          setShowDiscoverPuzzleIntro(false)
           setForegroundReloadNonce((n) => n + 1)
         })
-      }, 150)
+      }, 280)
     }
 
     document.addEventListener('visibilitychange', schedule)
