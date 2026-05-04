@@ -1,6 +1,6 @@
 /**
  * 從伺服器讀取本次部署的 build-id，與目前 bundle 內嵌版本比對。
- * 不一致時強制重新載入以取得最新前端（優先 /api/build-id，備援 /build-id.txt）。
+ * 不一致時強制重新載入以取得最新前端（優先 /api/git-sha，備援 /build-id.txt）。
  *
  * 僅 reload() 時，舊 Service Worker 仍可能持續用 precache 餵舊 HTML/JS（尤其「加到主畫面」的 PWA）。
  * 因此在 mismatch 時先 unregister SW + 清掉本網域 Cache Storage，再重整。
@@ -26,7 +26,7 @@ async function unregisterSwAndClearSiteCaches(): Promise<void> {
 
 async function fetchRemoteBuildId(): Promise<string | null> {
   const cb = Date.now()
-  const urls = [`/api/build-id?cb=${cb}`, `/build-id.txt?cb=${cb}`]
+  const urls = [`/api/git-sha?cb=${cb}`, `/build-id.txt?cb=${cb}`]
   for (const url of urls) {
     try {
       const res = await fetch(url, {

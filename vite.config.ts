@@ -43,7 +43,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ url }) =>
-              url.pathname === '/api/build-id' || url.pathname.endsWith('/api/build-id'),
+              url.pathname === '/api/git-sha' || url.pathname.endsWith('/api/git-sha'),
             handler: 'NetworkOnly',
           },
           {
