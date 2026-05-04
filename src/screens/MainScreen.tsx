@@ -1370,6 +1370,38 @@ function DiscoverTab({
     getMyBlockedProfileKeys().then(setBlockedKeys)
   }, [userId])
 
+  // iOS PWA：背景切回後 Framer 全螢幕層或對話框偶爾留在可點層，探索會「按了沒反應」。回到前景時關閉探索內浮層並輕推 scroll 強制 WebKit 重建命中測試。
+  useEffect(() => {
+    const onResume = () => {
+      if (document.visibilityState !== 'visible') return
+      setConfirmIntent(null)
+      setShowNotifModal(false)
+      setShowNotifPrompt(false)
+      setReportTarget(null)
+      setBlockTarget(null)
+      requestAnimationFrame(() => {
+        const el = cardScrollRef.current
+        if (el) {
+          const t = el.scrollTop
+          el.scrollTop = t > 0 ? t - 1 : 1
+          el.scrollTop = t
+        }
+        const outer = contentScrollRef?.current
+        if (outer) {
+          const ot = outer.scrollTop
+          outer.scrollTop = ot > 0 ? ot - 1 : 1
+          outer.scrollTop = ot
+        }
+      })
+    }
+    document.addEventListener('visibilitychange', onResume)
+    window.addEventListener('pageshow', onResume)
+    return () => {
+      document.removeEventListener('visibilitychange', onResume)
+      window.removeEventListener('pageshow', onResume)
+    }
+  }, [contentScrollRef])
+
   // 探索名單：換日／手動「重新載入」／換帳號才請求 RPC；切回探索頁沿用記憶體快取（見 discoverDeckSessionCache）
   useEffect(() => {
     if (!userId) {
@@ -5366,21 +5398,6 @@ function ProfileTab({
             </motion.button>
           </div>
         </div>
-
-        {profile && (
-          <div className="rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-100">
-            <div className="flex items-start gap-3">
-              <Camera className="mt-0.5 h-5 w-5 shrink-0 text-slate-300" aria-hidden />
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">生活照</p>
-                <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                  已上傳 <span className="font-bold text-slate-900">{(profile.photo_urls ?? []).filter(Boolean).length}</span> 張。
-                  預覽、更換與刪除請點下方「編輯個人資訊」—此頁不重複顯示相片縮圖。
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Bio */}

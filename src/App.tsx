@@ -174,9 +174,20 @@ export default function App() {
     update()
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
+
+    // iOS PWA：切到其他 App 再回來時，visualViewport / 捲動偶爾卡住，主螢幕高度與觸控區會錯位。
+    const onResume = () => {
+      if (document.visibilityState !== 'visible') return
+      update()
+    }
+    document.addEventListener('visibilitychange', onResume)
+    window.addEventListener('pageshow', onResume)
+
     return () => {
       vv.removeEventListener('resize', update)
       vv.removeEventListener('scroll', update)
+      document.removeEventListener('visibilitychange', onResume)
+      window.removeEventListener('pageshow', onResume)
       document.documentElement.style.removeProperty('--app-height')
     }
   }, [screen])
