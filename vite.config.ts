@@ -13,8 +13,8 @@ const APP_BUILD_ID =
 function emitBuildIdPlugin(): Plugin {
   return {
     name: 'emit-build-id',
-    generateBundle(_opts, _bundle, isWrite) {
-      if (!isWrite) return
+    // 勿依賴 isWrite：部分 Rollup/Vite 路徑下為 false，會導致 build-id 未 emit、線上 404。
+    generateBundle() {
       this.emitFile({
         type: 'asset',
         fileName: 'build-id.txt',
