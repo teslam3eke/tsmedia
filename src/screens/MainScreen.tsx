@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
+import { wakeSupabaseAuthFromBackground } from '@/lib/supabase'
 import {
   getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification,
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
@@ -1271,6 +1272,7 @@ function DiscoverTab({
   userId,
   discoverDeckDayKey,
   discoverDeckRolloverTick,
+  foregroundReloadNonce,
   currentUserGender,
   preferredRegion,
   contentScrollRef,
@@ -1285,6 +1287,8 @@ function DiscoverTab({
   discoverDeckDayKey: string
   /** 每次換日遞增，供換日動畫只播一次 */
   discoverDeckRolloverTick: number
+  /** 回前景喚醒 auth 後遞增；略過探索 RAM cache 以免過期 JWT 留下的空名單 */
+  foregroundReloadNonce: number
   currentUserGender: 'male' | 'female'
   preferredRegion: import('@/lib/types').Region | null
   contentScrollRef?: React.RefObject<HTMLDivElement | null>
@@ -1348,6 +1352,7 @@ function DiscoverTab({
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
   const skipDiscoverIndexScrollResetRef = useRef(true)
+  const lastDeckWakeNonceRef = useRef(0)
 
   useEffect(() => {
     if (visibleProfiles.length === 0) return
@@ -1370,15 +1375,10 @@ function DiscoverTab({
     getMyBlockedProfileKeys().then(setBlockedKeys)
   }, [userId])
 
-  // iOS PWA：背景切回後 Framer 全螢幕層或對話框偶爾留在可點層，探索會「按了沒反應」。回到前景時關閉探索內浮層並輕推 scroll 強制 WebKit 重建命中測試。
+  // iOS PWA：背景切回後 WebKit 捲動命中／overlay 偶爾異常；僅輕推 scroll，避免與前景 auth refresh 並發搶 Supabase lock。
   useEffect(() => {
     const onResume = () => {
       if (document.visibilityState !== 'visible') return
-      setConfirmIntent(null)
-      setShowNotifModal(false)
-      setShowNotifPrompt(false)
-      setReportTarget(null)
-      setBlockTarget(null)
       requestAnimationFrame(() => {
         const el = cardScrollRef.current
         if (el) {
@@ -1408,6 +1408,17 @@ function DiscoverTab({
       setLiveDeckStatus('idle')
       setLiveDeck([])
       return
+    }
+
+    if (
+      foregroundReloadNonce > 0 &&
+      foregroundReloadNonce !== lastDeckWakeNonceRef.current
+    ) {
+      lastDeckWakeNonceRef.current = foregroundReloadNonce
+      const c = discoverDeckSessionCache
+      if (c && c.userId === userId && c.dayKey === discoverDeckDayKey) {
+        discoverDeckSessionCache = null
+      }
     }
 
     const cached = discoverDeckSessionCache
@@ -1450,7 +1461,7 @@ function DiscoverTab({
     return () => {
       cancelled = true
     }
-  }, [userId, discoverDeckDayKey, deckRefresh])
+  }, [userId, discoverDeckDayKey, deckRefresh, foregroundReloadNonce])
 
   useEffect(() => {
     if (prevDeckRefreshRef.current === null) {
@@ -5234,12 +5245,14 @@ function SectionHeading({ label, hint }: { label: string; hint?: string }) {
 
 function ProfileTab({
   userId,
+  foregroundReloadNonce,
   onSignOut,
   creditBalance,
   onRefreshCredits,
   onOpenSubscription,
 }: {
   userId: string
+  foregroundReloadNonce: number
   onSignOut: () => void
   creditBalance: CreditBalance
   onRefreshCredits: () => void
@@ -5263,7 +5276,7 @@ function ProfileTab({
       if (stats) setTabStats(stats)
     }
     load()
-  }, [userId])
+  }, [userId, foregroundReloadNonce])
 
   useEffect(() => {
     if (!userId) return
@@ -5284,7 +5297,7 @@ function ProfileTab({
     loadNotifications()
     const intervalId = window.setInterval(loadNotifications, 5_000)
     return () => window.clearInterval(intervalId)
-  }, [userId, profile?.verification_status, profile?.income_tier])
+  }, [userId, profile?.verification_status, profile?.income_tier, foregroundReloadNonce])
 
   const dismissAppNotification = async (notificationId: string) => {
     setAppNotifications((prev) => prev.filter((n) => n.id !== notificationId))
@@ -5687,6 +5700,31 @@ export default function MainScreen({
   const [selfPhotoOk, setSelfPhotoOk] = useState(true)
   const [showDiscoverPuzzleIntro, setShowDiscoverPuzzleIntro] = useState(false)
   const [photoGateToast, setPhotoGateToast] = useState(false)
+  /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
+  const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
+
+  useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+    const schedule = () => {
+      if (document.visibilityState !== 'visible') return
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null
+        void wakeSupabaseAuthFromBackground().finally(() => {
+          setForegroundReloadNonce((n) => n + 1)
+        })
+      }, 150)
+    }
+
+    document.addEventListener('visibilitychange', schedule)
+    window.addEventListener('pageshow', schedule)
+    return () => {
+      document.removeEventListener('visibilitychange', schedule)
+      window.removeEventListener('pageshow', schedule)
+      if (debounceTimer) clearTimeout(debounceTimer)
+    }
+  }, [])
 
   useEffect(() => {
     if (!user?.id) {
@@ -5828,6 +5866,11 @@ export default function MainScreen({
   }, [loadLiveMatchThreads])
 
   useEffect(() => {
+    if (!user?.id || foregroundReloadNonce === 0) return
+    void loadLiveMatchThreads()
+  }, [user?.id, foregroundReloadNonce, loadLiveMatchThreads])
+
+  useEffect(() => {
     void checkRemoteBuildIdAndReload()
     const onVisibility = () => {
       if (document.visibilityState === 'visible') void checkRemoteBuildIdAndReload()
@@ -5875,7 +5918,12 @@ export default function MainScreen({
     return () => {
       cancelled = true
     }
-  }, [user?.id, activeTab])
+  }, [user?.id, activeTab, foregroundReloadNonce])
+
+  useEffect(() => {
+    if (!user?.id || foregroundReloadNonce === 0) return
+    void refreshCredits()
+  }, [user?.id, foregroundReloadNonce, refreshCredits])
 
   // 首次進入探索：聊天拼圖解鎖說明（每帳號一次）
   useEffect(() => {
@@ -5901,6 +5949,7 @@ export default function MainScreen({
         userId={user?.id}
         discoverDeckDayKey={discoverDeckDayKey}
         discoverDeckRolloverTick={discoverDeckRolloverTick}
+        foregroundReloadNonce={foregroundReloadNonce}
         currentUserGender={currentUserGender}
         preferredRegion={currentUserPreferredRegion}
         contentScrollRef={contentScrollRef}
@@ -5959,6 +6008,7 @@ export default function MainScreen({
     profile: (
       <ProfileTab
         userId={user?.id ?? ''}
+        foregroundReloadNonce={foregroundReloadNonce}
         onSignOut={handleSignOut}
         creditBalance={creditBalance}
         onRefreshCredits={refreshCredits}
