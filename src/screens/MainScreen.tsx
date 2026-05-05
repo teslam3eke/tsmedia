@@ -12,8 +12,13 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
-import { wakeSupabaseAuthFromBackground } from '@/lib/supabase'
-import { queryClient } from '@/lib/queryClient'
+import {
+  wakeSupabaseAuthFromBackground,
+  reconnectSupabaseRealtimeOnly,
+  refreshSupabaseAuthSoft,
+  touchSupabaseAuthSessionRead,
+} from '@/lib/supabase'
+import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
   getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification,
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
@@ -1332,6 +1337,9 @@ function DiscoverTab({
   const [liveDeckStatus, setLiveDeckStatus] = useState<'idle' | 'loading' | 'ready'>('idle')
   /** RPC／逾時／例外時直接顯示在探索頁，方便 iOS 使用者回報 */
   const [deckLoadDiagnostic, setDeckLoadDiagnostic] = useState<string | null>(null)
+  /** 探索載入失敗時，逐鍵診斷哪種恢復方式有效 */
+  const [deckRecoverBusy, setDeckRecoverBusy] = useState<string | null>(null)
+  const [deckRecoverTip, setDeckRecoverTip] = useState<string | null>(null)
   const [deckRefresh, setDeckRefresh] = useState(0)
   const liveDeckRef = useRef<Profile[]>([])
   liveDeckRef.current = liveDeck
@@ -1701,6 +1709,28 @@ function DiscoverTab({
     goNext()
   }
 
+  const bumpDeckReload = useCallback(() => {
+    setDeckRecoverTip(null)
+    setDeckLoadDiagnostic(null)
+    setDeckRefresh((n) => n + 1)
+  }, [])
+
+  const runDeckRecovery = useCallback(async (label: string, prelude?: () => Promise<void>) => {
+    setDeckRecoverBusy(label)
+    setDeckRecoverTip(null)
+    try {
+      if (prelude) await prelude()
+      setDeckLoadDiagnostic(null)
+      setDeckRefresh((n) => n + 1)
+      setDeckRecoverTip(`「${label}」已完成，已觸發重新載入。請看是否出現卡片。`)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setDeckRecoverTip(`「${label}」前置步驟失敗：${msg}`)
+    } finally {
+      setDeckRecoverBusy(null)
+    }
+  }, [])
+
   if (userId && liveDeckStatus === 'loading' && visibleProfiles.length === 0) {
     return (
       <div className="relative flex min-h-[50vh] flex-col">
@@ -1745,14 +1775,104 @@ function DiscoverTab({
             </div>
             <button
               type="button"
-              onClick={() => {
-                setDeckLoadDiagnostic(null)
-                setDeckRefresh((n) => n + 1)
-              }}
-              className="mt-6 w-full px-5 py-3 bg-slate-900 text-white text-sm font-semibold rounded-2xl"
+              disabled={Boolean(deckRecoverBusy)}
+              onClick={bumpDeckReload}
+              className="mt-6 w-full px-5 py-3 bg-slate-900 text-white text-sm font-semibold rounded-2xl disabled:opacity-50"
             >
-              重試載入
+              ① 僅重試載入
             </button>
+            <p className="mt-4 text-[11px] leading-relaxed text-slate-600">
+              若上面無效，請逐個試下方按鈕，並記下<strong className="font-semibold text-slate-800">哪一個</strong>能讓探索恢復（方便回報）。
+            </p>
+            <div className="mt-3 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => void runDeckRecovery('換發登入並重連', wakeSupabaseAuthFromBackground)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-medium text-slate-800 shadow-sm active:bg-slate-50 disabled:opacity-50"
+              >
+                ② 換發登入並重連（完整 wake）
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => void runDeckRecovery('僅軟換發 Session', refreshSupabaseAuthSoft)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-medium text-slate-800 shadow-sm active:bg-slate-50 disabled:opacity-50"
+              >
+                ③ 僅軟換發（refresh，不重斷 WS）
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => void runDeckRecovery('僅重連即時頻道', reconnectSupabaseRealtimeOnly)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-medium text-slate-800 shadow-sm active:bg-slate-50 disabled:opacity-50"
+              >
+                ④ 僅重連即時頻道（不切換 JWT）
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => void runDeckRecovery('讀取 Session', touchSupabaseAuthSessionRead)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-medium text-slate-800 shadow-sm active:bg-slate-50 disabled:opacity-50"
+              >
+                ⑤ 僅讀取 Session（getSession，不換發）
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => {
+                  setDeckRecoverBusy('清除 Query 快取')
+                  setDeckRecoverTip(null)
+                  try {
+                    clearAppQueryCache()
+                    setDeckLoadDiagnostic(null)
+                    setDeckRefresh((n) => n + 1)
+                    setDeckRecoverTip('已清除 TanStack 記憶體與 localStorage 持久化快取，並重試載入。')
+                  } finally {
+                    setDeckRecoverBusy(null)
+                  }
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-medium text-slate-800 shadow-sm active:bg-slate-50 disabled:opacity-50"
+              >
+                ⑥ 清除 Query 快取後重試（含持久化）
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => {
+                  setDeckRecoverBusy('invalidateQueries')
+                  setDeckRecoverTip(null)
+                  try {
+                    void queryClient.invalidateQueries()
+                    setDeckLoadDiagnostic(null)
+                    setDeckRefresh((n) => n + 1)
+                    setDeckRecoverTip('已執行 invalidateQueries（標記重抓，未刪 localStorage）。')
+                  } finally {
+                    setDeckRecoverBusy(null)
+                  }
+                }}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-medium text-slate-800 shadow-sm active:bg-slate-50 disabled:opacity-50"
+              >
+                ⑦ 標記 Query 需重抓後重試
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(deckRecoverBusy)}
+                onClick={() => {
+                  setDeckRecoverBusy('整頁重新載入')
+                  window.location.reload()
+                }}
+                className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-left text-[13px] font-semibold text-amber-950 shadow-sm active:bg-amber-100/80 disabled:opacity-50"
+              >
+                ⑧ 整頁重新載入
+              </button>
+            </div>
+            {deckRecoverBusy ? (
+              <p className="mt-3 text-center text-[12px] font-medium text-sky-800">進行中：{deckRecoverBusy}</p>
+            ) : null}
+            {deckRecoverTip ? (
+              <p className="mt-2 whitespace-pre-wrap text-center text-[11px] leading-relaxed text-slate-600">{deckRecoverTip}</p>
+            ) : null}
           </div>
         ) : (
           <>

@@ -106,6 +106,35 @@ export function wakeSupabaseAuthFromBackground(): Promise<void> {
   return wakeMutex
 }
 
+/** 診斷：不切換 JWT，只重連 Realtime WebSocket（對照是否 WS 僵死） */
+export async function reconnectSupabaseRealtimeOnly(): Promise<void> {
+  try {
+    await supabase.realtime.disconnect()
+  } catch {
+    /* ignore */
+  }
+  supabase.realtime.connect()
+}
+
+/**
+ * 診斷：`refreshSession` + `realtime.setAuth`，但不強制 disconnect／connect（對照 {@link wakeSupabaseAuthFromBackground}）。
+ */
+export async function refreshSupabaseAuthSoft(): Promise<void> {
+  const {
+    data: { session },
+    error: sessErr,
+  } = await supabase.auth.getSession()
+  if (sessErr || !session) return
+  const { data: refreshed, error: refErr } = await supabase.auth.refreshSession()
+  const token = !refErr ? refreshed.session?.access_token : undefined
+  if (token) supabase.realtime.setAuth(token)
+}
+
+/** 診斷：僅讀取／同步本地 Session，不換發 token */
+export async function touchSupabaseAuthSessionRead(): Promise<void> {
+  await supabase.auth.getSession()
+}
+
 /** 與 TanStack `refetchOnReconnect` 對齊：網路自離線恢復時若已在前景，再跑一次 session／Realtime 恢復 */
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
