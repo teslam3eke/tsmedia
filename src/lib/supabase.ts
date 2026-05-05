@@ -9,6 +9,19 @@ import {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
+function supabaseFetchLogEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('fetchlog') === '1' || q.get('debug') === '1') return true
+    if (sessionStorage.getItem('tm_fetchlog') === '1') return true
+    if (localStorage.getItem('tm_fetchlog') === '1') return true
+    return false
+  } catch {
+    return false
+  }
+}
+
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('[TsMedia] Supabase env vars not set — running in offline mode.')
 }
@@ -39,10 +52,51 @@ function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     else parent.addEventListener('abort', onParentAbort, { once: true })
   }
 
-  return nativeFetch(input as RequestInfo, { ...init, signal: ctrl.signal }).finally(() => {
-    globalThis.clearTimeout(tid)
-    parent?.removeEventListener('abort', onParentAbort)
-  })
+  const t0 =
+    typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+
+  let pathHint = urlStr
+  try {
+    pathHint = new URL(urlStr).pathname + new URL(urlStr).search
+  } catch {
+    pathHint = urlStr.slice(0, 120)
+  }
+
+  const chain = nativeFetch(input as RequestInfo, { ...init, signal: ctrl.signal })
+
+  return chain
+    .then((res) => {
+      if (supabaseFetchLogEnabled()) {
+        const ms =
+          (typeof performance !== 'undefined' && performance.now
+            ? performance.now()
+            : Date.now()) - t0
+        console.info('[tsmedia:supabase-fetch]', {
+          ms: Math.round(ms),
+          status: res.status,
+          path: pathHint.slice(0, 160),
+        })
+      }
+      return res
+    })
+    .catch((err: unknown) => {
+      if (supabaseFetchLogEnabled()) {
+        const ms =
+          (typeof performance !== 'undefined' && performance.now
+            ? performance.now()
+            : Date.now()) - t0
+        console.warn('[tsmedia:supabase-fetch]', {
+          ms: Math.round(ms),
+          path: pathHint.slice(0, 160),
+          err: err instanceof Error ? err.message : String(err),
+        })
+      }
+      throw err
+    })
+    .finally(() => {
+      globalThis.clearTimeout(tid)
+      parent?.removeEventListener('abort', onParentAbort)
+    })
 }
 
 export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
