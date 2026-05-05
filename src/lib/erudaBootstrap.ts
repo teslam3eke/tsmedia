@@ -1,4 +1,4 @@
-/** `?eruda=1` 或 `?debug=1`：本工作階段啟用 Eruda • `?debug=1`／`?fetchlog=1`：Console 印出每筆 Supabase fetch（Eruda Network 在 iOS 常不完整）• `localStorage.setItem('tm_eruda','1')`／`tm_fetchlog`：跨重開仍啟用 • `?eruda=0`／`?debug=0`／`?fetchlog=0`：關閉對應旗標 */
+/** `?eruda=1` 或 `?debug=1`：本工作階段啟用 Eruda • `?debug=1`／`?fetchlog=1`：`[tsmedia:supabase-fetch:*]`（Eruda Network 在 iOS 常不完整）• `?actionlog=1`／與上述相同旗標：見 `clientActionTrace.ts` 的 `[tsmedia:action:*]` • `localStorage`：`tm_eruda`／`tm_fetchlog`／`tm_actionlog`＝`1` • `?eruda=0`／`?debug=0`／`?fetchlog=0`／`?actionlog=0`：關閉對應旗標 */
 
 const STORAGE_KEY = 'tm_eruda'
 
@@ -18,6 +18,7 @@ export async function maybeInitEruda(): Promise<void> {
       sessionStorage.removeItem(STORAGE_KEY)
       localStorage.removeItem(STORAGE_KEY)
       sessionStorage.removeItem('tm_fetchlog')
+      sessionStorage.removeItem('tm_actionlog')
     } catch {
       /* quota / private mode */
     }
@@ -43,6 +44,21 @@ export async function maybeInitEruda(): Promise<void> {
   if (params.get('fetchlog') === '0') {
     try {
       sessionStorage.removeItem('tm_fetchlog')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (params.get('actionlog') === '1' || params.get('debug') === '1' || params.get('fetchlog') === '1') {
+    try {
+      sessionStorage.setItem('tm_actionlog', '1')
+    } catch {
+      /* ignore */
+    }
+  }
+  if (params.get('actionlog') === '0') {
+    try {
+      sessionStorage.removeItem('tm_actionlog')
     } catch {
       /* ignore */
     }

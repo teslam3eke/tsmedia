@@ -1,4 +1,5 @@
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume } from './supabase'
+import { actionTrace, shortId } from './clientActionTrace'
 import { reportRealtimeChannel } from './resumeRealtimeTelemetry'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type {
@@ -54,10 +55,21 @@ export async function getProfile(userId: string): Promise<ProfileRow | null> {
   }
 
   if (error) {
+    actionTrace('db.getProfile', '已取得：錯誤或無資料列', {
+      uid: shortId(userId),
+      code: error.code ?? '—',
+      hint: typeof error.message === 'string' ? error.message.slice(0, 160) : '—',
+    })
     console.error('[db] getProfile error:', error.message)
     return null
   }
-  return data as ProfileRow
+  const row = data as ProfileRow
+  actionTrace('db.getProfile', '已取得：profile 列', {
+    uid: shortId(userId),
+    nameLen: row.name?.length ?? 0,
+    nickLen: row.nickname?.length ?? 0,
+  })
+  return row
 }
 
 export interface UpsertProfilePayload {
@@ -200,7 +212,10 @@ export async function uploadPhoto(
 }
 
 export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
-  if (paths.length === 0) return []
+  if (paths.length === 0) {
+    actionTrace('db.resolvePhotoUrls', '已跳過（無路徑）', {})
+    return []
+  }
 
   const resolved = [...paths]
   const storagePaths = paths.filter((path) =>
@@ -211,13 +226,23 @@ export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
     !path.startsWith('data:')
   )
 
-  if (storagePaths.length === 0) return resolved
+  if (storagePaths.length === 0) {
+    actionTrace('db.resolvePhotoUrls', '已跳過（僅公開網址）', { paths: paths.length })
+    return resolved
+  }
+
+  actionTrace('db.resolvePhotoUrls', '請求簽章', {
+    paths: paths.length,
+    storagePaths: storagePaths.length,
+    firstPath: typeof storagePaths[0] === 'string' ? storagePaths[0].slice(0, 40) : '—',
+  })
 
   const { data, error } = await supabase.storage
     .from('photos')
     .createSignedUrls(storagePaths, 60 * 60)
 
   if (error) {
+    actionTrace('db.resolvePhotoUrls', '簽章失敗（沿用原路徑）', { msg: error.message?.slice?.(0, 120) ?? '—' })
     console.error('[db] resolvePhotoUrls error:', error.message)
     return resolved
   }
@@ -228,6 +253,10 @@ export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
       .map((item) => [item.path, item.signedUrl] as const),
   )
 
+  actionTrace('db.resolvePhotoUrls', '簽章完成', {
+    resolvedSlots: resolved.length,
+    signedCount: signedMap.size,
+  })
   return resolved.map((path) => signedMap.get(path) ?? path)
 }
 
@@ -615,6 +644,14 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
   /** PostgREST／RPC 失敗時供 UI 顯示；成功為 null */
   rpcError: string | null
 }> {
+  const fin = (rows: DailyDiscoverRpcRow[], rpcError: string | null) => {
+    actionTrace('db.fetchDailyDiscoverDeck', '已回傳', {
+      rowCount: rows.length,
+      err: rpcError ? rpcError.slice(0, 100) : null,
+      skipWake: Boolean(options?.skipWake),
+    })
+    return { rows, rpcError }
+  }
   /**
    * iOS／PWA：使用者可能在 visibility debounce 完成前就切到探索；此時 JWT 尚未換發，RPC 失敗會吃成空陣列。
    * 先與前景換發對齊（`ensureConnectionWithBudget`，單一 flight 合併並發），必要時再重試 RPC。
@@ -652,20 +689,20 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
     const detail = [errObj.message, errObj.details, errObj.hint, errObj.code ? `code:${errObj.code}` : '']
       .filter(Boolean)
       .join(' · ')
-    return { rows: [], rpcError: detail || '無法取得探索名單（RPC 錯誤）' }
+    return fin([], detail || '無法取得探索名單（RPC 錯誤）')
   }
-  if (data == null) return { rows: [], rpcError: null }
+  if (data == null) return fin([], null)
   try {
     const parsed = Array.isArray(data)
       ? data
       : (typeof data === 'string' ? (JSON.parse(data) as unknown) : [])
     if (!Array.isArray(parsed)) {
-      return { rows: [], rpcError: '伺服器回傳格式異常（預期為陣列）' }
+      return fin([], '伺服器回傳格式異常（預期為陣列）')
     }
-    return { rows: parsed as DailyDiscoverRpcRow[], rpcError: null }
+    return fin(parsed as DailyDiscoverRpcRow[], null)
   } catch (parseErr) {
     const msg = parseErr instanceof Error ? parseErr.message : String(parseErr)
-    return { rows: [], rpcError: `解析探索名單失敗：${msg}` }
+    return fin([], `解析探索名單失敗：${msg}`)
   }
 }
 
@@ -798,6 +835,10 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
   }
 
   if (error) {
+    actionTrace('db.refreshTabStats', '已取得：RPC 錯誤', {
+      code: error.code ?? '—',
+      msg: typeof error.message === 'string' ? error.message.slice(0, 120) : '—',
+    })
     console.error('[db] refreshProfileTabStats error:', error.message)
     return null
   }
@@ -805,14 +846,26 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
   if (Array.isArray(raw) && raw.length > 0 && raw[0] != null && typeof raw[0] === 'object') {
     raw = raw[0]
   }
-  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+    actionTrace('db.refreshTabStats', '已取得：無法組出統計', {
+      payloadKind: Array.isArray(data) ? `array:${data.length}` : data == null ? 'nullish' : typeof data,
+    })
+    return null
+  }
   const row = raw as ProfileTabStats
-  return {
+  const out = {
     login_streak_days: Number(row.login_streak_days ?? 0),
     login_total_days: Number(row.login_total_days ?? 0),
     hearts_received: Number(row.hearts_received ?? 0),
     super_likes_received: Number(row.super_likes_received ?? 0),
   }
+  actionTrace('db.refreshTabStats', '已取得：統計數字', {
+    login_streak_days: out.login_streak_days,
+    login_total_days: out.login_total_days,
+    hearts_received: out.hearts_received,
+    super_likes_received: out.super_likes_received,
+  })
+  return out
 }
 
 /** 成功為陣列（可能為空）；失敗為 null — 勿覆寫畫面上既有資料（PWA 回前景時 JWT 尚未好常誤判成「沒配對」）。 */

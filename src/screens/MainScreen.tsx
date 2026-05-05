@@ -42,6 +42,7 @@ import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
+import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
@@ -1501,6 +1502,13 @@ function DiscoverTab({
     /** 僅涵蓋 RPC＋相片簽章；換發登入在 race 外 await，見 `work` 開頭 */
     const DECK_LOAD_DEADLINE_MS = 22_000
 
+    actionTrace('discover.deck', 'effect:開始', {
+      uid: shortId(userId),
+      dk: discoverDeckDayKey,
+      deckRefresh,
+      keepStaleVisible,
+    })
+
     if (!keepStaleVisible) {
       setLiveDeckStatus('loading')
       setLiveDeck([])
@@ -1512,26 +1520,72 @@ function DiscoverTab({
     ;(async () => {
       try {
         const work = async () => {
+          const perfNow = () =>
+            typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+          actionTrace('discover.deck', 'work:進入', { phase: 'pre-ensure' })
           if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
             await ensureConnectionWithBudget()
           }
+          actionTrace('discover.deck', 'work:ensureConnection 結束', {})
+          const tRpc = perfNow()
           const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
-          if (cancelled) return
+          if (cancelled) {
+            actionTrace('discover.deck', 'work:RPC 後已取消', { ms: Math.round(perfNow() - tRpc) })
+            return
+          }
+          actionTrace('discover.deck', 'work:RPC 回來', {
+            ms: Math.round(perfNow() - tRpc),
+            rowCount: rows.length,
+            rpcErr: rpcError ? rpcError.slice(0, 80) : null,
+          })
           if (rpcError) {
             if (!cancelled && tryDiscoverFailAutoReload()) return
             const detail = rpcError.trim() || '（伺服器未附說明）'
             setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', detail].join('\n\n'))
             if (!keepStaleVisible) setLiveDeck([])
             setLiveDeckStatus('ready')
+            actionTrace('discover.deck', 'work:RPC 錯誤結束（UI ready）', {})
             return
           }
           phase = 'photos'
-          const profiles = await Promise.all(rows.map((r, i) => mapDailyDiscoverRow(r, i)))
-          if (cancelled) return
+          const tPhotos = perfNow()
+          const profiles = await Promise.all(
+            rows.map(async (r, i) => {
+              actionTrace('discover.deck', 'mapRow:開始', {
+                i,
+                pid: shortId(String(r.id)),
+                photoPaths: (r.photo_urls ?? []).length,
+              })
+              try {
+                const p = await mapDailyDiscoverRow(r, i)
+                actionTrace('discover.deck', 'mapRow:結束', {
+                  i,
+                  pid: shortId(String(r.id)),
+                  outPhotos: p.photoUrls?.length ?? 0,
+                })
+                return p
+              } catch (e) {
+                actionTrace('discover.deck', 'mapRow:例外', {
+                  i,
+                  msg: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160),
+                })
+                throw e
+              }
+            }),
+          )
+          if (cancelled) {
+            actionTrace('discover.deck', 'work:簽章後已取消', { mapMs: Math.round(perfNow() - tPhotos) })
+            return
+          }
+          actionTrace('discover.deck', 'work:setState 前', {
+            profileCount: profiles.length,
+            mapMs: Math.round(perfNow() - tPhotos),
+          })
           setDeckLoadDiagnostic(null)
           clearDiscoverFailAutoReloadFlag()
           setLiveDeck(profiles)
           setLiveDeckStatus('ready')
+          actionTrace('discover.deck', 'work:完成', { profileCount: profiles.length })
         }
 
         const timeoutPromise = new Promise<never>((_, reject) => {
@@ -1544,6 +1598,9 @@ function DiscoverTab({
       } catch (e) {
         console.error('[DiscoverTab] deck load failed:', e)
         if (!cancelled) {
+          const ename =
+            e && typeof e === 'object' && 'name' in e ? String((e as { name?: string }).name) : ''
+          actionTrace('discover.deck', 'work:catch', { name: ename, phase })
           if (tryDiscoverFailAutoReload()) return
           const msg = formatDiscoverDeckLoadError(e)
           const noPhasePrefix =
@@ -1565,6 +1622,11 @@ function DiscoverTab({
     })()
 
     return () => {
+      actionTrace('discover.deck', 'effect:清理', {
+        uid: shortId(userId),
+        dk: discoverDeckDayKey,
+        deckRefresh,
+      })
       cancelled = true
       if (timeoutId != null) window.clearTimeout(timeoutId)
     }
@@ -5570,12 +5632,26 @@ function ProfileTab({
 
   useEffect(() => {
     const load = async () => {
+      const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+      actionTrace('profileTab', 'load:開始', {
+        rid,
+        uid: shortId(userId),
+        foregroundNonce: foregroundReloadNonce,
+      })
       /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
       void finalizeDueAiReviews()
       /** `getProfile` 回前景偶有長等待；與統計並行，`refresh_profile_tab_stats` 不依賴 profile 資料。 */
       const [latest, stats] = await Promise.all([getProfile(userId), refreshProfileTabStats()])
+      actionTrace('profileTab', 'load:已取得', {
+        rid,
+        hasProfile: Boolean(latest),
+        nameLen: latest?.name?.length ?? 0,
+        nickLen: latest?.nickname?.length ?? 0,
+        hasStats: Boolean(stats),
+      })
       setProfile((prev) => latest ?? prev)
       if (stats) setTabStats(stats)
+      actionTrace('profileTab', 'load:setState 已呼叫', { rid })
     }
     load()
   }, [userId, foregroundReloadNonce])
@@ -5583,12 +5659,20 @@ function ProfileTab({
   useEffect(() => {
     if (!userId) return
     const loadNotifications = async () => {
+      const poll = Date.now()
+      actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId) })
       void finalizeDueAiReviews()
       const [latest, notifications, stats] = await Promise.all([
         getProfile(userId),
         getUnreadAppNotifications(userId),
         refreshProfileTabStats(),
       ])
+      actionTrace('profileTab', 'poll:Promise.all 結束', {
+        poll,
+        hasProfile: Boolean(latest),
+        notifCount: notifications.length,
+        hasStats: Boolean(stats),
+      })
       setProfile((prev) => latest ?? prev)
       const legacySuperLikes = notifications.filter((n) => n.kind === 'super_like_received')
       if (legacySuperLikes.length > 0) {
@@ -5597,6 +5681,10 @@ function ProfileTab({
       setAppNotifications(notifications.filter((n) => n.kind !== 'super_like_received'))
       onRefreshCredits()
       if (stats) setTabStats(stats)
+      actionTrace('profileTab', 'poll:完成（含標記超喜已讀）', {
+        poll,
+        legacyReads: legacySuperLikes.length,
+      })
     }
     loadNotifications()
     const intervalId = window.setInterval(loadNotifications, 5_000)
