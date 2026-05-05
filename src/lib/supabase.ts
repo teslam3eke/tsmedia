@@ -29,6 +29,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 /** iOS PWA 回前景後偶有 fetch 永不出結果；包一層逾時避免整個 UI 卡在 loading（abort 後由上層重試／換發 JWT）。 */
 const nativeFetch = globalThis.fetch.bind(globalThis)
 
+let supabaseFetchLogSeq = 0
+
 function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const urlStr =
     typeof input === 'string'
@@ -62,32 +64,64 @@ function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     pathHint = urlStr.slice(0, 120)
   }
 
+  const logOn = supabaseFetchLogEnabled()
+  const rid = ++supabaseFetchLogSeq
+
+  if (logOn) {
+    const method =
+      init?.method ?? (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET')
+    console.info('[tsmedia:supabase-fetch:start]', {
+      rid,
+      budgetMs: ms,
+      method: String(method || 'GET'),
+      path: pathHint.slice(0, 180),
+    })
+  }
+
+  const pendingWarnAfter = Math.min(isAuth ? 18_000 : 9_500, ms - 2_500)
+  const pendingTid =
+    logOn && pendingWarnAfter >= 4_000
+      ? globalThis.setTimeout(() => {
+          const elapsed =
+            (typeof performance !== 'undefined' && performance.now
+              ? performance.now()
+              : Date.now()) - t0
+          console.warn('[tsmedia:supabase-fetch:still-pending]', {
+            rid,
+            elapsedMs: Math.round(elapsed),
+            path: pathHint.slice(0, 180),
+          })
+        }, pendingWarnAfter)
+      : null
+
   const chain = nativeFetch(input as RequestInfo, { ...init, signal: ctrl.signal })
 
   return chain
     .then((res) => {
-      if (supabaseFetchLogEnabled()) {
-        const ms =
+      if (logOn) {
+        const elapsed =
           (typeof performance !== 'undefined' && performance.now
             ? performance.now()
             : Date.now()) - t0
-        console.info('[tsmedia:supabase-fetch]', {
-          ms: Math.round(ms),
+        console.info('[tsmedia:supabase-fetch:done]', {
+          rid,
+          elapsedMs: Math.round(elapsed),
           status: res.status,
-          path: pathHint.slice(0, 160),
+          path: pathHint.slice(0, 180),
         })
       }
       return res
     })
     .catch((err: unknown) => {
-      if (supabaseFetchLogEnabled()) {
-        const ms =
+      if (logOn) {
+        const elapsed =
           (typeof performance !== 'undefined' && performance.now
             ? performance.now()
             : Date.now()) - t0
-        console.warn('[tsmedia:supabase-fetch]', {
-          ms: Math.round(ms),
-          path: pathHint.slice(0, 160),
+        console.warn('[tsmedia:supabase-fetch:error]', {
+          rid,
+          elapsedMs: Math.round(elapsed),
+          path: pathHint.slice(0, 180),
           err: err instanceof Error ? err.message : String(err),
         })
       }
@@ -95,6 +129,7 @@ function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     })
     .finally(() => {
       globalThis.clearTimeout(tid)
+      if (pendingTid != null) globalThis.clearTimeout(pendingTid)
       parent?.removeEventListener('abort', onParentAbort)
     })
 }
