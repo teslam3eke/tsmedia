@@ -36,6 +36,8 @@ export default defineConfig({
       manifest: false,
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,json}'],
+        /** Eruda 僅在 `?eruda=1` 等啟用時動態載入，勿預快取 ~500KB 除錯包 */
+        globIgnores: ['**/*eruda*.js'],
         skipWaiting: true,
         clientsClaim: true,
         // build-id 一律走網路，避免 SW／HTTP 快取讓版本檢查讀到舊檔

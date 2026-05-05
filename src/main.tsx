@@ -7,7 +7,10 @@ import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.tsx'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
+import { maybeInitEruda } from '@/lib/erudaBootstrap'
 import { ensureConnectionWithBudget } from '@/lib/supabase'
+
+void maybeInitEruda()
 
 registerSW({
   immediate: true,
