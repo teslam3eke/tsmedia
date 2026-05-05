@@ -6377,12 +6377,18 @@ export default function MainScreen({
     <div className="max-w-md mx-auto w-full flex-1 flex flex-col min-h-0 bg-white">
       {activeTab !== 'messages' && (
         <div className="flex-none flex items-center px-4 pb-3 pt-safe-bar border-b border-gray-200 bg-white">
-          <div className="flex items-center gap-2 flex-1">
-            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
               <Cpu className="w-[18px] h-[18px] text-white" />
             </div>
-            <span className="font-bold text-slate-900 tracking-tight text-lg leading-none">tsMedia</span>
-            <span className="text-[11px] text-slate-400 ml-1 leading-none">Silicon Hearts</span>
+            <span className="font-bold text-slate-900 tracking-tight text-lg leading-none shrink-0">tsMedia</span>
+            <span className="text-[11px] text-slate-400 leading-none shrink-0">Silicon Hearts</span>
+            <span
+              className="ml-auto min-w-0 truncate text-[10px] font-mono tabular-nums text-slate-400 max-w-[9rem] text-right"
+              title={`Build ${__APP_BUILD_ID__}`}
+            >
+              {__APP_BUILD_ID__}
+            </span>
           </div>
         </div>
       )}
