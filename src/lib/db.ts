@@ -1,4 +1,5 @@
 import { supabase, ensureConnectionWithBudget } from './supabase'
+import { reportRealtimeChannel } from './resumeRealtimeTelemetry'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
@@ -819,7 +820,9 @@ export function subscribeToNewMatches(
         if (row) onInsert(row)
       },
     )
-    .subscribe()
+    .subscribe((status) => {
+      reportRealtimeChannel('matches', String(status))
+    })
 
   return () => {
     void supabase.removeChannel(channel)
@@ -934,6 +937,7 @@ export function subscribeToMatchMessages(
       },
     )
     .subscribe((status) => {
+      reportRealtimeChannel('messages', String(status))
       if (status === 'CHANNEL_ERROR') {
         console.error('[db] subscribeToMatchMessages channel error', matchId)
       }

@@ -5,6 +5,8 @@
 declare const __APP_BUILD_ID__: string
 
 interface ImportMetaEnv {
+  /** POST JSON：`resume`、`realtime_ws`、`realtime_channel`、`connection_repair`（無 PII） */
+  readonly VITE_RESUME_REALTIME_TELEMETRY_URL?: string
   /** 正式站建議設為 https://www.tsmedia.tw — 註冊確認信 redirect 與 Supabase Redirect URLs 一致 */
   readonly VITE_SITE_URL?: string
   readonly VITE_TAPPAY_APP_ID?: string

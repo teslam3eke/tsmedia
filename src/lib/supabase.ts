@@ -1,5 +1,11 @@
 import { createClient, type Session } from '@supabase/supabase-js'
 
+import {
+  reportConnectionRepairTelemetry,
+  reportRealtimeEngine,
+  reportResumeEvent,
+} from './resumeRealtimeTelemetry'
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
@@ -98,20 +104,28 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       markIosNeedsFullAuthRepairAfterHiddenOrCache()
+      reportResumeEvent('visibility_hidden')
+    } else if (document.visibilityState === 'visible') {
+      reportResumeEvent('visibility_visible')
     }
   })
   /** BFCache：`visibilitychange` 未必再發；persisted pageshow 視同冷凍復原後必須重撿連線狀態。 */
   window.addEventListener('pageshow', (ev: Event) => {
     const e = ev as PageTransitionEvent
     if (e.persisted) markIosNeedsFullAuthRepairAfterHiddenOrCache()
+    reportResumeEvent('pageshow', { persisted: Boolean(e.persisted) })
   })
   window.addEventListener('pagehide', (ev: Event) => {
     const e = ev as PageTransitionEvent
-    if (e.persisted) markIosNeedsFullAuthRepairAfterHiddenOrCache()
+    if (e.persisted) {
+      markIosNeedsFullAuthRepairAfterHiddenOrCache()
+      reportResumeEvent('pagehide_bf_cache')
+    }
   })
   /** Page Lifecycle（Chromium／部分 WebView）：對齊 Freeze 備案。 */
   document.addEventListener('freeze', () => {
     markIosNeedsFullAuthRepairAfterHiddenOrCache()
+    reportResumeEvent('freeze')
   })
 }
 
@@ -211,10 +225,12 @@ export function wakeSupabaseAuthFromBackground(): Promise<void> {
     }
 
     wakeMutex = (async () => {
+      reportRealtimeEngine('wake_attempt_start')
       const deadline = new Promise<void>((resolve) =>
         globalThis.setTimeout(resolve, WAKE_OVERALL_BUDGET_MS),
       )
       await Promise.race([attemptWakeInner(), deadline])
+      reportRealtimeEngine('wake_after_inner_budget')
 
       /** iOS：`refreshSession／disconnect` 等若整輪卡住，budget 已到仍甩一次 realtime。 */
       if (document.visibilityState === 'visible') {
@@ -224,8 +240,10 @@ export function wakeSupabaseAuthFromBackground(): Promise<void> {
         } catch {
           /* ignore */
         }
+        reportRealtimeEngine('wake_post_race_resync')
       }
     })().finally(() => {
+      reportRealtimeEngine('wake_mutex_cleared')
       wakeMutex = null
     })
   }
@@ -234,12 +252,14 @@ export function wakeSupabaseAuthFromBackground(): Promise<void> {
 
 /** 診斷：不切換 JWT，只重連 Realtime WebSocket（對照是否 WS 僵死） */
 export async function reconnectSupabaseRealtimeOnly(): Promise<void> {
+  reportRealtimeEngine('reconnect_realtime_only_disconnect')
   try {
     await supabase.realtime.disconnect()
   } catch {
     /* ignore */
   }
   supabase.realtime.connect()
+  reportRealtimeEngine('reconnect_realtime_only_connect')
 }
 
 /**
@@ -276,6 +296,7 @@ const ENSURE_MAX_ATTEMPTS = 3
 let ensureFlight: Promise<boolean> | null = null
 
 function emitConnectionRepair(detail: ConnectionRepairDetail): void {
+  reportConnectionRepairTelemetry(detail)
   window.dispatchEvent(new CustomEvent(CONNECTION_REPAIR_EVENT, { detail }))
 }
 
@@ -400,6 +421,9 @@ async function ensureConnectionOnce(): Promise<boolean> {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    if (document.visibilityState === 'visible') void ensureConnection()
+    if (document.visibilityState === 'visible') {
+      reportResumeEvent('online')
+      void ensureConnection()
+    }
   })
 }
