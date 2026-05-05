@@ -1,4 +1,4 @@
-import { supabase, ensureConnectionWithBudget } from './supabase'
+import { supabase, ensureConnectionWithBudget, repairAuthAfterResume } from './supabase'
 import { reportRealtimeChannel } from './resumeRealtimeTelemetry'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type {
@@ -12,6 +12,20 @@ import { PROFILE_PHOTO_MAX } from './types'
 
 export const TERMS_VERSION = '2026-04-28'
 
+function isRecoverableResumeAuthError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false
+  const code = String(error.code ?? '')
+  const msg = String(error.message ?? '').toLowerCase()
+  return (
+    code === 'PGRST116' ||
+    code === '401' ||
+    code === '42501' ||
+    msg.includes('jwt') ||
+    msg.includes('permission denied') ||
+    msg.includes('not authorized')
+  )
+}
+
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
 export async function getProfile(userId: string): Promise<ProfileRow | null> {
@@ -22,6 +36,18 @@ export async function getProfile(userId: string): Promise<ProfileRow | null> {
     supabase.from('profiles').select('*').eq('id', userId).single()
 
   let { data, error } = await query()
+
+  if (visible && error && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(12_000)
+    ;({ data, error } = await query())
+  }
+
+  if (visible && error && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    ;({ data, error } = await query())
+  }
+
   if (error && visible) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await query())
@@ -598,13 +624,26 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
   if (visible && !options?.skipWake) await ensureConnectionWithBudget()
 
   // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let { data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
+  const rpcDeck = async () =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).rpc('get_daily_discover_deck_v2', {})
+
+  let { data, error } = await rpcDeck()
+
+  if (error && visible) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(12_000)
+    ;({ data, error } = await rpcDeck())
+  }
+
+  if (error && visible) {
+    await repairAuthAfterResume()
+    ;({ data, error } = await rpcDeck())
+  }
 
   if (error && visible) {
     await ensureConnectionWithBudget()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;({ data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {}))
+    ;({ data, error } = await rpcDeck())
   }
 
   if (error) {
@@ -785,6 +824,15 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
       .order('created_at', { ascending: false })
 
   let { data, error } = await query()
+  if (error && visible && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(12_000)
+    ;({ data, error } = await query())
+  }
+  if (error && visible && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    ;({ data, error } = await query())
+  }
   if (error && visible) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await query())
@@ -838,6 +886,15 @@ export async function getMatchMessages(matchId: string): Promise<MessageRow[] | 
     supabase.from('messages').select('*').eq('match_id', matchId).order('created_at', { ascending: true })
 
   let { data, error } = await query()
+  if (error && visible && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(12_000)
+    ;({ data, error } = await query())
+  }
+  if (error && visible && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    ;({ data, error } = await query())
+  }
   if (error && visible) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await query())

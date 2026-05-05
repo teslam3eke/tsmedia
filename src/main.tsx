@@ -8,7 +8,7 @@ import './index.css'
 import App from './App.tsx'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
 import { maybeInitEruda } from '@/lib/erudaBootstrap'
-import { ensureConnectionWithBudget } from '@/lib/supabase'
+import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 
 void maybeInitEruda()
 
@@ -30,10 +30,13 @@ function syncReactQueryFocusFromPageVisibility() {
   onlineManager.setOnline(navigator.onLine)
 }
 
-/** 同步 TanStack；App 回前景時一併 bounded await ensureConnection（不依賴下游畫面監聽器）。 */
+/** 同步 TanStack；回前景先強制換發 JWT + wake（與 bounded ensure 並行）。 */
 function onDocumentForegroundAlignment() {
   syncReactQueryFocusFromPageVisibility()
-  if (document.visibilityState === 'visible') void ensureConnectionWithBudget()
+  if (document.visibilityState === 'visible') {
+    void repairAuthAfterResume()
+    void ensureConnectionWithBudget()
+  }
 }
 
 syncReactQueryFocusFromPageVisibility()

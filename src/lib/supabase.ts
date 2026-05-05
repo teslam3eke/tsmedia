@@ -335,6 +335,37 @@ export async function ensureConnectionWithBudget(budgetMs = DEFAULT_ENSURE_AWAIT
   ])
 }
 
+const RESUME_REFRESH_BUDGET_MS = 14_000
+
+let repairAuthFlight: Promise<void> | null = null
+
+/**
+ * Resume 的另一條強化路：**先換發 JWT**（與 ensure 並行視角不同，明確對齊 RLS／auth.uid）再接 {@link wakeSupabaseAuthFromBackground}。
+ * 適用 WebKit／PWA 回前景後「HTTP 見 200 但資料空」或過期 token。
+ */
+export function repairAuthAfterResume(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve()
+  if (typeof document === 'undefined') return Promise.resolve()
+  if (document.visibilityState !== 'visible') return Promise.resolve()
+  if (!navigator.onLine) return Promise.resolve()
+
+  if (!repairAuthFlight) {
+    repairAuthFlight = (async () => {
+      await Promise.race([
+        supabase.auth
+          .refreshSession()
+          .then(() => undefined)
+          .catch(() => undefined),
+        new Promise<void>((resolve) => globalThis.setTimeout(resolve, RESUME_REFRESH_BUDGET_MS)),
+      ])
+      await wakeSupabaseAuthFromBackground()
+    })().finally(() => {
+      repairAuthFlight = null
+    })
+  }
+  return repairAuthFlight
+}
+
 async function runEnsureWithRetries(): Promise<boolean> {
   for (let attempt = 1; attempt <= ENSURE_MAX_ATTEMPTS; attempt++) {
     if (attempt > 1) {

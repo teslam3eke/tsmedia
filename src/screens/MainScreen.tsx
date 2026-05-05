@@ -19,6 +19,7 @@ import {
   touchSupabaseAuthSessionRead,
   ensureConnection,
   ensureConnectionWithBudget,
+  repairAuthAfterResume,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
@@ -6010,6 +6011,7 @@ export default function MainScreen({
   useEffect(() => {
     if (!user?.id) return
     if (document.visibilityState !== 'visible') return
+    void repairAuthAfterResume()
     void queryClient.invalidateQueries()
     setForegroundReloadNonce((n) => n + 1)
     let cancelled = false
@@ -6036,6 +6038,7 @@ export default function MainScreen({
 
     const schedule = () => {
       if (document.visibilityState !== 'visible') return
+      void repairAuthAfterResume()
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
       if (debounceTimer) clearTimeout(debounceTimer)
