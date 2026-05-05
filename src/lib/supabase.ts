@@ -297,6 +297,23 @@ export async function ensureConnection(): Promise<boolean> {
   return ensureFlight
 }
 
+const DEFAULT_ENSURE_AWAIT_BUDGET_MS = 5_500
+
+/**
+ * 前景 API 專用：**不要**無限 await `ensureConnection()`（iOS 換發／wake 可能卡住整分鐘）。
+ * 最多等 `budgetMs` 就繼續打 PostgREST／RPC；換發可能仍在背景收尾。
+ */
+export async function ensureConnectionWithBudget(budgetMs = DEFAULT_ENSURE_AWAIT_BUDGET_MS): Promise<void> {
+  if (typeof document === 'undefined') return
+  if (document.visibilityState !== 'visible') return
+  if (!navigator.onLine) return
+
+  await Promise.race([
+    ensureConnection().catch(() => undefined),
+    new Promise<void>((resolve) => globalThis.setTimeout(resolve, budgetMs)),
+  ])
+}
+
 async function runEnsureWithRetries(): Promise<boolean> {
   for (let attempt = 1; attempt <= ENSURE_MAX_ATTEMPTS; attempt++) {
     if (attempt > 1) {

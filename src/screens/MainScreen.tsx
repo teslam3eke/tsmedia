@@ -18,6 +18,7 @@ import {
   refreshSupabaseAuthSoft,
   touchSupabaseAuthSessionRead,
   ensureConnection,
+  ensureConnectionWithBudget,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
@@ -1511,7 +1512,7 @@ function DiscoverTab({
       try {
         const work = async () => {
           if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-            await ensureConnection()
+            await ensureConnectionWithBudget()
           }
           const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
           if (cancelled) return
@@ -6009,6 +6010,8 @@ export default function MainScreen({
   useEffect(() => {
     if (!user?.id) return
     if (document.visibilityState !== 'visible') return
+    void queryClient.invalidateQueries()
+    setForegroundReloadNonce((n) => n + 1)
     let cancelled = false
     void ensureConnection().finally(() => {
       if (cancelled) return
@@ -6033,6 +6036,8 @@ export default function MainScreen({
 
     const schedule = () => {
       if (document.visibilityState !== 'visible') return
+      void queryClient.invalidateQueries()
+      setForegroundReloadNonce((n) => n + 1)
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
         debounceTimer = null
@@ -6148,7 +6153,7 @@ export default function MainScreen({
       return
     }
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-      await ensureConnection()
+      await ensureConnectionWithBudget()
     }
     const gen = ++liveMatchThreadsLoadGenRef.current
     const blockSpinner = mode === 'full'

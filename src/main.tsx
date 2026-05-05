@@ -7,7 +7,7 @@ import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.tsx'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
-import { ensureConnection } from '@/lib/supabase'
+import { ensureConnectionWithBudget } from '@/lib/supabase'
 
 registerSW({
   immediate: true,
@@ -27,10 +27,10 @@ function syncReactQueryFocusFromPageVisibility() {
   onlineManager.setOnline(navigator.onLine)
 }
 
-/** 同步 TanStack；App 回前景時一併執行 ensureConnection（不依賴下游畫面監聽器）。 */
+/** 同步 TanStack；App 回前景時一併 bounded await ensureConnection（不依賴下游畫面監聽器）。 */
 function onDocumentForegroundAlignment() {
   syncReactQueryFocusFromPageVisibility()
-  if (document.visibilityState === 'visible') void ensureConnection()
+  if (document.visibilityState === 'visible') void ensureConnectionWithBudget()
 }
 
 syncReactQueryFocusFromPageVisibility()

@@ -11,7 +11,7 @@ import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 
-import { supabase, ensureConnection, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
+import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
@@ -257,7 +257,7 @@ export default function App() {
         // iOS Safari／PWA：冷啟時 React 此 effect 晚於初始 `pageshow`，MainScreen 的 wake 監聽尚不存在，
         // 若 storage 內 access_token 已過期，這裡第一個 getProfile 會失敗（桌面較少見）。
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await ensureConnection()
+          await ensureConnectionWithBudget()
         }
         const profile = await getProfile(u.id)
         routeByProfile(profile)
