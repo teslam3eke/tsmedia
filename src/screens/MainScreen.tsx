@@ -20,6 +20,7 @@ import {
   ensureConnection,
   ensureConnectionWithBudget,
   repairAuthAfterResume,
+  prepareSupabaseForProfileReads,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
@@ -5686,8 +5687,6 @@ function ProfileTab({
   onRefreshCredits: () => void
   onOpenSubscription: () => void
 }) {
-  const PROFILE_HYDRATE_BUDGET_MS = 24_000
-
   const [profile, setProfile] = useState<ProfileRow | null>(null)
   const [editing, setEditing] = useState(false)
   const [showNotif, setShowNotif] = useState(false)
@@ -5710,11 +5709,12 @@ function ProfileTab({
       })
       /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
       void finalizeDueAiReviews()
-      /** `getProfile` 回前景偶有長等待；與統計並行，`refresh_profile_tab_stats` 不依賴 profile 資料。 */
-      const [latest, stats] = await Promise.all([
-        raceWithBudgetMs('profileTab', 'load:getProfile', PROFILE_HYDRATE_BUDGET_MS, getProfile(userId)),
-        raceWithBudgetMs('profileTab', 'load:tabStats', PROFILE_HYDRATE_BUDGET_MS, refreshProfileTabStats()),
-      ])
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        /** 先換發+wake（load 強制）；勿再疊 `raceWithBudgetMs(24s)`——會早於 REST 28s abort 並把資料砍成 null。 */
+        await prepareSupabaseForProfileReads('load')
+      }
+      /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
+      const [latest, stats] = await Promise.all([getProfile(userId), refreshProfileTabStats()])
       if (profileLoadEpochRef.current !== myEpoch) {
         actionTrace('profileTab', 'load:略過 stale', {
           rid,
@@ -5744,17 +5744,15 @@ function ProfileTab({
       const poll = Date.now()
       actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
       void finalizeDueAiReviews()
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        await prepareSupabaseForProfileReads('poll')
+      }
       const [latest, notifications, stats] = await Promise.all([
-        raceWithBudgetMs('profileTab', 'poll:getProfile', PROFILE_HYDRATE_BUDGET_MS, getProfile(userId)),
-        raceWithBudgetMs(
-          'profileTab',
-          'poll:notifications',
-          PROFILE_HYDRATE_BUDGET_MS,
-          getUnreadAppNotifications(userId),
-        ),
-        raceWithBudgetMs('profileTab', 'poll:tabStats', PROFILE_HYDRATE_BUDGET_MS, refreshProfileTabStats()),
+        getProfile(userId),
+        getUnreadAppNotifications(userId),
+        refreshProfileTabStats(),
       ])
-      const notifList = notifications ?? []
+      const notifList = notifications
       if (profilePollGenRef.current !== myEpoch) {
         actionTrace('profileTab', 'poll:略過 stale', {
           poll,

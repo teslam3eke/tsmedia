@@ -455,6 +455,28 @@ export function repairAuthAfterResume(): Promise<void> {
   return repairAuthFlight
 }
 
+const PROFILE_TAB_READ_ENSURE_DEEP_MS = 14_000
+
+/**
+ * 「我的」載入／輪詢前：從 hidden／BFCache 回來時 sessionStorage 會帶標記「需完整換發」。
+ * 先前只靠 5.5s ensure 再打 REST，再被外層 24s race 砍掉 → 整頁 profiles／stats 變 null（Console 會見大量 timeout）。
+ * - `load`：一律 refreshSession + wake + 較長 ensure。
+ * - `poll`：僅標記仍在時深修理；否則短 ensure。
+ */
+export async function prepareSupabaseForProfileReads(mode: 'load' | 'poll'): Promise<void> {
+  if (typeof document === 'undefined') return
+  if (document.visibilityState !== 'visible') return
+  if (!navigator.onLine) return
+
+  const deep = mode === 'load' || iosResumeFullAuthRepairPending()
+  if (deep) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(PROFILE_TAB_READ_ENSURE_DEEP_MS)
+  } else {
+    await ensureConnectionWithBudget()
+  }
+}
+
 async function runEnsureWithRetries(): Promise<boolean> {
   for (let attempt = 1; attempt <= ENSURE_MAX_ATTEMPTS; attempt++) {
     if (attempt > 1) {
