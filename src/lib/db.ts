@@ -14,17 +14,23 @@ export const TERMS_VERSION = '2026-04-28'
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
 export async function getProfile(userId: string): Promise<ProfileRow | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single()
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const query = () =>
+    supabase.from('profiles').select('*').eq('id', userId).single()
+
+  let { data, error } = await query()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await query())
+  }
 
   if (error) {
     console.error('[db] getProfile error:', error.message)
     return null
   }
-  return data
+  return data as ProfileRow
 }
 
 export interface UpsertProfilePayload {
@@ -512,13 +518,23 @@ export async function createAppNotification(payload: {
 }
 
 export async function getUnreadAppNotifications(userId: string): Promise<AppNotificationRow[]> {
-  const { data, error } = await supabase
-    .from('app_notifications')
-    .select('*')
-    .eq('user_id', userId)
-    .is('read_at', null)
-    .order('created_at', { ascending: false })
-    .limit(10)
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const query = () =>
+    supabase
+      .from('app_notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .is('read_at', null)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+  let { data, error } = await query()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await query())
+  }
 
   if (error) {
     console.error('[db] getUnreadAppNotifications error:', error.message)
@@ -694,8 +710,18 @@ export async function claimDailyMemberHearts(): Promise<{
   reason?: string
   appDayKey?: string
 }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc('claim_daily_member_hearts')
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const rpc = async () =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).rpc('claim_daily_member_hearts')
+
+  let { data, error } = await rpc()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await rpc())
+  }
 
   if (error) {
     console.error('[db] claimDailyMemberHearts error:', error.message)
@@ -717,8 +743,19 @@ export type ProfileTabStats = {
 
 /** 更新登入 streak／累積天數，並回傳「我的」頁統計（須執行 migration 016） */
 export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc('refresh_profile_tab_stats')
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const rpc = async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (supabase as any).rpc('refresh_profile_tab_stats')
+  }
+
+  let { data, error } = await rpc()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await rpc())
+  }
 
   if (error) {
     console.error('[db] refreshProfileTabStats error:', error.message)
@@ -736,11 +773,21 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
 
 /** 成功為陣列（可能為空）；失敗為 null — 勿覆寫畫面上既有資料（PWA 回前景時 JWT 尚未好常誤判成「沒配對」）。 */
 export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
-  const { data, error } = await supabase
-    .from('matches')
-    .select('*')
-    .or(`user_a.eq.${userId},user_b.eq.${userId}`)
-    .order('created_at', { ascending: false })
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const query = () =>
+    supabase
+      .from('matches')
+      .select('*')
+      .or(`user_a.eq.${userId},user_b.eq.${userId}`)
+      .order('created_at', { ascending: false })
+
+  let { data, error } = await query()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await query())
+  }
 
   if (error) {
     console.error('[db] getMyMatches error:', error.message)
@@ -781,11 +828,17 @@ export function subscribeToNewMatches(
 
 /** 成功為陣列（可能為空）；失敗為 null — 前景重載時勿清空聊天（避免誤以為訊息遺失）。 */
 export async function getMatchMessages(matchId: string): Promise<MessageRow[] | null> {
-  const { data, error } = await supabase
-    .from('messages')
-    .select('*')
-    .eq('match_id', matchId)
-    .order('created_at', { ascending: true })
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const query = () =>
+    supabase.from('messages').select('*').eq('match_id', matchId).order('created_at', { ascending: true })
+
+  let { data, error } = await query()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await query())
+  }
 
   if (error) {
     console.error('[db] getMatchMessages error:', error.message)
@@ -1038,11 +1091,21 @@ export async function submitMessageReport(payload: {
 }
 
 export async function getCreditTransactions(userId: string): Promise<CreditTransactionRow[]> {
-  const { data, error } = await supabase
-    .from('credit_transactions')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await wakeSupabaseAuthFromBackground()
+
+  const query = () =>
+    supabase
+      .from('credit_transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+
+  let { data, error } = await query()
+  if (error && visible) {
+    await wakeSupabaseAuthFromBackground()
+    ;({ data, error } = await query())
+  }
 
   if (error) {
     console.error('[db] getCreditTransactions error:', error.message)

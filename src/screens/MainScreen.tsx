@@ -5569,7 +5569,7 @@ function ProfileTab({
     const load = async () => {
       await finalizeDueAiReviews()
       const latest = await getProfile(userId)
-      setProfile(latest)
+      setProfile((prev) => latest ?? prev)
       const stats = await refreshProfileTabStats()
       if (stats) setTabStats(stats)
     }
@@ -5581,7 +5581,7 @@ function ProfileTab({
     const loadNotifications = async () => {
       await finalizeDueAiReviews()
       const latest = await getProfile(userId)
-      if (latest) setProfile(latest)
+      setProfile((prev) => latest ?? prev)
       const notifications = await getUnreadAppNotifications(userId)
       const legacySuperLikes = notifications.filter((n) => n.kind === 'super_like_received')
       if (legacySuperLikes.length > 0) {
@@ -6260,9 +6260,10 @@ export default function MainScreen({
     let cancelled = false
     void getProfile(user.id).then((profile) => {
       if (cancelled) return
-      if (profile?.gender) setCurrentUserGender(profile.gender)
-      setCurrentUserPreferredRegion((profile?.preferred_region as import('@/lib/types').Region | null) ?? null)
-      const n = (profile?.photo_urls ?? []).filter(Boolean).length
+      if (!profile) return
+      if (profile.gender) setCurrentUserGender(profile.gender)
+      setCurrentUserPreferredRegion((profile.preferred_region as import('@/lib/types').Region | null) ?? null)
+      const n = (profile.photo_urls ?? []).filter(Boolean).length
       setSelfPhotoOk(n >= PROFILE_PHOTO_MIN)
     })
     return () => {
@@ -6431,7 +6432,8 @@ export default function MainScreen({
                   if (user?.id && targetTab === 'discover') {
                     // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
                     void getProfile(user.id).then((profile) => {
-                      const ok = (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
+                      if (!profile) return
+                      const ok = (profile.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
                       setSelfPhotoOk(ok)
                       if (!ok) {
                         setPhotoGateToast(true)
