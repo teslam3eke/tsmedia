@@ -394,6 +394,34 @@ function formatDiscoverDeckLoadError(e: unknown): string {
   return s.length > 320 ? `${s.slice(0, 320)}…` : s
 }
 
+/**
+ * iOS PWA 上若只有整頁重載能恢復探索，於首次失敗時自動 reload 一次。
+ * `sessionStorage` 避免連續重載；成功載入後 {@link clearDiscoverFailAutoReloadFlag}。
+ */
+const DISCOVER_FAIL_AUTO_RELOAD_KEY = 'tsmedia_discover_fail_auto_reload_v1'
+
+function clearDiscoverFailAutoReloadFlag(): void {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.removeItem(DISCOVER_FAIL_AUTO_RELOAD_KEY)
+  } catch {
+    /* private mode */
+  }
+}
+
+/** @returns 是否已觸發 reload（呼叫端應略過後續 setState） */
+function tryDiscoverFailAutoReload(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    if (sessionStorage.getItem(DISCOVER_FAIL_AUTO_RELOAD_KEY) === '1') return false
+    sessionStorage.setItem(DISCOVER_FAIL_AUTO_RELOAD_KEY, '1')
+    window.location.reload()
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** 將資料庫個人檔案轉成配對／聊天詳情用的 Profile（與探索卡版面一致）。 */
 async function profileRowToMatchProfile(row: ProfileRow, idSlot: number): Promise<Profile> {
   const uid = row.id
@@ -1453,6 +1481,7 @@ function DiscoverTab({
       setLiveDeckStatus('idle')
       setLiveDeck([])
       setDeckLoadDiagnostic(null)
+      clearDiscoverFailAutoReloadFlag()
       return
     }
 
@@ -1486,6 +1515,7 @@ function DiscoverTab({
           const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
           if (cancelled) return
           if (rpcError) {
+            if (!cancelled && tryDiscoverFailAutoReload()) return
             const detail = rpcError.trim() || '（伺服器未附說明）'
             setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', detail].join('\n\n'))
             if (!keepStaleVisible) setLiveDeck([])
@@ -1496,6 +1526,7 @@ function DiscoverTab({
           const profiles = await Promise.all(rows.map((r, i) => mapDailyDiscoverRow(r, i)))
           if (cancelled) return
           setDeckLoadDiagnostic(null)
+          clearDiscoverFailAutoReloadFlag()
           setLiveDeck(profiles)
           setLiveDeckStatus('ready')
         }
@@ -1510,6 +1541,7 @@ function DiscoverTab({
       } catch (e) {
         console.error('[DiscoverTab] deck load failed:', e)
         if (!cancelled) {
+          if (tryDiscoverFailAutoReload()) return
           const msg = formatDiscoverDeckLoadError(e)
           const noPhasePrefix =
             (e && typeof e === 'object' && (e as { name?: string }).name === 'TimeoutError') ||
@@ -1769,6 +1801,9 @@ function DiscoverTab({
               lang="zh-Hant"
             >
               <p className="text-[13px] font-bold text-rose-950">探索暫時載入失敗</p>
+              <p className="mt-2 text-[11px] leading-relaxed text-rose-900/90">
+                若曾自動重新載入過仍看到此畫面，請再試下方「⑧」或關掉程式後重開。
+              </p>
               <p className="mt-3 whitespace-pre-wrap break-words text-[13px] font-normal leading-relaxed text-slate-900">
                 {deckFailureDetail}
               </p>
@@ -1860,6 +1895,7 @@ function DiscoverTab({
                 disabled={Boolean(deckRecoverBusy)}
                 onClick={() => {
                   setDeckRecoverBusy('整頁重新載入')
+                  clearDiscoverFailAutoReloadFlag()
                   window.location.reload()
                 }}
                 className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-left text-[13px] font-semibold text-amber-950 shadow-sm active:bg-amber-100/80 disabled:opacity-50"
