@@ -801,8 +801,12 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
     console.error('[db] refreshProfileTabStats error:', error.message)
     return null
   }
-  const row = data as ProfileTabStats | null
-  if (!row) return null
+  let raw: unknown = data
+  if (Array.isArray(raw) && raw.length > 0 && raw[0] != null && typeof raw[0] === 'object') {
+    raw = raw[0]
+  }
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as ProfileTabStats
   return {
     login_streak_days: Number(row.login_streak_days ?? 0),
     login_total_days: Number(row.login_total_days ?? 0),

@@ -5572,9 +5572,9 @@ function ProfileTab({
     const load = async () => {
       /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
       void finalizeDueAiReviews()
-      const latest = await getProfile(userId)
+      /** `getProfile` 回前景偶有長等待；與統計並行，`refresh_profile_tab_stats` 不依賴 profile 資料。 */
+      const [latest, stats] = await Promise.all([getProfile(userId), refreshProfileTabStats()])
       setProfile((prev) => latest ?? prev)
-      const stats = await refreshProfileTabStats()
       if (stats) setTabStats(stats)
     }
     load()
@@ -5584,16 +5584,18 @@ function ProfileTab({
     if (!userId) return
     const loadNotifications = async () => {
       void finalizeDueAiReviews()
-      const latest = await getProfile(userId)
+      const [latest, notifications, stats] = await Promise.all([
+        getProfile(userId),
+        getUnreadAppNotifications(userId),
+        refreshProfileTabStats(),
+      ])
       setProfile((prev) => latest ?? prev)
-      const notifications = await getUnreadAppNotifications(userId)
       const legacySuperLikes = notifications.filter((n) => n.kind === 'super_like_received')
       if (legacySuperLikes.length > 0) {
         await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
       }
       setAppNotifications(notifications.filter((n) => n.kind !== 'super_like_received'))
       onRefreshCredits()
-      const stats = await refreshProfileTabStats()
       if (stats) setTabStats(stats)
     }
     loadNotifications()
@@ -5606,7 +5608,8 @@ function ProfileTab({
     await markAppNotificationRead(notificationId)
   }
 
-  const displayName = profile?.name ?? '—'
+  const displayName =
+    (profile?.nickname?.trim() || profile?.name?.trim() || null) ?? '—'
   const interests = profile?.interests ?? []
   const bio = profile?.bio ?? ''
   const verStatus = profile?.verification_status ?? 'pending'
