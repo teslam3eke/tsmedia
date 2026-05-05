@@ -5570,7 +5570,8 @@ function ProfileTab({
 
   useEffect(() => {
     const load = async () => {
-      await finalizeDueAiReviews()
+      /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
+      void finalizeDueAiReviews()
       const latest = await getProfile(userId)
       setProfile((prev) => latest ?? prev)
       const stats = await refreshProfileTabStats()
@@ -5582,7 +5583,7 @@ function ProfileTab({
   useEffect(() => {
     if (!userId) return
     const loadNotifications = async () => {
-      await finalizeDueAiReviews()
+      void finalizeDueAiReviews()
       const latest = await getProfile(userId)
       setProfile((prev) => latest ?? prev)
       const notifications = await getUnreadAppNotifications(userId)
