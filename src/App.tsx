@@ -11,7 +11,7 @@ import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 
-import { supabase, wakeSupabaseAuthFromBackground } from '@/lib/supabase'
+import { supabase, ensureConnection, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
@@ -75,6 +75,8 @@ export default function App() {
   const [currentProfileName, setCurrentProfileName] = useState<string | null>(null)
   const [termsBusy, setTermsBusy] = useState(false)
   const [termsError, setTermsError] = useState<string | undefined>()
+  /** Supabase／iOS 連線自助修復訊息（見 `ensureConnection`） */
+  const [connectionBannerMsg, setConnectionBannerMsg] = useState<string | null>(null)
   /** 進入主畫面時預設分頁：生活照未達標時強制「我的」以便上傳 */
   const [mainInitialTab, setMainInitialTab] = useState<MainScreenTab>('discover')
 
@@ -133,6 +135,19 @@ export default function App() {
     if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
     launchMainFromProfile(profile)
   }
+
+  useEffect(() => {
+    const listener: EventListener = (e: Event) => {
+      const d = (e as CustomEvent<ConnectionRepairDetail>).detail
+      if (d.phase === 'start') {
+        if (screen === 'splash' || screen === 'landing') return
+        setConnectionBannerMsg(d.message)
+      } else if (d.phase === 'success') setConnectionBannerMsg(null)
+      else setConnectionBannerMsg(d.message)
+    }
+    window.addEventListener(CONNECTION_REPAIR_EVENT, listener)
+    return () => window.removeEventListener(CONNECTION_REPAIR_EVENT, listener)
+  }, [screen])
 
   // ── iOS PWA layout recalc hack ────────────────────────────────────
   // On cold-start, iOS PWA occasionally renders with a stale viewport
@@ -242,7 +257,7 @@ export default function App() {
         // iOS Safari／PWA：冷啟時 React 此 effect 晚於初始 `pageshow`，MainScreen 的 wake 監聽尚不存在，
         // 若 storage 內 access_token 已過期，這裡第一個 getProfile 會失敗（桌面較少見）。
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await wakeSupabaseAuthFromBackground()
+          await ensureConnection()
         }
         const profile = await getProfile(u.id)
         routeByProfile(profile)
@@ -341,6 +356,19 @@ export default function App() {
     }
   }
 
+  const connectivityToast =
+    connectionBannerMsg && screen !== 'landing' ? (
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-0 right-0 z-[99990] flex justify-center px-4"
+      >
+        <span className="max-w-[min(100%-2rem,24rem)] rounded-2xl bg-slate-900/92 px-4 py-2.5 text-center text-xs font-semibold tracking-wide text-white shadow-xl ring-1 ring-white/10">
+          {connectionBannerMsg}
+        </span>
+      </div>
+    ) : null
+
   if (!authReady) return <SplashScreen />
 
   // Main screen is rendered OUTSIDE AnimatePresence/motion.div so it is not
@@ -349,22 +377,27 @@ export default function App() {
   // PWA cold start (the dvh / fill-available bugs don't apply).
   if (screen === 'main') {
     return (
-      <div
-        className="app-container flex flex-col bg-white overflow-hidden"
-        style={{ height: 'var(--app-height, 100dvh)' }}
-      >
-        <MainScreen
-          user={user}
-          initialDiscoverGender={userGender}
-          initialTab={mainInitialTab}
-          onSignOut={() => go('landing')}
-        />
-      </div>
+      <>
+        {connectivityToast}
+        <div
+          className="app-container flex flex-col bg-white overflow-hidden"
+          style={{ height: 'var(--app-height, 100dvh)' }}
+        >
+          <MainScreen
+            user={user}
+            initialDiscoverGender={userGender}
+            initialTab={mainInitialTab}
+            onSignOut={() => go('landing')}
+          />
+        </div>
+      </>
     )
   }
 
   return (
-    <AnimatePresence mode="wait">
+    <>
+      {connectivityToast}
+      <AnimatePresence mode="wait">
       <motion.div
         key={screen}
         initial={motionInitial}
@@ -447,5 +480,6 @@ export default function App() {
         )}
       </motion.div>
     </AnimatePresence>
+    </>
   )
 }

@@ -39,7 +39,9 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         // build-id 一律走網路，避免 SW／HTTP 快取讓版本檢查讀到舊檔
-        // Supabase：含 OPTIONS 預檢 + POST RPC；勿拆成僅 POST 規則 → 405。
+        // Supabase：**整個 *.supabase.co 主機一律 NetworkOnly、不 method 細拆**，
+        // 含 OPTIONS（CORS）、REST、Auth、Realtime upgrade；可避免 SW／快取鎖進錯誤的離線快照。
+        // iOS PWA：勿改回 StaleWhileRevalidate 或依 method 分拆 — 易造成假連線／僵死請求。
         runtimeCaching: [
           {
             urlPattern: ({ url }) =>

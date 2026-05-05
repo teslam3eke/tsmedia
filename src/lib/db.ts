@@ -1,4 +1,4 @@
-import { supabase, wakeSupabaseAuthFromBackground } from './supabase'
+import { supabase, ensureConnection } from './supabase'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
@@ -15,14 +15,14 @@ export const TERMS_VERSION = '2026-04-28'
 
 export async function getProfile(userId: string): Promise<ProfileRow | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const query = () =>
     supabase.from('profiles').select('*').eq('id', userId).single()
 
   let { data, error } = await query()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await query())
   }
 
@@ -519,7 +519,7 @@ export async function createAppNotification(payload: {
 
 export async function getUnreadAppNotifications(userId: string): Promise<AppNotificationRow[]> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const query = () =>
     supabase
@@ -532,7 +532,7 @@ export async function getUnreadAppNotifications(userId: string): Promise<AppNoti
 
   let { data, error } = await query()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await query())
   }
 
@@ -590,18 +590,18 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
 }> {
   /**
    * iOS／PWA：使用者可能在 visibility debounce 完成前就切到探索；此時 JWT 尚未換發，RPC 失敗會吃成空陣列。
-   * 先與前景 wake 對齊（mutex 會合併並發），必要時再 wake 重試一次。
-   * `skipWake`：呼叫端已 await 過 wake 時設為 true，避免換發耗時併入 UI 逾時競賽。
+   * 先與前景 `ensureConnection` 對齊（單一 flight 合併並發），必要時再重試 RPC。
+   * `skipWake`：呼叫端已在 race 外 `await ensureConnection()` 時設為 true，避免換發耗時併入 UI 逾時競賽。
    */
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible && !options?.skipWake) await wakeSupabaseAuthFromBackground()
+  if (visible && !options?.skipWake) await ensureConnection()
 
   // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let { data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
 
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;({ data, error } = await (supabase as any).rpc('get_daily_discover_deck_v2', {}))
   }
@@ -711,7 +711,7 @@ export async function claimDailyMemberHearts(): Promise<{
   appDayKey?: string
 }> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const rpc = async () =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -719,7 +719,7 @@ export async function claimDailyMemberHearts(): Promise<{
 
   let { data, error } = await rpc()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await rpc())
   }
 
@@ -744,7 +744,7 @@ export type ProfileTabStats = {
 /** 更新登入 streak／累積天數，並回傳「我的」頁統計（須執行 migration 016） */
 export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const rpc = async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -753,7 +753,7 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
 
   let { data, error } = await rpc()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await rpc())
   }
 
@@ -774,7 +774,7 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
 /** 成功為陣列（可能為空）；失敗為 null — 勿覆寫畫面上既有資料（PWA 回前景時 JWT 尚未好常誤判成「沒配對」）。 */
 export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const query = () =>
     supabase
@@ -785,7 +785,7 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
 
   let { data, error } = await query()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await query())
   }
 
@@ -829,14 +829,14 @@ export function subscribeToNewMatches(
 /** 成功為陣列（可能為空）；失敗為 null — 前景重載時勿清空聊天（避免誤以為訊息遺失）。 */
 export async function getMatchMessages(matchId: string): Promise<MessageRow[] | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const query = () =>
     supabase.from('messages').select('*').eq('match_id', matchId).order('created_at', { ascending: true })
 
   let { data, error } = await query()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await query())
   }
 
@@ -1092,7 +1092,7 @@ export async function submitMessageReport(payload: {
 
 export async function getCreditTransactions(userId: string): Promise<CreditTransactionRow[]> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await wakeSupabaseAuthFromBackground()
+  if (visible) await ensureConnection()
 
   const query = () =>
     supabase
@@ -1103,7 +1103,7 @@ export async function getCreditTransactions(userId: string): Promise<CreditTrans
 
   let { data, error } = await query()
   if (error && visible) {
-    await wakeSupabaseAuthFromBackground()
+    await ensureConnection()
     ;({ data, error } = await query())
   }
 

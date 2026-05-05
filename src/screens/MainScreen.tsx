@@ -17,6 +17,7 @@ import {
   reconnectSupabaseRealtimeOnly,
   refreshSupabaseAuthSoft,
   touchSupabaseAuthSessionRead,
+  ensureConnection,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
@@ -1510,7 +1511,7 @@ function DiscoverTab({
       try {
         const work = async () => {
           if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-            await wakeSupabaseAuthFromBackground()
+            await ensureConnection()
           }
           const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
           if (cancelled) return
@@ -6009,7 +6010,7 @@ export default function MainScreen({
     if (!user?.id) return
     if (document.visibilityState !== 'visible') return
     let cancelled = false
-    void wakeSupabaseAuthFromBackground().finally(() => {
+    void ensureConnection().finally(() => {
       if (cancelled) return
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
@@ -6035,7 +6036,7 @@ export default function MainScreen({
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
         debounceTimer = null
-        void wakeSupabaseAuthFromBackground().finally(() => {
+        void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
           setRewardFlash(null)
           setMatchSplash(null)
@@ -6147,7 +6148,7 @@ export default function MainScreen({
       return
     }
     if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-      await wakeSupabaseAuthFromBackground()
+      await ensureConnection()
     }
     const gen = ++liveMatchThreadsLoadGenRef.current
     const blockSpinner = mode === 'full'
