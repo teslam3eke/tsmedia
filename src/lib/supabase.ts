@@ -63,6 +63,58 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
   },
 })
 
+/**
+ * iOS PWA：`getSession` 常瞬間得到「看似有效」的 JWT，REST 仍整批掛死；用 sessionStorage 在
+ * hidden／BFCache resume 打一個跨 React 監聽的記號，`ensureConnection` 強制換發+wake。
+ * （不依賴單一分頁／effect 競態。）
+ */
+const IOS_RESUME_AUTH_REPAIR_KEY = 'tm_ios_resume_needs_full_auth'
+
+function markIosNeedsFullAuthRepairAfterHiddenOrCache(): void {
+  try {
+    sessionStorage.setItem(IOS_RESUME_AUTH_REPAIR_KEY, '1')
+  } catch {
+    /* private mode／quota */
+  }
+}
+
+function iosResumeFullAuthRepairPending(): boolean {
+  try {
+    return sessionStorage.getItem(IOS_RESUME_AUTH_REPAIR_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function clearIosResumeFullAuthRepairFlag(): void {
+  try {
+    sessionStorage.removeItem(IOS_RESUME_AUTH_REPAIR_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      markIosNeedsFullAuthRepairAfterHiddenOrCache()
+    }
+  })
+  /** BFCache：`visibilitychange` 未必再發；persisted pageshow 視同冷凍復原後必須重撿連線狀態。 */
+  window.addEventListener('pageshow', (ev: Event) => {
+    const e = ev as PageTransitionEvent
+    if (e.persisted) markIosNeedsFullAuthRepairAfterHiddenOrCache()
+  })
+  window.addEventListener('pagehide', (ev: Event) => {
+    const e = ev as PageTransitionEvent
+    if (e.persisted) markIosNeedsFullAuthRepairAfterHiddenOrCache()
+  })
+  /** Page Lifecycle（Chromium／部分 WebView）：對齊 Freeze 備案。 */
+  document.addEventListener('freeze', () => {
+    markIosNeedsFullAuthRepairAfterHiddenOrCache()
+  })
+}
+
 let wakeMutex: Promise<void> | null = null
 
 /** 整段 wake 卡住時仍能釋放 mutex，避免後續 `await wake`／REST 請求全系統凍結。 */
@@ -273,6 +325,8 @@ async function runEnsureWithRetries(): Promise<boolean> {
 async function ensureConnectionOnce(): Promise<boolean> {
   if (!navigator.onLine) return false
 
+  const resumedFromIosSuspend = iosResumeFullAuthRepairPending()
+
   type Tagged =
     | { tag: 'ok'; session: Session | null; err: unknown }
     | { tag: 'timeout' }
@@ -296,11 +350,15 @@ async function ensureConnectionOnce(): Promise<boolean> {
   }
 
   if (peek.tag === 'ok' && !peek.err && !peek.session) {
+    clearIosResumeFullAuthRepairFlag()
     return true
   }
 
+  /** 從背景／BFCache 回來：**不得**只靠快取 JWT 快速路徑——常遇到「session 仍有、請求全系統凍結」。 */
   const needsManualRefresh =
-    peek.tag === 'timeout' || (peek.tag === 'ok' && (Boolean(peek.err) || !peek.session))
+    resumedFromIosSuspend ||
+    peek.tag === 'timeout' ||
+    (peek.tag === 'ok' && (Boolean(peek.err) || !peek.session))
 
   if (!needsManualRefresh && peek.tag === 'ok') {
     return true
@@ -311,11 +369,15 @@ async function ensureConnectionOnce(): Promise<boolean> {
   /** 換發失敗且已無 session：視為登出或未登入情境，不修 UI、不中斷資料流。 */
   if (refErr) {
     const { data: after } = await supabase.auth.getSession()
-    if (!after.session) return true
+    if (!after.session) {
+      clearIosResumeFullAuthRepairFlag()
+      return true
+    }
     return false
   }
 
   await wakeSupabaseAuthFromBackground()
+  clearIosResumeFullAuthRepairFlag()
   return true
 }
 
