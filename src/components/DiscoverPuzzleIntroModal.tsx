@@ -23,11 +23,36 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
   const [hintIndex, setHintIndex] = useState(0)
   const unlockSeqRef = useRef([11, 14, 1, 13, 6, 10])
   const seqPosRef = useRef(0)
+  const resumeDismissRef = useRef(false)
 
   const orderedTiles = useMemo(
     () => [...PUZZLE_TILES].sort((a, b) => Number(demoUnlocked.has(a)) - Number(demoUnlocked.has(b))),
     [demoUnlocked],
   )
+
+  useEffect(() => {
+    if (!open) {
+      resumeDismissRef.current = false
+      return
+    }
+    const onVis = () => {
+      const v = document.visibilityState
+      if (v === 'hidden') resumeDismissRef.current = true
+      if (v === 'visible' && resumeDismissRef.current) {
+        resumeDismissRef.current = false
+        onGotIt()
+      }
+    }
+    const onShow = (ev: Event) => {
+      if ((ev as PageTransitionEvent).persisted) onGotIt()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pageshow', onShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pageshow', onShow)
+    }
+  }, [open, onGotIt])
 
   useEffect(() => {
     if (!open) return

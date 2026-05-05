@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Heart, Sparkles, Star, LayoutGrid } from 'lucide-react'
@@ -39,8 +39,36 @@ export function CreditRewardFlash({
   subtitle?: string
   onDismiss: () => void
 }) {
+  /** iOS／PWA：`setTimeout` 在背景凍結，auto-dismiss 永不跑 → 全螢幕 overlay 卡住所有觸控。 */
+  const resumeDismissRef = useRef(false)
+
   useEffect(() => {
-    if (!open) return
+    const onVisibility = () => {
+      const v = document.visibilityState
+      if (open && v === 'hidden') resumeDismissRef.current = true
+      if (open && v === 'visible' && resumeDismissRef.current) {
+        resumeDismissRef.current = false
+        onDismiss()
+      }
+    }
+    const onPageshow = (ev: Event) => {
+      if (!open) return
+      const e = ev as PageTransitionEvent
+      if (e.persisted) onDismiss()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', onPageshow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', onPageshow)
+    }
+  }, [open, onDismiss])
+
+  useEffect(() => {
+    if (!open) {
+      resumeDismissRef.current = false
+      return
+    }
     const t = window.setTimeout(onDismiss, 2400)
     return () => window.clearTimeout(t)
   }, [open, onDismiss])

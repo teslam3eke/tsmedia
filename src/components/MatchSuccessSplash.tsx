@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, Sparkles } from 'lucide-react'
@@ -24,6 +24,34 @@ export default function MatchSuccessSplash({
 }: Props) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState('')
+  const resumeDismissRef = useRef(false)
+
+  /** 回前景／BFCache：`open` 時全螢幕擋操作；使用者先前若遇觸控失效會永遠卡死。 */
+  useEffect(() => {
+    const onVis = () => {
+      if (!open) return
+      const v = document.visibilityState
+      if (v === 'hidden') resumeDismissRef.current = true
+      if (v === 'visible' && resumeDismissRef.current) {
+        resumeDismissRef.current = false
+        onClose()
+      }
+    }
+    const onShow = (ev: Event) => {
+      if (!open) return
+      if ((ev as PageTransitionEvent).persisted) onClose()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pageshow', onShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pageshow', onShow)
+    }
+  }, [open, onClose])
+
+  useEffect(() => {
+    if (!open) resumeDismissRef.current = false
+  }, [open])
 
   useEffect(() => {
     if (!open || !peerUserId) {
