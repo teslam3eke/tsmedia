@@ -61,3 +61,44 @@ export function actionTrace(
     ...(detail ?? {}),
   })
 }
+
+/** iOS／PWA：`await` 可能永不 resolve；強制結束並打日誌，仍讓呼叫端決定如何用 `null`。 */
+export async function raceWithBudgetMs<T>(
+  lane: string,
+  step: string,
+  budgetMs: number,
+  p: Promise<T>,
+): Promise<T | null> {
+  type Win =
+    | { kind: 'ok'; val: T }
+    | { kind: 'to' }
+    | { kind: 'rej'; err: unknown }
+
+  let tm: ReturnType<typeof globalThis.setTimeout> | undefined
+  try {
+    const r = await Promise.race<Win>([
+      p
+        .then((val): Win => ({ kind: 'ok', val }))
+        .catch((err): Win => ({ kind: 'rej', err })),
+      new Promise<Win>((resolve) => {
+        tm = globalThis.setTimeout(() => resolve({ kind: 'to' }), budgetMs)
+      }),
+    ])
+
+    if (r.kind === 'to') {
+      console.warn(`[tsmedia:timeout] ${lane} · ${step}`, { budgetMs })
+      actionTrace(lane, `${step}:逾時`, { budgetMs })
+      return null
+    }
+    if (r.kind === 'rej') {
+      console.warn(`[tsmedia:promise-error] ${lane} · ${step}`, r.err)
+      actionTrace(lane, `${step}:rejected`, {
+        msg: r.err instanceof Error ? r.err.message.slice(0, 160) : String(r.err).slice(0, 160),
+      })
+      return null
+    }
+    return r.val
+  } finally {
+    if (tm != null) globalThis.clearTimeout(tm)
+  }
+}
