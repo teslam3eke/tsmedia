@@ -1500,9 +1500,13 @@ function DiscoverTab({
     const keepStaleVisible = !ctxChanged && liveDeckRef.current.length > 0
 
     let cancelled = false
-    let timeoutId: ReturnType<typeof setTimeout> | null = null
-    /** 僅涵蓋 RPC＋相片簽章；換發登入在 race 外 await，見 `work` 開頭 */
-    const DECK_LOAD_DEADLINE_MS = 22_000
+    /**
+     * 舊版把 `ensureConnectionWithBudget`（約 5.5s）與 RPC／簽章塞進同一個 22s race，常導致
+     * `work:即將請求探索RPC` 後還沒等到 PostgREST 就被整段判逾時。此值只限制 **ensure 之後** 的 RPC+簽章。
+     */
+    const DECK_POST_ENSURE_BUDGET_MS = 52_000
+    /** 單獨對 `get_daily_discover_deck_v2` 設硬頂，一定會打 `[tsmedia:timeout]`（永遠）或 action trace。 */
+    const DECK_RPC_CLIENT_BUDGET_MS = 30_000
 
     const myEpoch = ++deckLoadEpochRef.current
 
@@ -1540,83 +1544,125 @@ function DiscoverTab({
             })
             return
           }
-          actionTrace('discover.deck', 'work:即將請求探索RPC', { myEpoch })
-          const tRpc = perfNow()
-          const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
-          if (cancelled || deckLoadEpochRef.current !== myEpoch) {
-            actionTrace('discover.deck', 'work:RPC 後略過 stale', { ms: Math.round(perfNow() - tRpc), myEpoch })
-            return
-          }
-          actionTrace('discover.deck', 'work:RPC 回來', {
-            ms: Math.round(perfNow() - tRpc),
-            rowCount: rows.length,
-            rpcErr: rpcError ? rpcError.slice(0, 80) : null,
-            myEpoch,
-          })
-          if (rpcError) {
-            if (cancelled || deckLoadEpochRef.current !== myEpoch) return
-            if (tryDiscoverFailAutoReload()) return
-            const detail = rpcError.trim() || '（伺服器未附說明）'
-            setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', detail].join('\n\n'))
-            if (!keepStaleVisible) setLiveDeck([])
-            setLiveDeckStatus('ready')
-            actionTrace('discover.deck', 'work:RPC 錯誤結束（UI ready）', {})
-            return
-          }
-          phase = 'photos'
-          const tPhotos = perfNow()
-          const profiles = await Promise.all(
-            rows.map(async (r, i) => {
-              actionTrace('discover.deck', 'mapRow:開始', {
-                i,
-                pid: shortId(String(r.id)),
-                photoPaths: (r.photo_urls ?? []).length,
-              })
-              try {
-                const p = await mapDailyDiscoverRow(r, i)
-                actionTrace('discover.deck', 'mapRow:結束', {
-                  i,
-                  pid: shortId(String(r.id)),
-                  outPhotos: p.photoUrls?.length ?? 0,
+
+          let postEnsureTimeoutId: ReturnType<typeof setTimeout> | null = null
+          const deckTimeoutErr = Object.assign(new Error('探索載入逾時'), { name: 'TimeoutError' })
+          try {
+            await Promise.race([
+              (async () => {
+                actionTrace('discover.deck', 'work:即將請求探索RPC', { myEpoch })
+                const tRpc = perfNow()
+                const fetched = await raceWithBudgetMs(
+                  'discover.deck',
+                  'fetchDailyDiscoverDeck',
+                  DECK_RPC_CLIENT_BUDGET_MS,
+                  fetchDailyDiscoverDeck({ skipWake: true }),
+                )
+                if (fetched == null) {
+                  actionTrace('discover.deck', 'work:RPC 客戶端逾時', {
+                    myEpoch,
+                    budgetMs: DECK_RPC_CLIENT_BUDGET_MS,
+                  })
+                }
+                const rows = fetched?.rows ?? []
+                const rpcError =
+                  fetched == null
+                    ? '無法於時限內取得探索名單（請求可能仍在背景未完成）。請重試載入。'
+                    : fetched.rpcError
+                if (cancelled || deckLoadEpochRef.current !== myEpoch) {
+                  actionTrace('discover.deck', 'work:RPC 後略過 stale', {
+                    ms: Math.round(perfNow() - tRpc),
+                    myEpoch,
+                  })
+                  return
+                }
+                actionTrace('discover.deck', 'work:RPC 回來', {
+                  ms: Math.round(perfNow() - tRpc),
+                  rowCount: rows.length,
+                  rpcErr: rpcError ? rpcError.slice(0, 80) : null,
+                  myEpoch,
                 })
-                return p
-              } catch (e) {
-                actionTrace('discover.deck', 'mapRow:例外', {
-                  i,
-                  msg: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160),
+                if (rpcError) {
+                  if (cancelled || deckLoadEpochRef.current !== myEpoch) return
+                  if (tryDiscoverFailAutoReload()) return
+                  const detail = rpcError.trim() || '（伺服器未附說明）'
+                  const clientHung = fetched == null
+                  setDeckLoadDiagnostic(
+                    (clientHung
+                      ? ['【探索名單】裝置端等待逾時', detail]
+                      : ['【探索名單】伺服器錯誤', detail]
+                    ).join('\n\n'),
+                  )
+                  if (!keepStaleVisible) setLiveDeck([])
+                  setLiveDeckStatus('ready')
+                  actionTrace('discover.deck', 'work:RPC 錯誤結束（UI ready）', {})
+                  return
+                }
+                phase = 'photos'
+                const tPhotos = perfNow()
+                const profiles = await Promise.all(
+                  rows.map(async (r, i) => {
+                    actionTrace('discover.deck', 'mapRow:開始', {
+                      i,
+                      pid: shortId(String(r.id)),
+                      photoPaths: (r.photo_urls ?? []).length,
+                    })
+                    try {
+                      const p = await mapDailyDiscoverRow(r, i)
+                      actionTrace('discover.deck', 'mapRow:結束', {
+                        i,
+                        pid: shortId(String(r.id)),
+                        outPhotos: p.photoUrls?.length ?? 0,
+                      })
+                      return p
+                    } catch (e) {
+                      actionTrace('discover.deck', 'mapRow:例外', {
+                        i,
+                        msg: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160),
+                      })
+                      throw e
+                    }
+                  }),
+                )
+                if (cancelled || deckLoadEpochRef.current !== myEpoch) {
+                  actionTrace('discover.deck', 'work:簽章後略過 stale', {
+                    cancelled,
+                    mapMs: Math.round(perfNow() - tPhotos),
+                    myEpoch,
+                    cur: deckLoadEpochRef.current,
+                  })
+                  return
+                }
+                actionTrace('discover.deck', 'work:setState 前', {
+                  profileCount: profiles.length,
+                  mapMs: Math.round(perfNow() - tPhotos),
+                  myEpoch,
                 })
-                throw e
-              }
-            }),
-          )
-          if (cancelled || deckLoadEpochRef.current !== myEpoch) {
-            actionTrace('discover.deck', 'work:簽章後略過 stale', {
-              cancelled,
-              mapMs: Math.round(perfNow() - tPhotos),
-              myEpoch,
-              cur: deckLoadEpochRef.current,
-            })
-            return
+                setDeckLoadDiagnostic(null)
+                clearDiscoverFailAutoReloadFlag()
+                setLiveDeck(profiles)
+                setLiveDeckStatus('ready')
+                actionTrace('discover.deck', 'work:完成', {
+                  profileCount: profiles.length,
+                  myEpoch,
+                })
+              })(),
+              new Promise<never>((_, reject) => {
+                postEnsureTimeoutId = window.setTimeout(
+                  () => reject(deckTimeoutErr),
+                  DECK_POST_ENSURE_BUDGET_MS,
+                )
+              }),
+            ])
+          } finally {
+            if (postEnsureTimeoutId != null) {
+              window.clearTimeout(postEnsureTimeoutId)
+              postEnsureTimeoutId = null
+            }
           }
-          actionTrace('discover.deck', 'work:setState 前', {
-            profileCount: profiles.length,
-            mapMs: Math.round(perfNow() - tPhotos),
-            myEpoch,
-          })
-          setDeckLoadDiagnostic(null)
-          clearDiscoverFailAutoReloadFlag()
-          setLiveDeck(profiles)
-          setLiveDeckStatus('ready')
-          actionTrace('discover.deck', 'work:完成', { profileCount: profiles.length, myEpoch })
         }
 
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = window.setTimeout(() => {
-            reject(Object.assign(new Error('探索載入逾時'), { name: 'TimeoutError' }))
-          }, DECK_LOAD_DEADLINE_MS)
-        })
-
-        await Promise.race([work(), timeoutPromise])
+        await work()
       } catch (e) {
         console.error('[DiscoverTab] deck load failed:', e)
         if (!cancelled && deckLoadEpochRef.current === myEpoch) {
@@ -1635,11 +1681,6 @@ function DiscoverTab({
           if (!keepStaleVisible) setLiveDeck([])
           setLiveDeckStatus('ready')
         }
-      } finally {
-        if (timeoutId != null) {
-          window.clearTimeout(timeoutId)
-          timeoutId = null
-        }
       }
     })()
 
@@ -1653,7 +1694,6 @@ function DiscoverTab({
         latestEpoch: deckLoadEpochRef.current,
       })
       cancelled = true
-      if (timeoutId != null) window.clearTimeout(timeoutId)
     }
   }, [userId, discoverDeckDayKey, deckRefresh])
 
