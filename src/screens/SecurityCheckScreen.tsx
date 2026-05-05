@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Shield, Lock, Wifi, Eye, AlertTriangle, CheckCircle2,
@@ -50,6 +50,22 @@ interface Props {
   onContinue: () => void
 }
 
+/** 正常動畫最後一步約 2330ms；WebKit resume 會凍計時器，`allDone` 永不到 → 卡住本頁。 */
+const MIN_MS_BEFORE_RESUME_FORCE_FINISH = 2_650
+/** 保底：任一情況下必出現繼續／略過鈕。 */
+const SECURITY_CHECK_WATCHDOG_MS = 12_000
+
+function readStandaloneMode(): boolean {
+  try {
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+    )
+  } catch {
+    return false
+  }
+}
+
 export default function SecurityCheckScreen({ onContinue }: Props) {
   const [checks, setChecks] = useState<Check[]>(
     CHECKS.map((c) => ({ ...c, status: 'pending' })),
@@ -58,41 +74,94 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
   const [allDone, setAllDone] = useState(false)
   const [pwaSkipped, setPwaSkipped] = useState(false)
 
+  const allDoneRef = useRef(allDone)
+  const forceFinalizeRef = useRef(false)
+
   useEffect(() => {
+    allDoneRef.current = allDone
+  }, [allDone])
+
+  useEffect(() => {
+    const timeouts: ReturnType<typeof setTimeout>[] = []
+    const mountedAt = Date.now()
+
+    /** 強制對齊最終狀態（回前景／watchdog）；不自動開 PWA 浮層，避免 resume 後卡在全螢幕。 */
+    const forceFinalizeSim = () => {
+      if (allDoneRef.current || forceFinalizeRef.current) return
+      forceFinalizeRef.current = true
+      const standalone = readStandaloneMode()
+      setChecks((prev) =>
+        prev.map((c) => ({
+          ...c,
+          status: c.id === 'screenshot' && !standalone ? 'warn' : 'ok',
+        })),
+      )
+      timeouts.push(
+        window.setTimeout(() => {
+          setAllDone(true)
+        }, 0),
+      )
+    }
+
+    const onResume = () => {
+      if (document.visibilityState !== 'visible') return
+      const elapsed = Date.now() - mountedAt
+      if (elapsed >= MIN_MS_BEFORE_RESUME_FORCE_FINISH && !allDoneRef.current && !forceFinalizeRef.current) {
+        forceFinalizeSim()
+      }
+    }
+
+    document.addEventListener('visibilitychange', onResume)
+    window.addEventListener('pageshow', onResume)
+
+    timeouts.push(
+      window.setTimeout(() => {
+        if (!allDoneRef.current) forceFinalizeSim()
+      }, SECURITY_CHECK_WATCHDOG_MS),
+    )
+
     CHECKS.forEach(({ id, delay }) => {
-      // Set to 'checking'
-      setTimeout(() => {
-        setChecks((prev) =>
-          prev.map((c) => (c.id === id ? { ...c, status: 'checking' } : c)),
-        )
-      }, delay)
+      timeouts.push(
+        window.setTimeout(() => {
+          if (forceFinalizeRef.current) return
+          setChecks((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, status: 'checking' } : c)),
+          )
+        }, delay),
+      )
 
-      // Set to result
-      setTimeout(() => {
-        const isStandalone =
-          window.matchMedia('(display-mode: standalone)').matches ||
-          (window.navigator as { standalone?: boolean }).standalone === true
+      timeouts.push(
+        window.setTimeout(() => {
+          if (forceFinalizeRef.current) return
+          const isStandalone = readStandaloneMode()
+          const resultStatus = id === 'screenshot' && !isStandalone ? 'warn' : 'ok'
+          setChecks((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, status: resultStatus } : c)),
+          )
 
-        const resultStatus = id === 'screenshot' && !isStandalone ? 'warn' : 'ok'
-        setChecks((prev) =>
-          prev.map((c) => (c.id === id ? { ...c, status: resultStatus } : c)),
-        )
-
-        if (id === 'screenshot') {
-          setTimeout(() => {
-            setAllDone(true)
-            if (!isStandalone) {
-              setShowPWA(true)
-            }
-          }, 600)
-        }
-      }, delay + 380)
+          if (id === 'screenshot') {
+            timeouts.push(
+              window.setTimeout(() => {
+                if (forceFinalizeRef.current) return
+                setAllDone(true)
+                if (!isStandalone) {
+                  setShowPWA(true)
+                }
+              }, 600),
+            )
+          }
+        }, delay + 380),
+      )
     })
+
+    return () => {
+      document.removeEventListener('visibilitychange', onResume)
+      window.removeEventListener('pageshow', onResume)
+      timeouts.forEach((t) => globalThis.clearTimeout(t))
+    }
   }, [])
 
-  const isStandaloneMode =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as { standalone?: boolean }).standalone === true
+  const isStandaloneMode = readStandaloneMode()
 
   const canContinue = allDone && (isStandaloneMode || pwaSkipped)
 
@@ -248,9 +317,10 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
             >
               {!isStandaloneMode && !pwaSkipped && (
                 <motion.button
+                  type="button"
                   whileTap={{ scale: 0.97 }}
                   onClick={() => setShowPWA(true)}
-                  className="w-full bg-slate-900 text-white rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 shadow-xl shadow-slate-900/20"
+                  className="touch-manipulation w-full bg-slate-900 text-white rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 shadow-xl shadow-slate-900/20"
                 >
                   <Shield className="w-5 h-5" />
                   立即封裝至主畫面
@@ -259,10 +329,11 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
 
               {(isStandaloneMode || pwaSkipped) && (
                 <motion.button
+                  type="button"
                   whileTap={{ scale: 0.97 }}
                   onClick={onContinue}
                   disabled={!canContinue}
-                  className="w-full bg-slate-900 text-white rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 shadow-xl shadow-slate-900/20 disabled:opacity-40"
+                  className="touch-manipulation w-full bg-slate-900 text-white rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 shadow-xl shadow-slate-900/20 disabled:opacity-40"
                 >
                   環境驗證完成，繼續
                   <ChevronRight className="w-5 h-5" />
@@ -271,8 +342,9 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
 
               {!isStandaloneMode && !pwaSkipped && (
                 <button
+                  type="button"
                   onClick={() => { setPwaSkipped(true); setShowPWA(false) }}
-                  className="w-full text-slate-400 text-sm py-2"
+                  className="touch-manipulation w-full text-slate-400 text-sm py-2"
                 >
                   略過此步驟（降低隱私保護等級）
                 </button>
