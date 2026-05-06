@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Shield, Lock, Wifi, Eye, AlertTriangle, CheckCircle2,
@@ -90,12 +90,17 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
     }
   }, [])
 
+  /**
+   * ① 已由主畫面封裝開啟（standalone）；
+   * ② 或非 standalone 但因曾開過封裝版而帶 tm_pwa_standalone_used（重載／回前景再度進此頁）——
+   * 自動執行 onContinue，並隱藏「環境驗證完成，繼續」區塊。
+   */
   useEffect(() => {
     if (!allDone) return
-    if (!autoContinueAfterPwaMarkerRef.current) return
+    if (!readStandaloneMode() && !autoContinueAfterPwaMarkerRef.current) return
     const t = window.setTimeout(() => {
       void onContinueRef.current()
-    }, 480)
+    }, 380)
     return () => window.clearTimeout(t)
   }, [allDone])
 
@@ -186,6 +191,12 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
   const isStandaloneMode = readStandaloneMode()
 
   const canContinue = allDone && (isStandaloneMode || pwaSkipped)
+
+  const hideManualContinueChrome = useMemo(() => {
+    if (!allDone) return false
+    if (isStandaloneMode) return true
+    return Boolean(hasUsedPwaStandaloneBefore() && pwaSkipped)
+  }, [allDone, isStandaloneMode, pwaSkipped])
 
   return (
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa]">
@@ -307,7 +318,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
 
         {/* Advisory notice */}
         <AnimatePresence>
-          {allDone && (
+          {allDone && !hideManualContinueChrome && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -330,7 +341,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
       {/* Footer */}
       <div className="px-5 pb-10 pt-4">
         <AnimatePresence>
-          {allDone && (
+          {allDone && !hideManualContinueChrome && (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
