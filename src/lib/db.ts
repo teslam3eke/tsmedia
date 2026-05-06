@@ -661,26 +661,37 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
   if (visible && !options?.skipWake) await ensureConnectionWithBudget()
 
   // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
-  const rpcDeck = async () =>
+  const rpcDeck = async (attempt: number) => {
+    actionTrace('db.fetchDailyDiscoverDeck', 'rpc:即將發出', {
+      attempt,
+      skipWake: Boolean(options?.skipWake),
+    })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase as any).rpc('get_daily_discover_deck_v2', {})
+    const res = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
+    actionTrace('db.fetchDailyDiscoverDeck', 'rpc:已取得', {
+      attempt,
+      hasErr: Boolean(res.error),
+      code: res.error?.code ?? '—',
+    })
+    return res
+  }
 
-  let { data, error } = await rpcDeck()
+  let { data, error } = await rpcDeck(1)
 
   if (error && visible) {
     await repairAuthAfterResume()
     await ensureConnectionWithBudget(12_000)
-    ;({ data, error } = await rpcDeck())
+    ;({ data, error } = await rpcDeck(2))
   }
 
   if (error && visible) {
     await repairAuthAfterResume()
-    ;({ data, error } = await rpcDeck())
+    ;({ data, error } = await rpcDeck(3))
   }
 
   if (error && visible) {
     await ensureConnectionWithBudget()
-    ;({ data, error } = await rpcDeck())
+    ;({ data, error } = await rpcDeck(4))
   }
 
   if (error) {

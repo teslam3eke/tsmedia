@@ -94,9 +94,38 @@ function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
         }, pendingWarnAfter)
       : null
 
+  /**
+   * 少數 WebKit／PWA：`ctrl.abort()` 後底層 `fetch` 仍永不 resolve／reject，UI 會卡在 await。
+   * 再套一層硬逾時強制 reject（與 soft abort 並行），讓上層能重試或顯示錯誤。
+   */
+  const hardCapMs = ms + 6_000
+  let hardTid: ReturnType<typeof globalThis.setTimeout> | null = null
+  const hardFail = (): DOMException => {
+    try {
+      return new DOMException('Supabase fetch hard timeout', 'AbortError')
+    } catch {
+      return new DOMException('AbortError', 'AbortError')
+    }
+  }
+
   const chain = nativeFetch(input as RequestInfo, { ...init, signal: ctrl.signal })
 
-  return chain
+  const raced = Promise.race([
+    chain,
+    new Promise<Response>((_, reject) => {
+      hardTid = globalThis.setTimeout(() => {
+        hardTid = null
+        try {
+          ctrl.abort()
+        } catch {
+          /* ignore */
+        }
+        reject(hardFail())
+      }, hardCapMs)
+    }),
+  ])
+
+  return raced
     .then((res) => {
       if (logOn) {
         const elapsed =
@@ -129,6 +158,10 @@ function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     })
     .finally(() => {
       globalThis.clearTimeout(tid)
+      if (hardTid != null) {
+        globalThis.clearTimeout(hardTid)
+        hardTid = null
+      }
       if (pendingTid != null) globalThis.clearTimeout(pendingTid)
       parent?.removeEventListener('abort', onParentAbort)
     })
