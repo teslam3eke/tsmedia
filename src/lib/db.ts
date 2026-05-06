@@ -27,6 +27,43 @@ function isRecoverableResumeAuthError(error: { code?: string; message?: string }
   )
 }
 
+/** 探索 RPC：並「UI 新一輪取代／卸載」（parent abort）與「單次請求時間預算」（timer）→ 交由 PostgREST 傳入 fetch.signal */
+function mergedDiscoverDeckAbortSignal(parent: AbortSignal | undefined, budgetMs: number): AbortSignal {
+  const out = new AbortController()
+  if (parent?.aborted) {
+    out.abort()
+    return out.signal
+  }
+
+  let tid: ReturnType<typeof globalThis.setTimeout> | null = globalThis.setTimeout(() => {
+    tid = null
+    try {
+      out.abort()
+    } catch {
+      /* ignore */
+    }
+  }, budgetMs)
+
+  const bust = () => {
+    if (tid != null) {
+      globalThis.clearTimeout(tid)
+      tid = null
+    }
+    try {
+      out.abort()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (parent) {
+    if (parent.aborted) bust()
+    else parent.addEventListener('abort', bust, { once: true })
+  }
+
+  return out.signal
+}
+
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
 export async function getProfile(userId: string): Promise<ProfileRow | null> {
@@ -639,7 +676,11 @@ export type DailyDiscoverRpcRow = {
 }
 
 /** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
-export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): Promise<{
+export async function fetchDailyDiscoverDeck(options?: {
+  skipWake?: boolean
+  /** DiscoverTab 每輪載入建立的 signal：effect cleanup／新一輪取代時 abort，卡住中的上一輪 `await rpc` 才會卸下。 */
+  rpcFlightSignal?: AbortSignal
+}): Promise<{
   rows: DailyDiscoverRpcRow[]
   /** PostgREST／RPC 失敗時供 UI 顯示；成功為 null */
   rpcError: string | null
@@ -660,20 +701,7 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
   if (visible && !options?.skipWake) await ensureConnectionWithBudget()
 
-  /** 與 timed fetch 並行：`fetch` promise 卡在 WebKit／PWA 時仍要等 {@link AbortSignal.timeout}／硬 race。 */
-  const deckRpcBudgetSignal = (): AbortSignal => {
-    const ms = 36_500
-    try {
-      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
-        return AbortSignal.timeout(ms)
-    } catch {
-      /* Safari 過舊等 */
-    }
-    const ctrl = new AbortController()
-    globalThis.setTimeout(() => ctrl.abort(), ms)
-    return ctrl.signal
-  }
-
+  const deckRpcBudgetMs = 36_500
   /** 若 PostgREST 內部的 await fetch 完全不 settle，`abortSignal` 也救不了時，強制終止這次 await（避免探索頁 spinner 無限）。 */
   const deckRpcRaceMs = 38_500
 
@@ -683,24 +711,24 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
       attempt,
       skipWake: Boolean(options?.skipWake),
     })
+    const rpcSignal = mergedDiscoverDeckAbortSignal(options?.rpcFlightSignal, deckRpcBudgetMs)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const query = (supabase as any)
       .rpc('get_daily_discover_deck_v2', {})
-      .abortSignal(deckRpcBudgetSignal())
+      .abortSignal(rpcSignal)
       .retry(false)
     actionTrace('db.fetchDailyDiscoverDeck', 'rpc:await開始', { attempt })
 
     let res
+    let raceTid: ReturnType<typeof globalThis.setTimeout> | null = null
     try {
-      res = await Promise.race([
-        query,
-        new Promise<never>((_, rej) =>
-          globalThis.setTimeout(
-            () => rej(Object.assign(new Error(`探索 RPC ${deckRpcRaceMs}ms 硬逾時`), { name: 'AbortError' })),
-            deckRpcRaceMs,
-          ),
-        ),
-      ])
+      const raceCap = new Promise<never>((_, rej) => {
+        raceTid = globalThis.setTimeout(() => {
+          raceTid = null
+          rej(Object.assign(new Error(`探索 RPC ${deckRpcRaceMs}ms 硬逾時`), { name: 'AbortError' }))
+        }, deckRpcRaceMs)
+      })
+      res = await Promise.race([query, raceCap])
     } catch (e: unknown) {
       actionTrace('db.fetchDailyDiscoverDeck', 'rpc:await失敗（race或abort）', {
         attempt,
@@ -714,6 +742,11 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
           hint: 'Request was aborted (timeout or manual cancellation)',
           details: '',
         },
+      }
+    } finally {
+      if (raceTid != null) {
+        globalThis.clearTimeout(raceTid)
+        raceTid = null
       }
     }
 

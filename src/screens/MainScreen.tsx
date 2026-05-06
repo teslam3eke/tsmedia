@@ -1379,6 +1379,8 @@ function DiscoverTab({
   const lastDeckFetchCtxRef = useRef<{ uid: string; dk: string } | null>(null)
   /** `deckRefresh` 短時間連續 bump 時忽略前一輪 async，避免重複 RPC／setState 幽靈競態 */
   const deckLoadEpochRef = useRef(0)
+  /** 中止「上一輪仍在 await 的探索 RPC」——僅 bump epoch 無法解 WebKit 卡住中的 fetch。 */
+  const discoverDeckRpcFlightRef = useRef<AbortController | null>(null)
   const discoverUiSnap = userId ? takeDiscoverUiSnapshot(userId, discoverDeckDayKey, deckRefresh) : null
   const [celebrateDeck, setCelebrateDeck] = useState(false)
   const prevRolloverTickRef = useRef(0)
@@ -1492,6 +1494,8 @@ function DiscoverTab({
   // 探索名單：每次都打 RPC；若為同一 user／同日且畫面上已有 deck（例如回前景），不清空 UI — stale-while-revalidate。
   useEffect(() => {
     if (!userId) {
+      discoverDeckRpcFlightRef.current?.abort()
+      discoverDeckRpcFlightRef.current = null
       lastDeckFetchCtxRef.current = null
       setLiveDeckStatus('idle')
       setLiveDeck([])
@@ -1503,8 +1507,8 @@ function DiscoverTab({
     const snap = { uid: userId, dk: discoverDeckDayKey }
     const prev = lastDeckFetchCtxRef.current
     const ctxChangedEarly = !prev || prev.uid !== snap.uid || prev.dk !== snap.dk
-    /** 換人／換日立即載入；僅 deckRefresh bump 連發間隔常含前景換發的第二下（~320ms）——須長於該間隔才不會並行 ensure。 */
-    const debounceMs = ctxChangedEarly ? 0 : 420
+    /** 換人／換日立即載入；僅 deckRefresh bump 須蓋過前景換發第二下（320ms）並留余量。 */
+    const debounceMs = ctxChangedEarly ? 0 : 580
 
     let cancelledOuter = false
     /**
@@ -1518,6 +1522,10 @@ function DiscoverTab({
     const timer = window.setTimeout(() => {
       queueMicrotask(() => {
         if (cancelledOuter) return
+
+        discoverDeckRpcFlightRef.current?.abort()
+        discoverDeckRpcFlightRef.current = new AbortController()
+        const rpcFlightSig = discoverDeckRpcFlightRef.current.signal
 
         const ctx = { uid: userId, dk: discoverDeckDayKey }
         const ctxChanged =
@@ -1570,7 +1578,10 @@ function DiscoverTab({
                   (async () => {
                     actionTrace('discover.deck', 'work:即將請求探索RPC', { myEpoch })
                     const tRpc = perfNow()
-                    const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
+                    const { rows, rpcError } = await fetchDailyDiscoverDeck({
+                      skipWake: true,
+                      rpcFlightSignal: rpcFlightSig,
+                    })
                     if (cancelledOuter || deckLoadEpochRef.current !== myEpoch) {
                       actionTrace('discover.deck', 'work:RPC 後略過 stale', {
                         ms: Math.round(perfNow() - tRpc),
@@ -1689,6 +1700,8 @@ function DiscoverTab({
         /** 若與此行不同代表已有新一輪 effect 接上 */
         latestEpoch: deckLoadEpochRef.current,
       })
+      discoverDeckRpcFlightRef.current?.abort()
+      discoverDeckRpcFlightRef.current = null
       cancelledOuter = true
       window.clearTimeout(timer)
     }
