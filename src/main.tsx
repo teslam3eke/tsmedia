@@ -8,6 +8,7 @@ import './index.css'
 import App from './App.tsx'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
 import { maybeInitEruda } from '@/lib/erudaBootstrap'
+import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
 import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 
 void maybeInitEruda()
@@ -18,6 +19,15 @@ registerSW({
     window.location.reload()
   },
   onOfflineReady() {},
+  onRegistered(r) {
+    if (!import.meta.env.PROD || !r?.update) return
+    /** PWA／iOS 常延遲偵測新 sw.js；前景時主動問一次 */
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void r.update()
+    })
+    /** 背景長掛仍可拿到日後發佈的版本 */
+    window.setInterval(() => void r.update(), 4 * 60 * 60 * 1000)
+  },
 })
 
 /**
@@ -36,10 +46,12 @@ function onDocumentForegroundAlignment() {
   if (document.visibilityState === 'visible') {
     void repairAuthAfterResume()
     void ensureConnectionWithBudget()
+    void checkRemoteBuildIdAndReload()
   }
 }
 
 syncReactQueryFocusFromPageVisibility()
+void checkRemoteBuildIdAndReload()
 document.addEventListener('visibilitychange', onDocumentForegroundAlignment)
 window.addEventListener('pageshow', onDocumentForegroundAlignment)
 window.addEventListener('online', () => onlineManager.setOnline(true))

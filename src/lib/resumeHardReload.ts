@@ -1,31 +1,48 @@
 /**
- * iOS／PWA 回前景後 fetch／WS 僵死難根治時，用最接近「整頁冷啟」的方式恢復；
- * 僅在行動環境開啟，且可用 `?noHardResume=1` 或 `sessionStorage tm_no_hard_resume=1` 關閉以便除錯。
+ * 主殼回前景後整頁重載（類冷啟）：可用 `?noHardResume=1` 永久關閉（sessionStorage）。
+ * `?clearNoHardResume=1` 會清掉該關閉旗標（曾測試關過又忘記時很常發生）。
+ * `?debugHardResume=1` 會在 console 印 `[hardResume]`（需在 Mac Safari 接上裝置除錯）。
  */
 
 const STORAGE_DISABLE_KEY = 'tm_no_hard_resume'
 
-export function resumeHardReloadDisabledGlobally(): boolean {
+/** Android / desktop PWA：`display-mode: standalone`。iOS 加到主畫面：`navigator.standalone`。 */
+export function standaloneDisplayModeLikely(): boolean {
   try {
-    if (new URLSearchParams(window.location.search).get('noHardResume') === '1') {
-      sessionStorage.setItem(STORAGE_DISABLE_KEY, '1')
-    }
-    return sessionStorage.getItem(STORAGE_DISABLE_KEY) === '1'
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
+    if (window.matchMedia?.('(display-mode: standalone)').matches) return true
+    return (navigator as Navigator & { standalone?: boolean }).standalone === true
   } catch {
     return false
   }
 }
 
-/** 桌面版不必每次回前景就整頁重載（體驗差）；僅在行動／PWA 視為需要。 */
-export function hostLikelyNeedsResumeHardReload(): boolean {
-  if (typeof navigator === 'undefined') return false
-  const ua = navigator.userAgent.toLowerCase()
-  if (/iphone|ipad|ipod|android/.test(ua)) return true
+/**
+ * Safari 網址列分頁並非 standalone，`navigator.standalone` 為假，但回前景凍結／fetch 中止與 PWA 同源。
+ * blur／focus 監聽須涵蓋此情況（否則只靠 visibility 易漏、整頁 reload 也不觸發）。
+ */
+export function iosOrIpadosLikely(): boolean {
   try {
-    if (window.matchMedia('(display-mode: standalone)').matches) return true
-    if (window.matchMedia('(display-mode: fullscreen)').matches) return true
+    if (typeof navigator === 'undefined') return false
+    const ua = navigator.userAgent || ''
+    if (/iPhone|iPod|iPad/i.test(ua)) return true
+    return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
   } catch {
-    /* ignore */
+    return false
   }
-  return false
+}
+
+export function windowBlurWakeLikelyForResumeReload(): boolean {
+  return standaloneDisplayModeLikely() || iosOrIpadosLikely()
+}
+
+export function resumeHardReloadDisabledGlobally(): boolean {
+  try {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('clearNoHardResume') === '1') sessionStorage.removeItem(STORAGE_DISABLE_KEY)
+    if (q.get('noHardResume') === '1') sessionStorage.setItem(STORAGE_DISABLE_KEY, '1')
+    return sessionStorage.getItem(STORAGE_DISABLE_KEY) === '1'
+  } catch {
+    return false
+  }
 }

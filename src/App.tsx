@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AnimatePresence, motion, type TargetAndTransition } from 'framer-motion'
 import type { User } from '@supabase/supabase-js'
 
@@ -12,7 +12,10 @@ import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
-import { hostLikelyNeedsResumeHardReload, resumeHardReloadDisabledGlobally } from '@/lib/resumeHardReload'
+import {
+  resumeHardReloadDisabledGlobally,
+  windowBlurWakeLikelyForResumeReload,
+} from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
@@ -217,43 +220,75 @@ export default function App() {
   }, [screen])
 
   /**
-   * 行動／PWA：背景回前景若 transport 僵死，軟修復常追不到根因 → 直接整頁重載（等同冷啟）。
-   * 門檻略大於誤觸切換 App，避免每次略過通知列就 reload；BFCache 還原立即 reload。
-   * 關閉：`?noHardResume=1`（會寫入 sessionStorage）或見 `resumeHardReload.ts`。
+   * 主殼：背景／凍結回前景若 JS fetch transport 僵死 → 直接整頁重載。
+   * 不依賴 UA 判定（先前易漏）；桌機若在主殼也需避開可自行開 `?noHardResume=1`。
+   * 監聽只註冊一次，用 ref 對齊 `screen`/user id，避免 `[user]` 身分重算時拆掉 listener 錯過事件。
    */
+  const resumeHardReloadMainRef = useRef(false)
   useEffect(() => {
-    if (screen !== 'main' || !user) return
-    if (!hostLikelyNeedsResumeHardReload()) return
-    if (resumeHardReloadDisabledGlobally()) return
+    resumeHardReloadMainRef.current = screen === 'main' && Boolean(user?.id)
+  }, [screen, user?.id])
 
-    const MIN_HIDDEN_MS = 1_800
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+    const MIN_HIDDEN_MS = 600
+    const dbg =
+      new URLSearchParams(window.location.search).get('debugHardResume') === '1'
+    const log = (...a: unknown[]) => {
+      if (dbg) console.info('[hardResume]', ...a)
+    }
+
     let hiddenAt: number | null = null
     let reloading = false
 
     const reload = () => {
       if (reloading) return
+      if (resumeHardReloadDisabledGlobally()) {
+        log('reload skipped: disabled (noHardResume / sessionStorage)')
+        return
+      }
+      if (!resumeHardReloadMainRef.current) {
+        log('reload skipped: not main or no user id')
+        return
+      }
+      log('reload()')
       reloading = true
       requestAnimationFrame(() => {
         window.location.reload()
       })
     }
 
-    const onHidden = () => {
+    const markHidden = () => {
+      log('markHidden', { visibility: document.visibilityState })
       hiddenAt = Date.now()
     }
 
     const tryReloadAfterWake = () => {
-      if (document.visibilityState !== 'visible') return
-      if (hiddenAt == null) return
+      if (!resumeHardReloadMainRef.current) {
+        log('tryWake: skip (not main / no user)')
+        return
+      }
+      if (document.visibilityState !== 'visible') {
+        log('tryWake: skip (not visible)', document.visibilityState)
+        return
+      }
+      if (hiddenAt == null) {
+        log('tryWake: skip (never marked hidden)')
+        return
+      }
       const elapsed = Date.now() - hiddenAt
       hiddenAt = null
+      log('tryWake', { elapsed, min: MIN_HIDDEN_MS })
       if (elapsed < MIN_HIDDEN_MS) return
       reload()
     }
 
     const onPageShow = (ev: Event) => {
+      if (!resumeHardReloadMainRef.current) return
       const e = ev as PageTransitionEvent
       if (e.persisted) {
+        log('pageshow persisted → reload')
         reload()
         return
       }
@@ -261,18 +296,45 @@ export default function App() {
     }
 
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') onHidden()
+      if (document.visibilityState === 'hidden') markHidden()
       else tryReloadAfterWake()
+    }
+
+    /** iOS：Safari 分頁＋主畫面皆常見；blur／focus 補 visibility／pagehide 漏發。 */
+    const winWakeBlur = windowBlurWakeLikelyForResumeReload()
+    const onWinBlur = () => {
+      log('window blur')
+      markHidden()
+    }
+    const onWinFocus = () => {
+      log('window focus')
+      tryReloadAfterWake()
     }
 
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pageshow', onPageShow)
+    /** iOS／部分 WebKit：切 App 時 pagehide 比 visibility 可靠 */
+    window.addEventListener('pagehide', markHidden)
+    document.addEventListener('freeze', markHidden)
+    document.addEventListener('resume', tryReloadAfterWake)
+
+    if (winWakeBlur) {
+      window.addEventListener('blur', onWinBlur)
+      window.addEventListener('focus', onWinFocus)
+    }
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('pagehide', markHidden)
+      document.removeEventListener('freeze', markHidden)
+      document.removeEventListener('resume', tryReloadAfterWake)
+      if (winWakeBlur) {
+        window.removeEventListener('blur', onWinBlur)
+        window.removeEventListener('focus', onWinFocus)
+      }
     }
-  }, [screen, user])
+  }, [])
 
   // ── Lock document scroll while on the main (logged-in) screen ─────
   // Chat inputs trigger iOS keyboard-avoidance which scrolls <html>/<body>

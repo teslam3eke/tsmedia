@@ -698,8 +698,10 @@ export async function fetchDailyDiscoverDeck(options?: {
    * 先與前景換發對齊（`ensureConnectionWithBudget`，單一 flight 合併並發），必要時再重試 RPC。
    * `skipWake`：呼叫端已在 race 外 `await ensureConnectionWithBudget()` 時設為 true，避免換發耗時併入 UI 逾時競賽。
    */
-  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible && !options?.skipWake) await ensureConnectionWithBudget()
+  /** 每一段重試都用「當下」是否在前景；快照式 `visible` 會在切 App／WebKit freeze 後誤對背景 RPC 換發／重試。 */
+  const fg = () => typeof document !== 'undefined' && document.visibilityState === 'visible'
+
+  if (fg() && !options?.skipWake) await ensureConnectionWithBudget()
 
   const deckRpcBudgetMs = 36_500
   /** 若 PostgREST 內部的 await fetch 完全不 settle，`abortSignal` 也救不了時，強制終止這次 await（避免探索頁 spinner 無限）。 */
@@ -717,7 +719,10 @@ export async function fetchDailyDiscoverDeck(options?: {
       .rpc('get_daily_discover_deck_v2', {})
       .abortSignal(rpcSignal)
       .retry(false)
-    actionTrace('db.fetchDailyDiscoverDeck', 'rpc:await開始', { attempt })
+    actionTrace('db.fetchDailyDiscoverDeck', 'rpc:await開始', {
+      attempt,
+      clientVis: fg() ? 'visible' : 'hidden',
+    })
 
     let res
     let raceTid: ReturnType<typeof globalThis.setTimeout> | null = null
@@ -760,20 +765,30 @@ export async function fetchDailyDiscoverDeck(options?: {
 
   let { data, error } = await rpcDeck(1)
 
-  if (error && visible) {
+  if (error && fg()) {
     await repairAuthAfterResume()
     await ensureConnectionWithBudget(12_000)
     ;({ data, error } = await rpcDeck(2))
   }
 
-  if (error && visible) {
+  if (error && fg()) {
     await repairAuthAfterResume()
     ;({ data, error } = await rpcDeck(3))
   }
 
-  if (error && visible) {
+  if (error && fg()) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await rpcDeck(4))
+  }
+
+  /** WebKit／切 App：`fetch` AbortError（或 budget abort）發生在背景時不應對使用者推「伺服器錯誤」，回前景後 MainScreen nonce 會重抓 */
+  if (error && !fg()) {
+    actionTrace('db.fetchDailyDiscoverDeck', 'omitErrorWhileHidden（回前景將重試）', {
+      hint: typeof (error as { message?: string })?.message === 'string'
+        ? String((error as { message?: string }).message).slice(0, 72)
+        : '—',
+    })
+    return fin([], null)
   }
 
   if (error) {

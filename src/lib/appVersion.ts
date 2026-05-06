@@ -5,6 +5,10 @@
  * 僅 reload() 時，舊 Service Worker 仍可能持續用 precache 餵舊 HTML/JS（尤其「加到主畫面」的 PWA）。
  * 因此在 mismatch 時先 unregister SW + 清掉本網域 Cache Storage，再重整。
  */
+
+const MIN_PROBE_INTERVAL_MS = 20_000
+let buildIdProbeInFlight = false
+let lastBuildIdProbeEndedAt = 0
 async function unregisterSwAndClearSiteCaches(): Promise<void> {
   try {
     if ('serviceWorker' in navigator) {
@@ -48,6 +52,11 @@ export async function checkRemoteBuildIdAndReload(): Promise<void> {
   const embedded = typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__.trim() : ''
   if (!embedded || embedded.startsWith('local-')) return
 
+  if (buildIdProbeInFlight) return
+  const since = Date.now() - lastBuildIdProbeEndedAt
+  if (since < MIN_PROBE_INTERVAL_MS && lastBuildIdProbeEndedAt > 0) return
+
+  buildIdProbeInFlight = true
   try {
     const remote = await fetchRemoteBuildId()
     if (!remote || remote === embedded) return
@@ -55,5 +64,8 @@ export async function checkRemoteBuildIdAndReload(): Promise<void> {
     window.location.reload()
   } catch {
     /* 離線或請求失敗：不中斷操作 */
+  } finally {
+    buildIdProbeInFlight = false
+    lastBuildIdProbeEndedAt = Date.now()
   }
 }

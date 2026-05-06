@@ -36,7 +36,6 @@ import {
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches,
 } from '@/lib/db'
 import { getAppDayKey, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
-import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
@@ -1706,6 +1705,21 @@ function DiscoverTab({
       window.clearTimeout(timer)
     }
   }, [userId, discoverDeckDayKey, deckRefresh])
+
+  /** 探索長時間卡在 loading（epoch 被取消或 ensure 卡住未結束）；僅在目前前景時自動再踢一輪 */
+  useEffect(() => {
+    if (!userId || liveDeckStatus !== 'loading') return
+    let cancelled = false
+    const tid = window.setTimeout(() => {
+      if (cancelled) return
+      if (document.visibilityState !== 'visible') return
+      setDeckRefresh((r) => r + 1)
+    }, 42_000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(tid)
+    }
+  }, [userId, liveDeckStatus, deckRefresh])
 
   useEffect(() => {
     if (prevDeckRefreshRef.current === null) {
@@ -6259,6 +6273,8 @@ export default function MainScreen({
   const [photoGateToast, setPhotoGateToast] = useState(false)
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
+  /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
+  const lastFgScheduleAtRef = useRef(0)
 
   /**
    * 首次進入主殼（SPA 內導航無新 `pageshow`）：使用者在 onboarding／驗證頁停留過久時 JWT 可能已過期；
@@ -6294,6 +6310,9 @@ export default function MainScreen({
 
     const schedule = () => {
       if (document.visibilityState !== 'visible') return
+      const ts = Date.now()
+      if (ts - lastFgScheduleAtRef.current < 400) return
+      lastFgScheduleAtRef.current = ts
       void repairAuthAfterResume()
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
@@ -6484,15 +6503,6 @@ export default function MainScreen({
     if (!user?.id || foregroundReloadNonce === 0) return
     void loadLiveMatchThreads('full')
   }, [user?.id, foregroundReloadNonce, loadLiveMatchThreads])
-
-  useEffect(() => {
-    void checkRemoteBuildIdAndReload()
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') void checkRemoteBuildIdAndReload()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [])
 
   useEffect(() => {
     if (activeTab !== 'messages') setHideTabBarForChatKeyboard(false)
