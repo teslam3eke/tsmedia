@@ -660,6 +660,23 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
   if (visible && !options?.skipWake) await ensureConnectionWithBudget()
 
+  /** 與 timed fetch 並行：`fetch` promise 卡在 WebKit／PWA 時仍要等 {@link AbortSignal.timeout}／硬 race。 */
+  const deckRpcBudgetSignal = (): AbortSignal => {
+    const ms = 36_500
+    try {
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
+        return AbortSignal.timeout(ms)
+    } catch {
+      /* Safari 過舊等 */
+    }
+    const ctrl = new AbortController()
+    globalThis.setTimeout(() => ctrl.abort(), ms)
+    return ctrl.signal
+  }
+
+  /** 若 PostgREST 內部的 await fetch 完全不 settle，`abortSignal` 也救不了時，強制終止這次 await（避免探索頁 spinner 無限）。 */
+  const deckRpcRaceMs = 38_500
+
   // PostgREST 對舊名 get_daily_discover_deck 曾快取錯誤簽章 → 400/PG 42601；改呼叫 v2（migration 037）。
   const rpcDeck = async (attempt: number) => {
     actionTrace('db.fetchDailyDiscoverDeck', 'rpc:即將發出', {
@@ -667,7 +684,39 @@ export async function fetchDailyDiscoverDeck(options?: { skipWake?: boolean }): 
       skipWake: Boolean(options?.skipWake),
     })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await (supabase as any).rpc('get_daily_discover_deck_v2', {})
+    const query = (supabase as any)
+      .rpc('get_daily_discover_deck_v2', {})
+      .abortSignal(deckRpcBudgetSignal())
+      .retry(false)
+    actionTrace('db.fetchDailyDiscoverDeck', 'rpc:await開始', { attempt })
+
+    let res
+    try {
+      res = await Promise.race([
+        query,
+        new Promise<never>((_, rej) =>
+          globalThis.setTimeout(
+            () => rej(Object.assign(new Error(`探索 RPC ${deckRpcRaceMs}ms 硬逾時`), { name: 'AbortError' })),
+            deckRpcRaceMs,
+          ),
+        ),
+      ])
+    } catch (e: unknown) {
+      actionTrace('db.fetchDailyDiscoverDeck', 'rpc:await失敗（race或abort）', {
+        attempt,
+        name: e && typeof e === 'object' && 'name' in e ? String((e as { name?: string }).name) : '?',
+      })
+      return {
+        data: null as unknown,
+        error: {
+          message: String(e instanceof Error ? e.message : e),
+          code: '',
+          hint: 'Request was aborted (timeout or manual cancellation)',
+          details: '',
+        },
+      }
+    }
+
     actionTrace('db.fetchDailyDiscoverDeck', 'rpc:已取得', {
       attempt,
       hasErr: Boolean(res.error),

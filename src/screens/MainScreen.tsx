@@ -1503,8 +1503,8 @@ function DiscoverTab({
     const snap = { uid: userId, dk: discoverDeckDayKey }
     const prev = lastDeckFetchCtxRef.current
     const ctxChangedEarly = !prev || prev.uid !== snap.uid || prev.dk !== snap.dk
-    /** 換人／換日立即載入；僅 deckRefresh bump 常以數個 macrotask 連發——trailing delay 合成單輪 QM，避免並行 ensure／RPC。 */
-    const debounceMs = ctxChangedEarly ? 0 : 180
+    /** 換人／換日立即載入；僅 deckRefresh bump 連發間隔常含前景換發的第二下（~320ms）——須長於該間隔才不會並行 ensure。 */
+    const debounceMs = ctxChangedEarly ? 0 : 420
 
     let cancelledOuter = false
     /**
