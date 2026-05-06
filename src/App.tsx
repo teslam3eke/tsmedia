@@ -12,6 +12,7 @@ import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
+import { hostLikelyNeedsResumeHardReload, resumeHardReloadDisabledGlobally } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
@@ -214,6 +215,64 @@ export default function App() {
       document.documentElement.style.removeProperty('--app-height')
     }
   }, [screen])
+
+  /**
+   * 行動／PWA：背景回前景若 transport 僵死，軟修復常追不到根因 → 直接整頁重載（等同冷啟）。
+   * 門檻略大於誤觸切換 App，避免每次略過通知列就 reload；BFCache 還原立即 reload。
+   * 關閉：`?noHardResume=1`（會寫入 sessionStorage）或見 `resumeHardReload.ts`。
+   */
+  useEffect(() => {
+    if (screen !== 'main' || !user) return
+    if (!hostLikelyNeedsResumeHardReload()) return
+    if (resumeHardReloadDisabledGlobally()) return
+
+    const MIN_HIDDEN_MS = 1_800
+    let hiddenAt: number | null = null
+    let reloading = false
+
+    const reload = () => {
+      if (reloading) return
+      reloading = true
+      requestAnimationFrame(() => {
+        window.location.reload()
+      })
+    }
+
+    const onHidden = () => {
+      hiddenAt = Date.now()
+    }
+
+    const tryReloadAfterWake = () => {
+      if (document.visibilityState !== 'visible') return
+      if (hiddenAt == null) return
+      const elapsed = Date.now() - hiddenAt
+      hiddenAt = null
+      if (elapsed < MIN_HIDDEN_MS) return
+      reload()
+    }
+
+    const onPageShow = (ev: Event) => {
+      const e = ev as PageTransitionEvent
+      if (e.persisted) {
+        reload()
+        return
+      }
+      tryReloadAfterWake()
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onHidden()
+      else tryReloadAfterWake()
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', onPageShow)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [screen, user])
 
   // ── Lock document scroll while on the main (logged-in) screen ─────
   // Chat inputs trigger iOS keyboard-avoidance which scrolls <html>/<body>
