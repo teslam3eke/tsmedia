@@ -1513,28 +1513,32 @@ function DiscoverTab({
      * 舊版把 `ensureConnectionWithBudget`（約 5.5s）與 RPC／簽章塞進同一個 22s race，常導致
      * `work:即將請求探索RPC` 後還沒等到 PostgREST 就被整段判逾時。此值只限制 **ensure 之後** 的 RPC+簽章。
      * （勿再對 RPC 另行 30s `raceWithBudgetMs`——會與 global fetch28s／計時漂移撞車，只看到假逾時。）
+     * iOS 回前景時 RPC 可能重試多輪（各最多 ~28s）＋並行簽數張相片；過短會只看到假「探索載入逾時」。
      */
-    const DECK_POST_ENSURE_BUDGET_MS = 52_000
+    const DECK_POST_ENSURE_BUDGET_MS = 78_000
 
-    const myEpoch = ++deckLoadEpochRef.current
+    queueMicrotask(() => {
+      if (cancelled) return
 
-    actionTrace('discover.deck', 'effect:開始', {
-      uid: shortId(userId),
-      dk: discoverDeckDayKey,
-      deckRefresh,
-      keepStaleVisible,
-      myEpoch,
-    })
+      const myEpoch = ++deckLoadEpochRef.current
 
-    if (!keepStaleVisible) {
-      setLiveDeckStatus('loading')
-      setLiveDeck([])
-      setDeckLoadDiagnostic(null)
-    }
+      actionTrace('discover.deck', 'effect:開始', {
+        uid: shortId(userId),
+        dk: discoverDeckDayKey,
+        deckRefresh,
+        keepStaleVisible,
+        myEpoch,
+      })
 
-    let phase: 'rpc' | 'photos' = 'rpc'
+      if (!keepStaleVisible) {
+        setLiveDeckStatus('loading')
+        setLiveDeck([])
+        setDeckLoadDiagnostic(null)
+      }
 
-    ;(async () => {
+      let phase: 'rpc' | 'photos' = 'rpc'
+
+      void (async () => {
       try {
         const work = async () => {
           const perfNow = () =>
@@ -1650,32 +1654,31 @@ function DiscoverTab({
 
         await work()
       } catch (e) {
+        if (cancelled || deckLoadEpochRef.current !== myEpoch) return
         console.error('[DiscoverTab] deck load failed:', e)
-        if (!cancelled && deckLoadEpochRef.current === myEpoch) {
-          const ename =
-            e && typeof e === 'object' && 'name' in e ? String((e as { name?: string }).name) : ''
-          actionTrace('discover.deck', 'work:catch', { name: ename, phase, myEpoch })
-          if (tryDiscoverFailAutoReload()) return
-          const msg = formatDiscoverDeckLoadError(e)
-          const noPhasePrefix =
-            (e && typeof e === 'object' && (e as { name?: string }).name === 'TimeoutError') ||
-            (e instanceof DOMException && e.name === 'AbortError')
-          const combined = noPhasePrefix ? msg : `${phase === 'rpc' ? '【探索名單】' : '【相片網址簽章】'}\n\n${msg}`
-          setDeckLoadDiagnostic(
-            combined.trim() || '載入失敗，沒有詳細說明。請按下方重試或關掉程式再開。',
-          )
-          if (!keepStaleVisible) setLiveDeck([])
-          setLiveDeckStatus('ready')
-        }
+        const ename =
+          e && typeof e === 'object' && 'name' in e ? String((e as { name?: string }).name) : ''
+        actionTrace('discover.deck', 'work:catch', { name: ename, phase, myEpoch })
+        if (tryDiscoverFailAutoReload()) return
+        const msg = formatDiscoverDeckLoadError(e)
+        const noPhasePrefix =
+          (e && typeof e === 'object' && (e as { name?: string }).name === 'TimeoutError') ||
+          (e instanceof DOMException && e.name === 'AbortError')
+        const combined = noPhasePrefix ? msg : `${phase === 'rpc' ? '【探索名單】' : '【相片網址簽章】'}\n\n${msg}`
+        setDeckLoadDiagnostic(
+          combined.trim() || '載入失敗，沒有詳細說明。請按下方重試或關掉程式再開。',
+        )
+        if (!keepStaleVisible) setLiveDeck([])
+        setLiveDeckStatus('ready')
       }
-    })()
+      })()
+    })
 
     return () => {
       actionTrace('discover.deck', 'effect:清理', {
         uid: shortId(userId),
         dk: discoverDeckDayKey,
         deckRefresh,
-        cancelledEpoch: myEpoch,
         /** 若與此行不同代表已有新一輪 effect 接上 */
         latestEpoch: deckLoadEpochRef.current,
       })
