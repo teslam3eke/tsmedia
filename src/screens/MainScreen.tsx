@@ -37,7 +37,7 @@ import {
 } from '@/lib/db'
 import { getAppDayKey, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
-import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
+import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
@@ -5693,6 +5693,97 @@ function SectionHeading({ label, hint }: { label: string; hint?: string }) {
   )
 }
 
+// ─── App notifications：全屏彈窗（任意分頁皆顯示，非「我的」內嵌）─────────────────
+
+function appNotificationModalMeta(kind: AppNotificationKind) {
+  switch (kind) {
+    case 'verification_approved':
+      return {
+        ring: 'ring-emerald-200',
+        bg: 'bg-emerald-50',
+        titleClass: 'text-emerald-800',
+        bodyClass: 'text-emerald-700',
+        Icon: ShieldCheck,
+      }
+    case 'verification_rejected':
+      return {
+        ring: 'ring-red-200',
+        bg: 'bg-red-50',
+        titleClass: 'text-red-800',
+        bodyClass: 'text-red-600',
+        Icon: AlertCircle,
+      }
+    case 'super_like_received':
+      return {
+        ring: 'ring-fuchsia-200',
+        bg: 'bg-fuchsia-50',
+        titleClass: 'text-fuchsia-900',
+        bodyClass: 'text-fuchsia-800',
+        Icon: Sparkles,
+      }
+    case 'match_created':
+      return {
+        ring: 'ring-rose-200',
+        bg: 'bg-rose-50',
+        titleClass: 'text-rose-900',
+        bodyClass: 'text-rose-800',
+        Icon: Heart,
+      }
+    case 'message_received':
+      return {
+        ring: 'ring-sky-200',
+        bg: 'bg-sky-50',
+        titleClass: 'text-slate-900',
+        bodyClass: 'text-slate-700',
+        Icon: MessageCircle,
+      }
+  }
+}
+
+function AppNotificationAlertPortal({
+  notification,
+  onDismiss,
+}: {
+  notification: AppNotificationRow
+  onDismiss: () => void
+}) {
+  const meta = appNotificationModalMeta(notification.kind)
+  const Icon = meta.Icon
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[232] flex items-center justify-center bg-slate-950/55 px-5"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="app-notif-alert-title"
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+        className={cn('w-full max-w-sm rounded-2xl p-5 shadow-xl ring-1', meta.bg, meta.ring)}
+      >
+        <div className="flex gap-3">
+          <Icon className="mt-0.5 h-6 w-6 shrink-0 opacity-90" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p id="app-notif-alert-title" className={cn('text-sm font-bold leading-snug', meta.titleClass)}>
+              {notification.title}
+            </p>
+            <p className={cn('mt-2 text-xs leading-relaxed', meta.bodyClass)}>{notification.body}</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mt-5 w-full touch-manipulation rounded-xl bg-slate-900 py-3.5 text-sm font-bold text-white active:opacity-95"
+        >
+          知道了
+        </button>
+      </motion.div>
+    </div>,
+    document.body,
+  )
+}
+
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
 function ProfileTab({
@@ -5716,7 +5807,6 @@ function ProfileTab({
   const [showCompanyVerify, setShowCompanyVerify] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
   const [showTermsNotice, setShowTermsNotice] = useState(false)
-  const [appNotifications, setAppNotifications] = useState<AppNotificationRow[]>([])
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
@@ -5812,12 +5902,10 @@ function ProfileTab({
             if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
               await prepareSupabaseForProfileReads('poll')
             }
-            const [latest, notifications, stats] = await Promise.all([
+            const [latest, stats] = await Promise.all([
               getProfile(userId),
-              getUnreadAppNotifications(userId),
               refreshProfileTabStats(),
             ])
-            const notifList = notifications
             if (profilePollGenRef.current !== myEpoch) {
               actionTrace('profileTab', 'poll:略過 stale', {
                 poll,
@@ -5829,21 +5917,14 @@ function ProfileTab({
             actionTrace('profileTab', 'poll:Promise.all 結束', {
               poll,
               hasProfile: Boolean(latest),
-              notifCount: notifList.length,
               hasStats: Boolean(stats),
               myEpoch,
             })
             setProfile((prev) => latest ?? prev)
-            const legacySuperLikes = notifList.filter((n) => n.kind === 'super_like_received')
-            if (legacySuperLikes.length > 0) {
-              await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
-            }
-            setAppNotifications(notifList.filter((n) => n.kind !== 'super_like_received'))
             onRefreshCredits()
             if (stats) setTabStats(stats)
-            actionTrace('profileTab', 'poll:完成（含標記超喜已讀）', {
+            actionTrace('profileTab', 'poll:完成', {
               poll,
-              legacyReads: legacySuperLikes.length,
             })
           })(),
           capReject(PROFILE_TAB_POLL_OUTER_CAP_MS),
@@ -5868,11 +5949,6 @@ function ProfileTab({
     const intervalId = window.setInterval(loadNotifications, 5_000)
     return () => window.clearInterval(intervalId)
   }, [userId, profile?.verification_status, profile?.income_tier])
-
-  const dismissAppNotification = async (notificationId: string) => {
-    setAppNotifications((prev) => prev.filter((n) => n.id !== notificationId))
-    await markAppNotificationRead(notificationId)
-  }
 
   const displayName =
     (profile?.nickname?.trim() || profile?.name?.trim() || null) ?? '—'
@@ -5983,51 +6059,6 @@ function ProfileTab({
           </div>
         </div>
       </div>
-
-      {/* Bio */}
-      {appNotifications.length > 0 && (
-        <div className="mx-4 mt-3 space-y-2">
-          {appNotifications.map((notification) => (
-            <motion.div
-              key={notification.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={cn(
-                'rounded-2xl p-4 shadow-sm ring-1',
-                notification.kind === 'verification_approved'
-                  ? 'bg-emerald-50 ring-emerald-100'
-                  : 'bg-red-50 ring-red-100',
-              )}
-            >
-              <div className="flex items-start gap-3">
-                {notification.kind === 'verification_approved'
-                  ? <ShieldCheck className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-600" />
-                  : <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" />}
-                <div className="min-w-0 flex-1">
-                  <p className={cn(
-                    'text-sm font-bold',
-                    notification.kind === 'verification_approved' ? 'text-emerald-800' : 'text-red-700',
-                  )}>
-                    {notification.title}
-                  </p>
-                  <p className={cn(
-                    'mt-1 text-xs leading-relaxed',
-                    notification.kind === 'verification_approved' ? 'text-emerald-700' : 'text-red-600',
-                  )}>
-                    {notification.body}
-                  </p>
-                </div>
-                <button
-                  onClick={() => dismissAppNotification(notification.id)}
-                  className="rounded-full bg-white/70 px-3 py-1.5 text-[11px] font-semibold text-slate-500"
-                >
-                  已讀
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
 
       <div className="mx-4 mt-3 grid grid-cols-3 gap-2">
         <div className="rounded-2xl bg-white p-3 text-center shadow-sm ring-1 ring-slate-100">
@@ -6344,6 +6375,67 @@ export default function MainScreen({
       setMatchSplash(null)
     }
   }, [user?.id])
+
+  /** 後台 app_notifications：全分頁彈窗；同一 id 會話內只會排入佇列一次，按「知道了」後標已讀再顯示下一則。 */
+  const appNotifPopupQueueRef = useRef<AppNotificationRow[]>([])
+  const appNotifQueuedOnceIdsRef = useRef(new Set<string>())
+  const [activeAppNotifPopup, setActiveAppNotifPopup] = useState<AppNotificationRow | null>(null)
+
+  useEffect(() => {
+    appNotifPopupQueueRef.current = []
+    appNotifQueuedOnceIdsRef.current.clear()
+    setActiveAppNotifPopup(null)
+  }, [user?.id])
+
+  const tryDequeueAppNotifPopup = useCallback(() => {
+    setActiveAppNotifPopup((prev) => {
+      if (prev != null) return prev
+      return appNotifPopupQueueRef.current.shift() ?? null
+    })
+  }, [])
+
+  const dismissActiveAppNotifPopup = useCallback(() => {
+    setActiveAppNotifPopup((cur) => {
+      if (cur == null) return null
+      const id = cur.id
+      void markAppNotificationRead(id).finally(() => {
+        queueMicrotask(() => {
+          setActiveAppNotifPopup((p) => (p != null ? p : appNotifPopupQueueRef.current.shift() ?? null))
+        })
+      })
+      return null
+    })
+  }, [])
+
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+    let cancelled = false
+
+    const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      try {
+        const list = await getUnreadAppNotifications(uid)
+        if (cancelled) return
+        for (const n of list) {
+          if (!appNotifQueuedOnceIdsRef.current.has(n.id)) {
+            appNotifQueuedOnceIdsRef.current.add(n.id)
+            appNotifPopupQueueRef.current.push(n)
+          }
+        }
+        tryDequeueAppNotifPopup()
+      } catch {
+        /* offline / transient */
+      }
+    }
+
+    void poll()
+    const iv = window.setInterval(poll, 5_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(iv)
+    }
+  }, [user?.id, foregroundReloadNonce, tryDequeueAppNotifPopup])
 
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
@@ -6816,6 +6908,14 @@ export default function MainScreen({
           startChatWith(mid)
         }}
       />
+
+      {activeAppNotifPopup && (
+        <AppNotificationAlertPortal
+          key={activeAppNotifPopup.id}
+          notification={activeAppNotifPopup}
+          onDismiss={dismissActiveAppNotifPopup}
+        />
+      )}
 
       {user?.id && (
         <DiscoverPuzzleIntroModal
