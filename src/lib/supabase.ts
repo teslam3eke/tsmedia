@@ -458,39 +458,23 @@ export function repairAuthAfterResume(): Promise<void> {
 const PROFILE_TAB_READ_ENSURE_DEEP_MS = 14_000
 
 /**
- * 「我的」載入／輪詢前：從 hidden／BFCache 回來時 sessionStorage 會帶標記「需完整換發」。
- * **務必**：外層用 **hard budget**——`wake`／`ensure` 在極端情況下若懸吊，不可讓輪詢永遠卡死在 `poll:開始`。
- * - `load`：一律 refreshSession + wake + 較長 ensure。
- * - `poll`：僅標記仍在時深修理；否則短 ensure。
+ * 「我的」載入／輪詢前先換發／wake／ensure。**勿**在此函式做短秒數 `Promise.race` 截斷：
+ * `repairAuthAfterResume`（refresh 最多 14s + wake 內層至多約 42s）合理可超過 26s，
+ * 截斷會讓換發打到一半就結束 await——接著 REST 仍以舊／僵線送出 → `poll` 整段卡住至 `busy` 永不釋放。
+ * （整段 load／poll 的硬頂請在 ProfileTab 用單一大帽。）
  */
 export async function prepareSupabaseForProfileReads(mode: 'load' | 'poll'): Promise<void> {
   if (typeof document === 'undefined') return
   if (document.visibilityState !== 'visible') return
   if (!navigator.onLine) return
 
-  /** 強制離開修理階段的頂時；時間到後仍繼續打 REST（由底下 fetch 28s 再護欄）。 */
-  const HARD_MS = mode === 'load' ? 26_000 : 20_000
-
-  await Promise.race([
-    (async (): Promise<void> => {
-      const deep = mode === 'load' || iosResumeFullAuthRepairPending()
-      if (deep) {
-        await repairAuthAfterResume()
-        await ensureConnectionWithBudget(PROFILE_TAB_READ_ENSURE_DEEP_MS)
-      } else {
-        await ensureConnectionWithBudget()
-      }
-    })(),
-    new Promise<void>((resolve) =>
-      globalThis.setTimeout(() => {
-        console.warn('[tsmedia:prepare-profile] hard budget elapsed — continuing', {
-          mode,
-          hardMs: HARD_MS,
-        })
-        resolve()
-      }, HARD_MS),
-    ),
-  ])
+  const deep = mode === 'load' || iosResumeFullAuthRepairPending()
+  if (deep) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(PROFILE_TAB_READ_ENSURE_DEEP_MS)
+  } else {
+    await ensureConnectionWithBudget()
+  }
 }
 
 async function runEnsureWithRetries(): Promise<boolean> {

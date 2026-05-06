@@ -5676,6 +5676,9 @@ function ProfileTab({
   const profilePollGenRef = useRef(0)
   const profileLoadBusyRef = useRef(false)
   const profilePollBusyRef = useRef(false)
+  /** prepare（換發+wake）+ 三並行請求最差可疊數十秒；小帽會誤砍 prepare 並導致 busy 卡在 Promise.all（永遠 `poll:重合略過`） */
+  const PROFILE_TAB_LOAD_OUTER_CAP_MS = 82_000
+  const PROFILE_TAB_POLL_OUTER_CAP_MS = 78_000
 
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
@@ -5687,36 +5690,64 @@ function ProfileTab({
       }
       profileLoadBusyRef.current = true
       try {
-        actionTrace('profileTab', 'load:開始', {
-          rid,
-          uid: shortId(userId),
-          foregroundNonce: foregroundReloadNonce,
-        })
-        /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
-        void finalizeDueAiReviews()
-        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await prepareSupabaseForProfileReads('load')
-        }
-        /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
-        const [latest, stats] = await Promise.all([getProfile(userId), refreshProfileTabStats()])
-        if (profileLoadEpochRef.current !== myEpoch) {
-          actionTrace('profileTab', 'load:略過 stale', {
-            rid,
-            myEpoch,
-            curEpoch: profileLoadEpochRef.current,
+        const capReject = (ms: number) =>
+          new Promise<never>((_, rej) => {
+            globalThis.setTimeout(
+              () => rej(Object.assign(new Error(`profile-tab load outer cap (${ms}ms)`), { name: 'ProfileTabCapError' })),
+              ms,
+            )
           })
-          return
+        await Promise.race([
+          (async (): Promise<void> => {
+            actionTrace('profileTab', 'load:開始', {
+              rid,
+              uid: shortId(userId),
+              foregroundNonce: foregroundReloadNonce,
+            })
+            /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
+            void finalizeDueAiReviews()
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+              await prepareSupabaseForProfileReads('load')
+            }
+            /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
+            const [latest, stats] = await Promise.all([
+              getProfile(userId),
+              refreshProfileTabStats(),
+            ])
+            if (profileLoadEpochRef.current !== myEpoch) {
+              actionTrace('profileTab', 'load:略過 stale', {
+                rid,
+                myEpoch,
+                curEpoch: profileLoadEpochRef.current,
+              })
+              return
+            }
+            actionTrace('profileTab', 'load:已取得', {
+              rid,
+              hasProfile: Boolean(latest),
+              nameLen: latest?.name?.length ?? 0,
+              nickLen: latest?.nickname?.length ?? 0,
+              hasStats: Boolean(stats),
+            })
+            setProfile((prev) => latest ?? prev)
+            if (stats) setTabStats(stats)
+            actionTrace('profileTab', 'load:setState 已呼叫', { rid })
+          })(),
+          capReject(PROFILE_TAB_LOAD_OUTER_CAP_MS),
+        ])
+      } catch (e) {
+        if (
+          profileLoadEpochRef.current === myEpoch
+          && e
+          && typeof e === 'object'
+          && (e as { name?: string }).name === 'ProfileTabCapError'
+        ) {
+          console.warn('[tsmedia:profileTab] load outer cap — busy released; try pull-to-refresh or reopen', {
+            capMs: PROFILE_TAB_LOAD_OUTER_CAP_MS,
+            rid,
+          })
+          actionTrace('profileTab', 'load:逾時強制結束', { rid, capMs: PROFILE_TAB_LOAD_OUTER_CAP_MS })
         }
-        actionTrace('profileTab', 'load:已取得', {
-          rid,
-          hasProfile: Boolean(latest),
-          nameLen: latest?.name?.length ?? 0,
-          nickLen: latest?.nickname?.length ?? 0,
-          hasStats: Boolean(stats),
-        })
-        setProfile((prev) => latest ?? prev)
-        if (stats) setTabStats(stats)
-        actionTrace('profileTab', 'load:setState 已呼叫', { rid })
       } finally {
         profileLoadBusyRef.current = false
       }
@@ -5735,44 +5766,70 @@ function ProfileTab({
       const poll = Date.now()
       profilePollBusyRef.current = true
       try {
-        actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
-        void finalizeDueAiReviews()
-        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await prepareSupabaseForProfileReads('poll')
-        }
-        const [latest, notifications, stats] = await Promise.all([
-          getProfile(userId),
-          getUnreadAppNotifications(userId),
-          refreshProfileTabStats(),
+        const capReject = (ms: number) =>
+          new Promise<never>((_, rej) => {
+            globalThis.setTimeout(
+              () => rej(Object.assign(new Error(`profile-tab poll outer cap (${ms}ms)`), { name: 'ProfileTabCapError' })),
+              ms,
+            )
+          })
+        await Promise.race([
+          (async (): Promise<void> => {
+            actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
+            void finalizeDueAiReviews()
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+              await prepareSupabaseForProfileReads('poll')
+            }
+            const [latest, notifications, stats] = await Promise.all([
+              getProfile(userId),
+              getUnreadAppNotifications(userId),
+              refreshProfileTabStats(),
+            ])
+            const notifList = notifications
+            if (profilePollGenRef.current !== myEpoch) {
+              actionTrace('profileTab', 'poll:略過 stale', {
+                poll,
+                myEpoch,
+                curEpoch: profilePollGenRef.current,
+              })
+              return
+            }
+            actionTrace('profileTab', 'poll:Promise.all 結束', {
+              poll,
+              hasProfile: Boolean(latest),
+              notifCount: notifList.length,
+              hasStats: Boolean(stats),
+              myEpoch,
+            })
+            setProfile((prev) => latest ?? prev)
+            const legacySuperLikes = notifList.filter((n) => n.kind === 'super_like_received')
+            if (legacySuperLikes.length > 0) {
+              await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
+            }
+            setAppNotifications(notifList.filter((n) => n.kind !== 'super_like_received'))
+            onRefreshCredits()
+            if (stats) setTabStats(stats)
+            actionTrace('profileTab', 'poll:完成（含標記超喜已讀）', {
+              poll,
+              legacyReads: legacySuperLikes.length,
+            })
+          })(),
+          capReject(PROFILE_TAB_POLL_OUTER_CAP_MS),
         ])
-        const notifList = notifications
-        if (profilePollGenRef.current !== myEpoch) {
-          actionTrace('profileTab', 'poll:略過 stale', {
+      } catch (e) {
+        if (
+          profilePollGenRef.current === myEpoch
+          && e
+          && typeof e === 'object'
+          && (e as { name?: string }).name === 'ProfileTabCapError'
+        ) {
+          console.warn('[tsmedia:profileTab] poll outer cap — busy released', {
+            capMs: PROFILE_TAB_POLL_OUTER_CAP_MS,
             poll,
             myEpoch,
-            curEpoch: profilePollGenRef.current,
           })
-          return
+          actionTrace('profileTab', 'poll:逾時強制結束', { poll, capMs: PROFILE_TAB_POLL_OUTER_CAP_MS, myEpoch })
         }
-        actionTrace('profileTab', 'poll:Promise.all 結束', {
-          poll,
-          hasProfile: Boolean(latest),
-          notifCount: notifList.length,
-          hasStats: Boolean(stats),
-          myEpoch,
-        })
-        setProfile((prev) => latest ?? prev)
-        const legacySuperLikes = notifList.filter((n) => n.kind === 'super_like_received')
-        if (legacySuperLikes.length > 0) {
-          await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
-        }
-        setAppNotifications(notifList.filter((n) => n.kind !== 'super_like_received'))
-        onRefreshCredits()
-        if (stats) setTabStats(stats)
-        actionTrace('profileTab', 'poll:完成（含標記超喜已讀）', {
-          poll,
-          legacyReads: legacySuperLikes.length,
-        })
       } finally {
         profilePollBusyRef.current = false
       }
