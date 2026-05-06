@@ -9,9 +9,11 @@ import App from './App.tsx'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
 import { maybeInitEruda } from '@/lib/erudaBootstrap'
 import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
+import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 
 void maybeInitEruda()
+markPwaStandaloneSeenIfNeeded()
 
 registerSW({
   immediate: true,

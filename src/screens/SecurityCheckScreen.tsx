@@ -5,6 +5,7 @@ import {
   ChevronRight, Cpu,
 } from 'lucide-react'
 import PWAInstallGuide from '@/components/PWAInstallGuide'
+import { hasUsedPwaStandaloneBefore, markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 
 interface Check {
   id: string
@@ -76,6 +77,27 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
 
   const allDoneRef = useRef(allDone)
   const forceFinalizeRef = useRef(false)
+  const onContinueRef = useRef(onContinue)
+  const autoContinueAfterPwaMarkerRef = useRef(false)
+  onContinueRef.current = onContinue
+
+  useEffect(() => {
+    markPwaStandaloneSeenIfNeeded()
+    if (!readStandaloneMode() && hasUsedPwaStandaloneBefore()) {
+      autoContinueAfterPwaMarkerRef.current = true
+      setPwaSkipped(true)
+      setShowPWA(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!allDone) return
+    if (!autoContinueAfterPwaMarkerRef.current) return
+    const t = window.setTimeout(() => {
+      void onContinueRef.current()
+    }, 480)
+    return () => window.clearTimeout(t)
+  }, [allDone])
 
   useEffect(() => {
     allDoneRef.current = allDone
@@ -144,7 +166,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
               window.setTimeout(() => {
                 if (forceFinalizeRef.current) return
                 setAllDone(true)
-                if (!isStandalone) {
+                if (!isStandalone && !hasUsedPwaStandaloneBefore()) {
                   setShowPWA(true)
                 }
               }, 600),
