@@ -1426,8 +1426,23 @@ function DiscoverTab({
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
   const skipDiscoverIndexScrollResetRef = useRef(true)
-  /** 與 foregroundReloadNonce 對齊：每次前景喚醒 bump deckRefresh，強制重新打探索 RPC（等同先前「每次更新」行為） */
-  const lastDiscoverWakeBumpNonceRef = useRef(0)
+  /** 前景 nonce 往往在數百毫秒內連跳 2〜4（mount ensure + invalidate + visibility debounce）；每次 bump deck 會拆掉上一輪探索 async → 只看到「略過 stale」。合併成單次 bump */
+  const discoverDeckBumpTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (foregroundReloadNonce === 0) return
+    if (discoverDeckBumpTimerRef.current) window.clearTimeout(discoverDeckBumpTimerRef.current)
+    discoverDeckBumpTimerRef.current = window.setTimeout(() => {
+      discoverDeckBumpTimerRef.current = null
+      setDeckRefresh((r) => r + 1)
+    }, 320)
+    return () => {
+      if (discoverDeckBumpTimerRef.current) {
+        window.clearTimeout(discoverDeckBumpTimerRef.current)
+        discoverDeckBumpTimerRef.current = null
+      }
+    }
+  }, [foregroundReloadNonce])
 
   useEffect(() => {
     if (visibleProfiles.length === 0) return
@@ -1473,13 +1488,6 @@ function DiscoverTab({
       }
     })
   }, [foregroundReloadNonce, contentScrollRef])
-
-  useEffect(() => {
-    if (foregroundReloadNonce === 0) return
-    if (foregroundReloadNonce === lastDiscoverWakeBumpNonceRef.current) return
-    lastDiscoverWakeBumpNonceRef.current = foregroundReloadNonce
-    setDeckRefresh((r) => r + 1)
-  }, [foregroundReloadNonce])
 
   // 探索名單：每次都打 RPC；若為同一 user／同日且畫面上已有 deck（例如回前景），不清空 UI — stale-while-revalidate。
   useEffect(() => {
@@ -5674,9 +5682,7 @@ function ProfileTab({
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
-  const profileLoadBusyRef = useRef(false)
-  const profilePollBusyRef = useRef(false)
-  /** prepare（換發+wake）+ 三並行請求最差可疊數十秒；小帽會誤砍 prepare 並導致 busy 卡在 Promise.all（永遠 `poll:重合略過`） */
+  /** prepare（換發+wake）+ 並行請求可能長掛；以 epoch／generation 收尾略過 stale，不靠 busy mutex（避免卡住時餓死後續 poll） */
   const PROFILE_TAB_LOAD_OUTER_CAP_MS = 82_000
   const PROFILE_TAB_POLL_OUTER_CAP_MS = 78_000
 
@@ -5684,11 +5690,6 @@ function ProfileTab({
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
       const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-      if (profileLoadBusyRef.current) {
-        actionTrace('profileTab', 'load:重合略過', { rid, uid: shortId(userId) })
-        return
-      }
-      profileLoadBusyRef.current = true
       try {
         const capReject = (ms: number) =>
           new Promise<never>((_, rej) => {
@@ -5742,14 +5743,12 @@ function ProfileTab({
           && typeof e === 'object'
           && (e as { name?: string }).name === 'ProfileTabCapError'
         ) {
-          console.warn('[tsmedia:profileTab] load outer cap — busy released; try pull-to-refresh or reopen', {
+          console.warn('[tsmedia:profileTab] load outer cap — try pull-to-refresh or reopen', {
             capMs: PROFILE_TAB_LOAD_OUTER_CAP_MS,
             rid,
           })
           actionTrace('profileTab', 'load:逾時強制結束', { rid, capMs: PROFILE_TAB_LOAD_OUTER_CAP_MS })
         }
-      } finally {
-        profileLoadBusyRef.current = false
       }
     }
     load()
@@ -5758,13 +5757,8 @@ function ProfileTab({
   useEffect(() => {
     if (!userId) return
     const loadNotifications = async () => {
-      if (profilePollBusyRef.current) {
-        actionTrace('profileTab', 'poll:重合略過', { uid: shortId(userId) })
-        return
-      }
       const myEpoch = ++profilePollGenRef.current
       const poll = Date.now()
-      profilePollBusyRef.current = true
       try {
         const capReject = (ms: number) =>
           new Promise<never>((_, rej) => {
@@ -5823,15 +5817,13 @@ function ProfileTab({
           && typeof e === 'object'
           && (e as { name?: string }).name === 'ProfileTabCapError'
         ) {
-          console.warn('[tsmedia:profileTab] poll outer cap — busy released', {
+          console.warn('[tsmedia:profileTab] poll outer cap elapsed', {
             capMs: PROFILE_TAB_POLL_OUTER_CAP_MS,
             poll,
             myEpoch,
           })
           actionTrace('profileTab', 'poll:逾時強制結束', { poll, capMs: PROFILE_TAB_POLL_OUTER_CAP_MS, myEpoch })
         }
-      } finally {
-        profilePollBusyRef.current = false
       }
     }
     loadNotifications()
