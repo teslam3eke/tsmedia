@@ -43,7 +43,7 @@ import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
-import { actionTrace, shortId, raceWithBudgetMs } from '@/lib/clientActionTrace'
+import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
@@ -1504,10 +1504,9 @@ function DiscoverTab({
     /**
      * 舊版把 `ensureConnectionWithBudget`（約 5.5s）與 RPC／簽章塞進同一個 22s race，常導致
      * `work:即將請求探索RPC` 後還沒等到 PostgREST 就被整段判逾時。此值只限制 **ensure 之後** 的 RPC+簽章。
+     * （勿再對 RPC 另行 30s `raceWithBudgetMs`——會與 global fetch28s／計時漂移撞車，只看到假逾時。）
      */
     const DECK_POST_ENSURE_BUDGET_MS = 52_000
-    /** 單獨對 `get_daily_discover_deck_v2` 設硬頂，一定會打 `[tsmedia:timeout]`（永遠）或 action trace。 */
-    const DECK_RPC_CLIENT_BUDGET_MS = 30_000
 
     const myEpoch = ++deckLoadEpochRef.current
 
@@ -1553,23 +1552,7 @@ function DiscoverTab({
               (async () => {
                 actionTrace('discover.deck', 'work:即將請求探索RPC', { myEpoch })
                 const tRpc = perfNow()
-                const fetched = await raceWithBudgetMs(
-                  'discover.deck',
-                  'fetchDailyDiscoverDeck',
-                  DECK_RPC_CLIENT_BUDGET_MS,
-                  fetchDailyDiscoverDeck({ skipWake: true }),
-                )
-                if (fetched == null) {
-                  actionTrace('discover.deck', 'work:RPC 客戶端逾時', {
-                    myEpoch,
-                    budgetMs: DECK_RPC_CLIENT_BUDGET_MS,
-                  })
-                }
-                const rows = fetched?.rows ?? []
-                const rpcError =
-                  fetched == null
-                    ? '無法於時限內取得探索名單（請求可能仍在背景未完成）。請重試載入。'
-                    : fetched.rpcError
+                const { rows, rpcError } = await fetchDailyDiscoverDeck({ skipWake: true })
                 if (cancelled || deckLoadEpochRef.current !== myEpoch) {
                   actionTrace('discover.deck', 'work:RPC 後略過 stale', {
                     ms: Math.round(perfNow() - tRpc),
@@ -1587,13 +1570,7 @@ function DiscoverTab({
                   if (cancelled || deckLoadEpochRef.current !== myEpoch) return
                   if (tryDiscoverFailAutoReload()) return
                   const detail = rpcError.trim() || '（伺服器未附說明）'
-                  const clientHung = fetched == null
-                  setDeckLoadDiagnostic(
-                    (clientHung
-                      ? ['【探索名單】裝置端等待逾時', detail]
-                      : ['【探索名單】伺服器錯誤', detail]
-                    ).join('\n\n'),
-                  )
+                  setDeckLoadDiagnostic(['【探索名單】伺服器錯誤', detail].join('\n\n'))
                   if (!keepStaleVisible) setLiveDeck([])
                   setLiveDeckStatus('ready')
                   actionTrace('discover.deck', 'work:RPC 錯誤結束（UI ready）', {})
@@ -5697,42 +5674,52 @@ function ProfileTab({
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
+  const profileLoadBusyRef = useRef(false)
+  const profilePollBusyRef = useRef(false)
 
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
       const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-      actionTrace('profileTab', 'load:開始', {
-        rid,
-        uid: shortId(userId),
-        foregroundNonce: foregroundReloadNonce,
-      })
-      /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
-      void finalizeDueAiReviews()
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        /** 先換發+wake（load 強制）；勿再疊 `raceWithBudgetMs(24s)`——會早於 REST 28s abort 並把資料砍成 null。 */
-        await prepareSupabaseForProfileReads('load')
-      }
-      /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
-      const [latest, stats] = await Promise.all([getProfile(userId), refreshProfileTabStats()])
-      if (profileLoadEpochRef.current !== myEpoch) {
-        actionTrace('profileTab', 'load:略過 stale', {
-          rid,
-          myEpoch,
-          curEpoch: profileLoadEpochRef.current,
-        })
+      if (profileLoadBusyRef.current) {
+        actionTrace('profileTab', 'load:重合略過', { rid, uid: shortId(userId) })
         return
       }
-      actionTrace('profileTab', 'load:已取得', {
-        rid,
-        hasProfile: Boolean(latest),
-        nameLen: latest?.name?.length ?? 0,
-        nickLen: latest?.nickname?.length ?? 0,
-        hasStats: Boolean(stats),
-      })
-      setProfile((prev) => latest ?? prev)
-      if (stats) setTabStats(stats)
-      actionTrace('profileTab', 'load:setState 已呼叫', { rid })
+      profileLoadBusyRef.current = true
+      try {
+        actionTrace('profileTab', 'load:開始', {
+          rid,
+          uid: shortId(userId),
+          foregroundNonce: foregroundReloadNonce,
+        })
+        /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
+        void finalizeDueAiReviews()
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          await prepareSupabaseForProfileReads('load')
+        }
+        /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
+        const [latest, stats] = await Promise.all([getProfile(userId), refreshProfileTabStats()])
+        if (profileLoadEpochRef.current !== myEpoch) {
+          actionTrace('profileTab', 'load:略過 stale', {
+            rid,
+            myEpoch,
+            curEpoch: profileLoadEpochRef.current,
+          })
+          return
+        }
+        actionTrace('profileTab', 'load:已取得', {
+          rid,
+          hasProfile: Boolean(latest),
+          nameLen: latest?.name?.length ?? 0,
+          nickLen: latest?.nickname?.length ?? 0,
+          hasStats: Boolean(stats),
+        })
+        setProfile((prev) => latest ?? prev)
+        if (stats) setTabStats(stats)
+        actionTrace('profileTab', 'load:setState 已呼叫', { rid })
+      } finally {
+        profileLoadBusyRef.current = false
+      }
     }
     load()
   }, [userId, foregroundReloadNonce])
@@ -5740,46 +5727,55 @@ function ProfileTab({
   useEffect(() => {
     if (!userId) return
     const loadNotifications = async () => {
-      const myEpoch = ++profilePollGenRef.current
-      const poll = Date.now()
-      actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
-      void finalizeDueAiReviews()
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        await prepareSupabaseForProfileReads('poll')
-      }
-      const [latest, notifications, stats] = await Promise.all([
-        getProfile(userId),
-        getUnreadAppNotifications(userId),
-        refreshProfileTabStats(),
-      ])
-      const notifList = notifications
-      if (profilePollGenRef.current !== myEpoch) {
-        actionTrace('profileTab', 'poll:略過 stale', {
-          poll,
-          myEpoch,
-          curEpoch: profilePollGenRef.current,
-        })
+      if (profilePollBusyRef.current) {
+        actionTrace('profileTab', 'poll:重合略過', { uid: shortId(userId) })
         return
       }
-      actionTrace('profileTab', 'poll:Promise.all 結束', {
-        poll,
-        hasProfile: Boolean(latest),
-        notifCount: notifList.length,
-        hasStats: Boolean(stats),
-        myEpoch,
-      })
-      setProfile((prev) => latest ?? prev)
-      const legacySuperLikes = notifList.filter((n) => n.kind === 'super_like_received')
-      if (legacySuperLikes.length > 0) {
-        await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
+      const myEpoch = ++profilePollGenRef.current
+      const poll = Date.now()
+      profilePollBusyRef.current = true
+      try {
+        actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
+        void finalizeDueAiReviews()
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          await prepareSupabaseForProfileReads('poll')
+        }
+        const [latest, notifications, stats] = await Promise.all([
+          getProfile(userId),
+          getUnreadAppNotifications(userId),
+          refreshProfileTabStats(),
+        ])
+        const notifList = notifications
+        if (profilePollGenRef.current !== myEpoch) {
+          actionTrace('profileTab', 'poll:略過 stale', {
+            poll,
+            myEpoch,
+            curEpoch: profilePollGenRef.current,
+          })
+          return
+        }
+        actionTrace('profileTab', 'poll:Promise.all 結束', {
+          poll,
+          hasProfile: Boolean(latest),
+          notifCount: notifList.length,
+          hasStats: Boolean(stats),
+          myEpoch,
+        })
+        setProfile((prev) => latest ?? prev)
+        const legacySuperLikes = notifList.filter((n) => n.kind === 'super_like_received')
+        if (legacySuperLikes.length > 0) {
+          await Promise.all(legacySuperLikes.map((n) => markAppNotificationRead(n.id)))
+        }
+        setAppNotifications(notifList.filter((n) => n.kind !== 'super_like_received'))
+        onRefreshCredits()
+        if (stats) setTabStats(stats)
+        actionTrace('profileTab', 'poll:完成（含標記超喜已讀）', {
+          poll,
+          legacyReads: legacySuperLikes.length,
+        })
+      } finally {
+        profilePollBusyRef.current = false
       }
-      setAppNotifications(notifList.filter((n) => n.kind !== 'super_like_received'))
-      onRefreshCredits()
-      if (stats) setTabStats(stats)
-      actionTrace('profileTab', 'poll:完成（含標記超喜已讀）', {
-        poll,
-        legacyReads: legacySuperLikes.length,
-      })
     }
     loadNotifications()
     const intervalId = window.setInterval(loadNotifications, 5_000)
