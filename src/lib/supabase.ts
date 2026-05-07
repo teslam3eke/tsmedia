@@ -5,6 +5,7 @@ import {
   reportRealtimeEngine,
   reportResumeEvent,
 } from './resumeRealtimeTelemetry'
+import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -531,6 +532,8 @@ async function runEnsureWithRetries(): Promise<boolean> {
   emitConnectionRepair({ phase: 'reload', message: '連線異常，正在重新載入應用…' })
 
   /** 離線不要做無限重整迴圈；僅在目前判定為線上時重載（避免 iOS SW／假連線卡住）。 */
+  if (isWithinMediaPickerGracePeriod()) return false
+
   if (navigator.onLine) globalThis.window?.location.reload()
   return false
 }

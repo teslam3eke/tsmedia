@@ -6,6 +6,8 @@
  * 因此在 mismatch 時先 unregister SW + 清掉本網域 Cache Storage，再重整。
  */
 
+import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
+
 const MIN_PROBE_INTERVAL_MS = 20_000
 let buildIdProbeInFlight = false
 let lastBuildIdProbeEndedAt = 0
@@ -61,6 +63,7 @@ export async function checkRemoteBuildIdAndReload(): Promise<void> {
     const remote = await fetchRemoteBuildId()
     if (!remote || remote === embedded) return
     await unregisterSwAndClearSiteCaches()
+    if (isWithinMediaPickerGracePeriod()) return
     window.location.reload()
   } catch {
     /* 離線或請求失敗：不中斷操作 */

@@ -14,6 +14,8 @@ import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
   resumeHardReloadDisabledGlobally,
+  touchMediaPickerGraceSession,
+  isWithinMediaPickerGracePeriod,
   windowBlurWakeLikelyForResumeReload,
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
@@ -252,6 +254,10 @@ export default function App() {
         log('reload skipped: not main or no user id')
         return
       }
+      if (isWithinMediaPickerGracePeriod()) {
+        log('reload skipped: media picker grace')
+        return
+      }
       log('reload()')
       reloading = true
       requestAnimationFrame(() => {
@@ -334,6 +340,23 @@ export default function App() {
         window.removeEventListener('focus', onWinFocus)
       }
     }
+  }, [])
+
+  /** 選相簿／拍照會長 blur，touch 先進 sessionStorage grace，避免 resume hard reload 截斷上傳。 */
+  useEffect(() => {
+    const onPointerDown = (ev: PointerEvent) => {
+      const t = ev.target
+      if (!(t instanceof Element)) return
+      if (t.matches('input[type=file]')) {
+        touchMediaPickerGraceSession()
+        return
+      }
+      const lab = t.closest('label')
+      const inner = lab?.querySelector('input[type=file]')
+      if (inner instanceof HTMLInputElement) touchMediaPickerGraceSession()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
   }, [])
 
   // ── Lock document scroll while on the main (logged-in) screen ─────

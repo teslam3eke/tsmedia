@@ -46,3 +46,27 @@ export function resumeHardReloadDisabledGlobally(): boolean {
     return false
   }
 }
+
+/** 選相簿／拍攝會讓 PWA blur 很久，`resume` hard reload 若觸發會中斷上傳。 */
+const MEDIA_PICKER_GRACE_KEY = 'tm_media_picker_grace_until'
+
+export function touchMediaPickerGraceSession(): void {
+  try {
+    /** 數分鐘內略過自動整頁重載／ensure 終極 reload */
+    sessionStorage.setItem(MEDIA_PICKER_GRACE_KEY, String(Date.now() + 240_000))
+  } catch {
+    /* private mode */
+  }
+}
+
+export function isWithinMediaPickerGracePeriod(): boolean {
+  try {
+    const v = sessionStorage.getItem(MEDIA_PICKER_GRACE_KEY)
+    if (!v) return false
+    const until = Number.parseInt(v, 10)
+    if (!Number.isFinite(until)) return false
+    return Date.now() < until
+  } catch {
+    return false
+  }
+}

@@ -48,6 +48,7 @@ import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import AdminScreen from '@/screens/AdminScreen'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
+import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -417,6 +418,7 @@ function clearDiscoverFailAutoReloadFlag(): void {
 function tryDiscoverFailAutoReload(): boolean {
   if (typeof window === 'undefined') return false
   try {
+    if (isWithinMediaPickerGracePeriod()) return false
     if (sessionStorage.getItem(DISCOVER_FAIL_AUTO_RELOAD_KEY) === '1') return false
     sessionStorage.setItem(DISCOVER_FAIL_AUTO_RELOAD_KEY, '1')
     window.location.reload()
@@ -5784,6 +5786,36 @@ function AppNotificationAlertPortal({
   )
 }
 
+// ─── 「我的」分頁：session 簡備份，冷啟／重載後先顯示上次暱稱 ─────────────────
+function profileBriefKey(userId: string): string {
+  return `tm_profile_brief_${userId}`
+}
+
+function persistProfileBrief(userId: string, row: ProfileRow): void {
+  try {
+    sessionStorage.setItem(
+      profileBriefKey(userId),
+      JSON.stringify({ name: row.name ?? '', nickname: row.nickname ?? '' }),
+    )
+  } catch {
+    /* private mode */
+  }
+}
+
+function readProfileBriefFallbackDisplay(userId: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(profileBriefKey(userId))
+    if (!raw) return null
+    const o = JSON.parse(raw) as { name?: unknown; nickname?: unknown }
+    const nick = typeof o.nickname === 'string' ? o.nickname.trim() : ''
+    const nm = typeof o.name === 'string' ? o.name.trim() : ''
+    const s = nick || nm
+    return s || null
+  } catch {
+    return null
+  }
+}
+
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
 function ProfileTab({
@@ -5858,6 +5890,7 @@ function ProfileTab({
               nickLen: latest?.nickname?.length ?? 0,
               hasStats: Boolean(stats),
             })
+            if (latest) persistProfileBrief(userId, latest)
             setProfile((prev) => latest ?? prev)
             if (stats) setTabStats(stats)
             actionTrace('profileTab', 'load:setState 已呼叫', { rid })
@@ -5899,9 +5932,6 @@ function ProfileTab({
           (async (): Promise<void> => {
             actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
             void finalizeDueAiReviews()
-            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-              await prepareSupabaseForProfileReads('poll')
-            }
             const [latest, stats] = await Promise.all([
               getProfile(userId),
               refreshProfileTabStats(),
@@ -5920,6 +5950,7 @@ function ProfileTab({
               hasStats: Boolean(stats),
               myEpoch,
             })
+            if (latest) persistProfileBrief(userId, latest)
             setProfile((prev) => latest ?? prev)
             onRefreshCredits()
             if (stats) setTabStats(stats)
@@ -5950,8 +5981,12 @@ function ProfileTab({
     return () => window.clearInterval(intervalId)
   }, [userId, profile?.verification_status, profile?.income_tier])
 
-  const displayName =
-    (profile?.nickname?.trim() || profile?.name?.trim() || null) ?? '—'
+  const displayName = useMemo(() => {
+    const fromRow = profile?.nickname?.trim() || profile?.name?.trim()
+    if (fromRow) return fromRow
+    return readProfileBriefFallbackDisplay(userId) ?? '—'
+  }, [profile?.nickname, profile?.name, userId])
+
   const interests = profile?.interests ?? []
   const bio = profile?.bio ?? ''
   const verStatus = profile?.verification_status ?? 'pending'
