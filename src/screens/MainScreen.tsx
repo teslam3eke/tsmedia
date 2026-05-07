@@ -6585,15 +6585,6 @@ export default function MainScreen({
     }
   }, [user?.id, foregroundReloadNonce, tryDequeueAppNotifPopup])
 
-  /** SW 在前景擋掉訊息橫幅時，補一輪對話列表（Realtime 未連上時） */
-  useEffect(() => {
-    const handler = () => {
-      void loadLiveMatchThreads('soft')
-    }
-    window.addEventListener('tm_foreground_message_push', handler)
-    return () => window.removeEventListener('tm_foreground_message_push', handler)
-  }, [loadLiveMatchThreads])
-
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
   }, [])
@@ -6785,6 +6776,15 @@ export default function MainScreen({
 
   useEffect(() => {
     void loadLiveMatchThreads('full')
+  }, [loadLiveMatchThreads])
+
+  /** SW 在前景擋掉訊息橫幅時，補一輪對話列表（Realtime 未連上時） */
+  useEffect(() => {
+    const handler = () => {
+      void loadLiveMatchThreads('soft')
+    }
+    window.addEventListener('tm_foreground_message_push', handler)
+    return () => window.removeEventListener('tm_foreground_message_push', handler)
   }, [loadLiveMatchThreads])
 
   useEffect(() => {
