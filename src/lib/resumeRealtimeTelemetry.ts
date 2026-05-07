@@ -16,6 +16,9 @@ type ResumeSource =
   | 'online'
   | 'visibility_hidden'
   | 'pagehide_bf_cache'
+  /** supabase foregroundKick：profiles REST 後硬 recycle Realtime（teardown buffer 對策） */
+  | 'foreground_transport_kick_start'
+  | 'foreground_transport_kick_done'
 
 type RealtimeEnginePhase =
   | 'wake_attempt_start'

@@ -52,7 +52,7 @@ import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { notifyServiceWorkerActiveChatMatch } from '@/lib/swActiveChat'
-import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
+import { TM_APP_DEEP_LINK_EVENT, TM_FOREGROUND_TRANSPORT_KICK_EVENT } from '@/lib/appDeepLinkEvents'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -6415,6 +6415,17 @@ export default function MainScreen({
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
+
+  /** `supabase` 回前景運輸踢：profiles REST + Realtime 硬斷線後事件；探索等不必等 WS onOpen */
+  useEffect(() => {
+    if (!user?.id) return
+    const bump = () => {
+      void queryClient.invalidateQueries()
+      setForegroundReloadNonce((n) => n + 1)
+    }
+    window.addEventListener(TM_FOREGROUND_TRANSPORT_KICK_EVENT, bump)
+    return () => window.removeEventListener(TM_FOREGROUND_TRANSPORT_KICK_EVENT, bump)
+  }, [user?.id])
 
   /**
    * 首次進入主殼（SPA 內導航無新 `pageshow`）：使用者在 onboarding／驗證頁停留過久時 JWT 可能已過期；

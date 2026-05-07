@@ -6,6 +6,7 @@ import {
   reportResumeEvent,
 } from './resumeRealtimeTelemetry'
 import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
+import { TM_FOREGROUND_TRANSPORT_KICK_EVENT } from './appDeepLinkEvents'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -198,44 +199,87 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
   },
 })
 
-let lastRealtimeAuthHintMs = 0
-const REALTIME_AUTH_HINT_DEBOUNCE_MS = 320
+const FG_TRANSPORT_KICK_DEBOUNCE_MS = 420
+const PROFILE_WARM_BUDGET_MS = 12_000
+/**
+ * Teardown 若卡在 waitForBufferDone，不可無限 await disconnect。
+ * 逾時仍執行 connect，讓 WS 另起一輪；REST 已先於此完成。
+ */
+const REALTIME_DISCONNECT_FOREGROUND_HARD_MS = 1_200
+
+let lastForegroundTransportKickMs = 0
 
 /**
- * 視窗／分頁回前景：**先**用快取的 access token 對齊 `realtime.setAuth`。
- * 完整換發 + disconnect／connect 仍由 `repairAuthAfterResume`／`wakeSupabaseAuthFromBackground` 負責（見 `main.tsx`）。
+ * 回前景：不依賴 Realtime 自癒。順序為：
+ * 1. `setAuth` + `profiles` REST 一筆（喚醒 PostgREST，名單類畫面可先靠之後 UI refetch，不必等 WS）。
+ * 2. 短 budget `disconnect` → `connect`（避免僵死 teardown 拖住整頁）。
+ * 3. 廣播 {@link TM_FOREGROUND_TRANSPORT_KICK_EVENT}，MainScreen 會遞增 nonce 重抓。
  */
-export async function hintRealtimeAuthFromStoredSession(): Promise<void> {
+export async function foregroundKickProfilesThenRealtimeRecycle(): Promise<void> {
   if (typeof window === 'undefined' || typeof document === 'undefined') return
   if (document.visibilityState !== 'visible') return
+
   const now = Date.now()
-  if (now - lastRealtimeAuthHintMs < REALTIME_AUTH_HINT_DEBOUNCE_MS) return
-  lastRealtimeAuthHintMs = now
+  if (now - lastForegroundTransportKickMs < FG_TRANSPORT_KICK_DEBOUNCE_MS) return
+  lastForegroundTransportKickMs = now
+
+  reportResumeEvent('foreground_transport_kick_start')
+
   try {
     const {
       data: { session },
-      error,
+      error: sessErr,
     } = await supabase.auth.getSession()
-    if (error || !session?.access_token) return
+    if (sessErr || !session?.access_token) return
+
+    const uid = session.user?.id
+    if (!uid) return
+
     await supabase.realtime.setAuth(session.access_token)
+
+    await Promise.race([
+      supabase.from('profiles').select('id').eq('id', uid).maybeSingle(),
+      new Promise<void>((resolve) => globalThis.setTimeout(resolve, PROFILE_WARM_BUDGET_MS)),
+    ])
   } catch {
-    /* private mode / 競態 */
+    /* private mode / abort */
+  }
+
+  const rt = supabase.realtime
+  try {
+    await Promise.race([
+      rt.disconnect().catch(() => undefined),
+      new Promise<void>((resolve) =>
+        globalThis.setTimeout(resolve, REALTIME_DISCONNECT_FOREGROUND_HARD_MS),
+      ),
+    ])
+  } catch {
+    /* ignore */
+  }
+  try {
+    rt.connect()
+  } catch {
+    /* ignore */
+  }
+
+  reportResumeEvent('foreground_transport_kick_done')
+
+  try {
+    window.dispatchEvent(new CustomEvent(TM_FOREGROUND_TRANSPORT_KICK_EVENT))
+  } catch {
+    /* ignore */
   }
 }
 
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void hintRealtimeAuthFromStoredSession()
+    if (document.visibilityState === 'visible') void foregroundKickProfilesThenRealtimeRecycle()
   })
 }
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  let lastFocusHint = 0
   window.addEventListener('focus', () => {
     if (document.visibilityState !== 'visible') return
-    const now = Date.now()
-    if (now - lastFocusHint < REALTIME_AUTH_HINT_DEBOUNCE_MS) return
-    lastFocusHint = now
-    void hintRealtimeAuthFromStoredSession()
+    void foregroundKickProfilesThenRealtimeRecycle()
   })
 }
 
