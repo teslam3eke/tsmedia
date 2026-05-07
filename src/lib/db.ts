@@ -274,27 +274,50 @@ export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
     firstPath: typeof storagePaths[0] === 'string' ? storagePaths[0].slice(0, 40) : '—',
   })
 
-  const { data, error } = await supabase.storage
-    .from('photos')
-    .createSignedUrls(storagePaths, 60 * 60)
+  /** 探索名單已回來但若此請求卡住（換發 JWT ／背景回前景後 zombie fetch），UI 會永遠 loading；Network 只看到 RPC OK。 */
+  const SIGN_URLS_BUDGET_MS = 22_000
 
-  if (error) {
-    actionTrace('db.resolvePhotoUrls', '簽章失敗（沿用原路徑）', { msg: error.message?.slice?.(0, 120) ?? '—' })
-    console.error('[db] resolvePhotoUrls error:', error.message)
+  try {
+    const { data, error } = await Promise.race([
+      supabase.storage.from('photos').createSignedUrls(storagePaths, 60 * 60),
+      new Promise<{ data: null; error: { message: string } }>((resolve) =>
+        globalThis.setTimeout(
+          () =>
+            resolve({
+              data: null,
+              error: { message: `簽章逾時（>${SIGN_URLS_BUDGET_MS}ms）` },
+            }),
+          SIGN_URLS_BUDGET_MS,
+        ),
+      ),
+    ])
+
+    if (error) {
+      actionTrace('db.resolvePhotoUrls', '簽章失敗（沿用原路徑）', { msg: error.message?.slice?.(0, 120) ?? '—' })
+      if (!String(error.message ?? '').includes('逾時')) {
+        console.error('[db] resolvePhotoUrls error:', error.message)
+      }
+      return resolved
+    }
+
+    const signedMap = new Map(
+      (data ?? [])
+        .filter((item) => item.path && item.signedUrl)
+        .map((item) => [item.path, item.signedUrl] as const),
+    )
+
+    actionTrace('db.resolvePhotoUrls', '簽章完成', {
+      resolvedSlots: resolved.length,
+      signedCount: signedMap.size,
+    })
+    return resolved.map((path) => signedMap.get(path) ?? path)
+  } catch (e: unknown) {
+    actionTrace('db.resolvePhotoUrls', '簽章例外（沿用原路徑）', {
+      msg: e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120),
+    })
+    console.error('[db] resolvePhotoUrls error:', e)
     return resolved
   }
-
-  const signedMap = new Map(
-    (data ?? [])
-      .filter((item) => item.path && item.signedUrl)
-      .map((item) => [item.path, item.signedUrl] as const),
-  )
-
-  actionTrace('db.resolvePhotoUrls', '簽章完成', {
-    resolvedSlots: resolved.length,
-    signedCount: signedMap.size,
-  })
-  return resolved.map((path) => signedMap.get(path) ?? path)
 }
 
 export async function uploadProofDoc(
