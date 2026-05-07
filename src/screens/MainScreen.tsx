@@ -51,6 +51,7 @@ import AdminScreen from '@/screens/AdminScreen'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import { notifyServiceWorkerActiveChatMatch } from '@/lib/swActiveChat'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -3886,6 +3887,15 @@ function ChatRoomView({
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
+
+  /** 回報 SW：已開進此配對的聊天室，同一對象來訊不打 OS 橫幅 */
+  useEffect(() => {
+    if (!isLive || !conversation.matchId) return
+    notifyServiceWorkerActiveChatMatch(conversation.matchId)
+    return () => {
+      notifyServiceWorkerActiveChatMatch(null)
+    }
+  }, [isLive, conversation.matchId])
 
   useEffect(() => {
     if (isLive) return

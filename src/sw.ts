@@ -23,6 +23,46 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
 })
 
+/** 主執行緒回報：使用者正待在與該 match 的一對一聊；此 match 的新訊息不顯示推播橫幅 */
+let activeChatMatchIdLc: string | null = null
+
+self.addEventListener('message', (event: ExtendableMessageEvent) => {
+  try {
+    const d = event.data as { type?: string; matchId?: string | null } | undefined
+    if (d?.type !== 'TM_ACTIVE_CHAT_MATCH') return
+    activeChatMatchIdLc =
+      typeof d.matchId === 'string' && d.matchId.trim().length > 0 ? d.matchId.trim().toLowerCase() : null
+  } catch {
+    /* ignore */
+  }
+})
+
+function matchIdFromPayloadUrl(openUrlPath: string): string | null {
+  try {
+    const u = openUrlPath.startsWith('http')
+      ? new URL(openUrlPath)
+      : new URL(openUrlPath, self.location.origin)
+    const raw = u.searchParams.get('match')
+    if (!raw || !raw.trim()) return null
+    return raw.trim().toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+async function pingClientsForegroundMessageQuiet(): Promise<void> {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  for (const x of clients) {
+    if (!(x instanceof WindowClient)) continue
+    if (!x.url.startsWith(self.location.origin)) continue
+    try {
+      x.postMessage({ type: 'TM_PUSH_MESSAGE_RECEIVED_FOREGROUND' })
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 self.addEventListener('push', (event: PushEvent) => {
   event.waitUntil(
     (async () => {
@@ -47,10 +87,21 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
-      /** 與 LINE 類似：App 已在前景且視窗有焦點時，新訊息不彈系統橫幅（站內改用即時聊天／角標） */
+      /** 與 LINE 類似：（1）正開在同一配對聊天室 （2）或前景有焦點 → 不彈 OS 橫幅 */
       const isMessageReceivedTag = tag === 'app-notif-message_received'
       if (isMessageReceivedTag) {
+        const incomingMatchLc = matchIdFromPayloadUrl(openUrl)
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+
+        if (
+          incomingMatchLc != null &&
+          activeChatMatchIdLc != null &&
+          incomingMatchLc === activeChatMatchIdLc
+        ) {
+          await pingClientsForegroundMessageQuiet()
+          return
+        }
+
         const focusedHere = clients.some(
           (x) =>
             x instanceof WindowClient &&
@@ -59,15 +110,7 @@ self.addEventListener('push', (event: PushEvent) => {
             x.url.startsWith(self.location.origin),
         )
         if (focusedHere) {
-          for (const x of clients) {
-            if (!(x instanceof WindowClient)) continue
-            if (!x.url.startsWith(self.location.origin)) continue
-            try {
-              x.postMessage({ type: 'TM_PUSH_MESSAGE_RECEIVED_FOREGROUND' })
-            } catch {
-              /* ignore */
-            }
-          }
+          await pingClientsForegroundMessageQuiet()
           return
         }
       }
