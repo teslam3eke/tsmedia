@@ -13,7 +13,7 @@
  * - PUSH_WEBHOOK_SECRET（隨機字串）
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { sendWebPushToUser } from './_utils/pushSend'
+import { sendWebPushToUser } from './_utils/pushSend.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== 'POST') {

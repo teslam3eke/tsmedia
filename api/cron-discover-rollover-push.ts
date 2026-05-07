@@ -3,7 +3,7 @@
  * vercel.json 內 crons 需一併部署；專案建議設定 CRON_SECRET，與 Vercel Cron 帶入的 Bearer 一致。
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { broadcastDiscoverDeckRolloverPush } from './_utils/pushSend'
+import { broadcastDiscoverDeckRolloverPush } from './_utils/pushSend.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'POST') {
