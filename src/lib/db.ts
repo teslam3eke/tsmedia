@@ -1,5 +1,4 @@
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume } from './supabase'
-import { queryClient } from './queryClient'
 import { actionTrace, shortId } from './clientActionTrace'
 import { reportRealtimeChannel } from './resumeRealtimeTelemetry'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
@@ -1037,9 +1036,13 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
 
 type RealtimeSubscribeLabel = 'matches' | 'messages'
 
+/** 任一頻道本地重建與時間錯開，降低與全域 wake 同一幀 teardown 競態（Console 會噴連線在半開又被關）。 */
+let lastRealtimeChannelLocalRecycleTs = 0
+
 /**
- * postgres_changes 頻道：`subscribe` 若回報 CHANNEL_ERROR／TIMED_OUT（Phoenix transport 層故障在客戶端常被歸成這兩類，
- * 另稿寫的 TPS／tps_error 即屬此層）則遞增 backoff 後 remove + 重建，並觸發 TanStack 全量 invalidate 讓列表立刻重抓。
+ * postgres_changes 頻道：subscribe 遇到 CHANNEL_ERROR／TIMED_OUT 時只做「卸頻道＋delay 後再接回」，
+ * **不在此重跑** {@link repairAuthAfterResume}（前景已跑過；再打會跟 `wakeSupabaseAuthFromBackground` 搶全域 disconnect）。
+ * 若仍需刷列表，請依賴 MainScreen／main.tsx 的回前景 invalidate。
  */
 function subscribePostgresChannelWithBackoff(
   label: RealtimeSubscribeLabel,
@@ -1070,18 +1073,25 @@ function subscribePostgresChannelWithBackoff(
     clearRetryTimer()
     backoffAttempt += 1
     const exp = Math.min(6, backoffAttempt)
-    const base = Math.min(30_000, 480 * Math.pow(2, exp))
+    /** 下限 ~1.2s：wake 全域瞬斷時立刻略過可避免與新一輪 connect 對撞 */
+    const base = Math.max(1_200, Math.min(30_000, 520 * Math.pow(2, exp)))
     const jitter = Math.floor(Math.random() * 500)
     retryTimer = globalThis.setTimeout(async () => {
       retryTimer = null
       if (destroyed) return
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-      await repairAuthAfterResume()
-      try {
-        void queryClient.invalidateQueries()
-      } catch {
-        /* ignore */
+      /**
+       * 與全域 wake／其他頻道錯開，避免同時 removeChannel × N + connect 在半開態互卡。
+       */
+      const now = Date.now()
+      const gap = 750 - (now - lastRealtimeChannelLocalRecycleTs)
+      if (gap > 0) {
+        await new Promise<void>((r) => globalThis.setTimeout(r, gap))
       }
+      lastRealtimeChannelLocalRecycleTs = Date.now()
+      if (destroyed) return
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      /** 換發已由前景路徑處理；此處只重建訂閱，減輕對探索 REST 的同時競爭。 */
       await teardownChannel()
       attach()
     }, base + jitter)
