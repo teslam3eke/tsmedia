@@ -21,6 +21,8 @@ import {
   ensureConnectionWithBudget,
   repairAuthAfterResume,
   prepareSupabaseForProfileReads,
+  awaitRealtimeWsSignalWithin,
+  PROFILE_TAB_REALTIME_SIGNAL_MS,
   supabase,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
@@ -5908,74 +5910,53 @@ function ProfileTab({
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
-  /** prepare（換發+wake）+ 並行請求可能長掛；以 epoch／generation 收尾略過 stale，不靠 busy mutex（避免卡住時餓死後續 poll） */
-  const PROFILE_TAB_LOAD_OUTER_CAP_MS = 82_000
-  const PROFILE_TAB_POLL_OUTER_CAP_MS = 78_000
-
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
       const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       try {
-        const capReject = (ms: number) =>
-          new Promise<never>((_, rej) => {
-            globalThis.setTimeout(
-              () => rej(Object.assign(new Error(`profile-tab load outer cap (${ms}ms)`), { name: 'ProfileTabCapError' })),
-              ms,
-            )
-          })
-        await Promise.race([
-          (async (): Promise<void> => {
-            actionTrace('profileTab', 'load:開始', {
-              rid,
-              uid: shortId(userId),
-              foregroundNonce: foregroundReloadNonce,
-            })
-            /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
-            void finalizeDueAiReviews()
-            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-              await prepareSupabaseForProfileReads('load')
-            }
-            /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
-            const [latest, stats] = await Promise.all([
-              getProfile(userId),
-              refreshProfileTabStats(),
-            ])
-            if (profileLoadEpochRef.current !== myEpoch) {
-              actionTrace('profileTab', 'load:略過 stale', {
-                rid,
-                myEpoch,
-                curEpoch: profileLoadEpochRef.current,
-              })
-              return
-            }
-            actionTrace('profileTab', 'load:已取得', {
-              rid,
-              hasProfile: Boolean(latest),
-              nameLen: latest?.name?.length ?? 0,
-              nickLen: latest?.nickname?.length ?? 0,
-              hasStats: Boolean(stats),
-            })
-            if (latest) persistProfileBrief(userId, latest)
-            setProfile((prev) => latest ?? prev)
-            if (stats) setTabStats(stats)
-            actionTrace('profileTab', 'load:setState 已呼叫', { rid })
-          })(),
-          capReject(PROFILE_TAB_LOAD_OUTER_CAP_MS),
-        ])
-      } catch (e) {
-        if (
-          profileLoadEpochRef.current === myEpoch
-          && e
-          && typeof e === 'object'
-          && (e as { name?: string }).name === 'ProfileTabCapError'
-        ) {
-          console.warn('[tsmedia:profileTab] load outer cap — try pull-to-refresh or reopen', {
-            capMs: PROFILE_TAB_LOAD_OUTER_CAP_MS,
-            rid,
-          })
-          actionTrace('profileTab', 'load:逾時強制結束', { rid, capMs: PROFILE_TAB_LOAD_OUTER_CAP_MS })
+        actionTrace('profileTab', 'load:開始', {
+          rid,
+          uid: shortId(userId),
+          foregroundNonce: foregroundReloadNonce,
+        })
+        /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
+        void finalizeDueAiReviews()
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          await prepareSupabaseForProfileReads('load')
         }
+        /** 至多等 WS／Worker open；逾時不中斷，接著 REST（fetch 另有逾時）。 */
+        await awaitRealtimeWsSignalWithin(PROFILE_TAB_REALTIME_SIGNAL_MS)
+
+        /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
+        const [latest, stats] = await Promise.all([
+          getProfile(userId),
+          refreshProfileTabStats(),
+        ])
+        if (profileLoadEpochRef.current !== myEpoch) {
+          actionTrace('profileTab', 'load:略過 stale', {
+            rid,
+            myEpoch,
+            curEpoch: profileLoadEpochRef.current,
+          })
+          return
+        }
+        actionTrace('profileTab', 'load:已取得', {
+          rid,
+          hasProfile: Boolean(latest),
+          nameLen: latest?.name?.length ?? 0,
+          nickLen: latest?.nickname?.length ?? 0,
+          hasStats: Boolean(stats),
+        })
+        if (latest) persistProfileBrief(userId, latest)
+        setProfile((prev) => latest ?? prev)
+        if (stats) setTabStats(stats)
+        actionTrace('profileTab', 'load:setState 已呼叫', { rid })
+      } catch (e) {
+        console.warn('[tsmedia:profileTab] load failed', {
+          rid,
+          err: e instanceof Error ? e.message : String(e),
+        })
       }
     }
     load()
@@ -5987,59 +5968,43 @@ function ProfileTab({
       const myEpoch = ++profilePollGenRef.current
       const poll = Date.now()
       try {
-        const capReject = (ms: number) =>
-          new Promise<never>((_, rej) => {
-            globalThis.setTimeout(
-              () => rej(Object.assign(new Error(`profile-tab poll outer cap (${ms}ms)`), { name: 'ProfileTabCapError' })),
-              ms,
-            )
-          })
-        await Promise.race([
-          (async (): Promise<void> => {
-            actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
-            void finalizeDueAiReviews()
-            const [latest, stats] = await Promise.all([
-              getProfile(userId),
-              refreshProfileTabStats(),
-            ])
-            if (profilePollGenRef.current !== myEpoch) {
-              actionTrace('profileTab', 'poll:略過 stale', {
-                poll,
-                myEpoch,
-                curEpoch: profilePollGenRef.current,
-              })
-              return
-            }
-            actionTrace('profileTab', 'poll:Promise.all 結束', {
-              poll,
-              hasProfile: Boolean(latest),
-              hasStats: Boolean(stats),
-              myEpoch,
-            })
-            if (latest) persistProfileBrief(userId, latest)
-            setProfile((prev) => latest ?? prev)
-            onRefreshCredits()
-            if (stats) setTabStats(stats)
-            actionTrace('profileTab', 'poll:完成', {
-              poll,
-            })
-          })(),
-          capReject(PROFILE_TAB_POLL_OUTER_CAP_MS),
+        actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
+        void finalizeDueAiReviews()
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          await prepareSupabaseForProfileReads('poll')
+        }
+        await awaitRealtimeWsSignalWithin(PROFILE_TAB_REALTIME_SIGNAL_MS)
+        const [latest, stats] = await Promise.all([
+          getProfile(userId),
+          refreshProfileTabStats(),
         ])
-      } catch (e) {
-        if (
-          profilePollGenRef.current === myEpoch
-          && e
-          && typeof e === 'object'
-          && (e as { name?: string }).name === 'ProfileTabCapError'
-        ) {
-          console.warn('[tsmedia:profileTab] poll outer cap elapsed', {
-            capMs: PROFILE_TAB_POLL_OUTER_CAP_MS,
+        if (profilePollGenRef.current !== myEpoch) {
+          actionTrace('profileTab', 'poll:略過 stale', {
             poll,
             myEpoch,
+            curEpoch: profilePollGenRef.current,
           })
-          actionTrace('profileTab', 'poll:逾時強制結束', { poll, capMs: PROFILE_TAB_POLL_OUTER_CAP_MS, myEpoch })
+          return
         }
+        actionTrace('profileTab', 'poll:Promise.all 結束', {
+          poll,
+          hasProfile: Boolean(latest),
+          hasStats: Boolean(stats),
+          myEpoch,
+        })
+        if (latest) persistProfileBrief(userId, latest)
+        setProfile((prev) => latest ?? prev)
+        onRefreshCredits()
+        if (stats) setTabStats(stats)
+        actionTrace('profileTab', 'poll:完成', {
+          poll,
+        })
+      } catch (e) {
+        console.warn('[tsmedia:profileTab] poll failed', {
+          poll,
+          myEpoch,
+          err: e instanceof Error ? e.message : String(e),
+        })
       }
     }
     loadNotifications()

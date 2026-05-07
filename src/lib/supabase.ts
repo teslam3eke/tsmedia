@@ -189,8 +189,9 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
     /** PostgREST：官方逾時；與 global.fetch 並用避免只靠其中一層 */
     timeout: 28_000,
   },
-  /** Realtime transports：略縮心跳間隔並自訂重連曲線（瀏覽器凍結後仍要靠前景 wake + channel 級重試補強）。 */
+  /** Realtime：Web Worker 承載 WS；略縮心跳並自訂重連曲線（凍結後仍靠前景補連 + channel 級重試）。 */
   realtime: {
+    worker: true,
     heartbeatIntervalMs: 22_000,
     reconnectAfterMs: (tries) => Math.min(32_000, 900 * Math.pow(2, Math.min(tries, 5))),
   },
@@ -201,18 +202,13 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
 
 const FG_TRANSPORT_KICK_DEBOUNCE_MS = 420
 const PROFILE_WARM_BUDGET_MS = 12_000
-/**
- * Teardown 若卡在 waitForBufferDone，不可無限 await disconnect。
- * 逾時仍執行 connect，讓 WS 另起一輪；REST 已先於此完成。
- */
-const REALTIME_DISCONNECT_FOREGROUND_HARD_MS = 1_200
 
 let lastForegroundTransportKickMs = 0
 
 /**
- * 回前景：不依賴 Realtime 自癒。順序為：
- * 1. `setAuth` + `profiles` REST 一筆（喚醒 PostgREST，名單類畫面可先靠之後 UI refetch，不必等 WS）。
- * 2. 短 budget `disconnect` → `connect`（避免僵死 teardown 拖住整頁）。
+ * 回前景：喚醒 PostgREST + 檢查 Realtime（含 `worker: true` 時由同一 client 走 Worker）。
+ * 1. `setAuth` + `profiles` REST 一筆（名單類畫面可先靠後續 refetch，不必等 WS）。
+ * 2. 若 {@link RealtimeClient.isConnected} 為 false：{@link RealtimeClient.connect}（已連線則不強制 disconnect，避免整頁每次 focus 都拆線）。
  * 3. 廣播 {@link TM_FOREGROUND_TRANSPORT_KICK_EVENT}，MainScreen 會遞增 nonce 重抓。
  */
 export async function foregroundKickProfilesThenRealtimeRecycle(): Promise<void> {
@@ -246,20 +242,12 @@ export async function foregroundKickProfilesThenRealtimeRecycle(): Promise<void>
   }
 
   const rt = supabase.realtime
-  try {
-    await Promise.race([
-      rt.disconnect().catch(() => undefined),
-      new Promise<void>((resolve) =>
-        globalThis.setTimeout(resolve, REALTIME_DISCONNECT_FOREGROUND_HARD_MS),
-      ),
-    ])
-  } catch {
-    /* ignore */
-  }
-  try {
-    rt.connect()
-  } catch {
-    /* ignore */
+  if (!rt.isConnected()) {
+    try {
+      rt.connect()
+    } catch {
+      /* ignore */
+    }
   }
 
   reportResumeEvent('foreground_transport_kick_done')
@@ -271,11 +259,6 @@ export async function foregroundKickProfilesThenRealtimeRecycle(): Promise<void>
   }
 }
 
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void foregroundKickProfilesThenRealtimeRecycle()
-  })
-}
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('focus', () => {
     if (document.visibilityState !== 'visible') return
@@ -321,6 +304,8 @@ if (typeof document !== 'undefined') {
       reportResumeEvent('visibility_hidden')
     } else if (document.visibilityState === 'visible') {
       reportResumeEvent('visibility_visible')
+      /** 頁面回前景：`isConnected()` 為 false 時 {@link foregroundKickProfilesThenRealtimeRecycle} 內會 `connect()`（Worker/WebSocket）。 */
+      void foregroundKickProfilesThenRealtimeRecycle()
     }
   })
   /** BFCache：`visibilitychange` 未必再發；persisted pageshow 視同冷凍復原後必須重撿連線狀態。 */
@@ -582,11 +567,41 @@ export function repairAuthAfterResume(): Promise<void> {
 
 const PROFILE_TAB_READ_ENSURE_DEEP_MS = 14_000
 
+/** ProfileTab：至多等待 Realtime Worker／WS `open` 的毫秒數；逾時仍走 REST（{@link awaitRealtimeWsSignalWithin}）。 */
+export const PROFILE_TAB_REALTIME_SIGNAL_MS = 3_000
+
+/**
+ * ProfileTab：`realtime.connectionState()==='open'` 前至多輪詢 `budgetMs`。
+ * 逾時不中斷；呼叫端應接著發 PostgREST（備援）。
+ */
+export async function awaitRealtimeWsSignalWithin(budgetMs: number): Promise<void> {
+  if (typeof window === 'undefined') return
+
+  const rt = supabase.realtime
+  if (rt.isConnected()) return
+
+  try {
+    rt.connect()
+  } catch {
+    /* ignore */
+  }
+
+  const perf =
+    typeof performance !== 'undefined' && performance.now
+      ? (): number => performance.now()
+      : (): number => Date.now()
+  const t0 = perf()
+  while (perf() - t0 < budgetMs) {
+    if (rt.isConnected()) return
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 50))
+  }
+}
+
 /**
  * 「我的」載入／輪詢前先換發／wake／ensure。**勿**在此函式做短秒數 `Promise.race` 截斷：
  * `repairAuthAfterResume`（refresh 最多 14s + wake 內層至多約 42s）合理可超過 26s，
- * 截斷會讓換發打到一半就結束 await——接著 REST 仍以舊／僵線送出 → `poll` 整段卡住至 `busy` 永不釋放。
- * （整段 load／poll 的硬頂請在 ProfileTab 用單一大帽。）
+ * 截斷會讓換發打到一半就結束 await——接著 REST 仍以舊／僵線送出。
+ * ProfileTab：換發／ensure 完成後另以 {@link awaitRealtimeWsSignalWithin}（約 3s）等 WS，`getProfile` 等請求交由 global fetch／PostgREST 逾時。
  */
 export async function prepareSupabaseForProfileReads(mode: 'load' | 'poll'): Promise<void> {
   if (typeof document === 'undefined') return
