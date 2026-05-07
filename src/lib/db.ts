@@ -754,7 +754,9 @@ export async function fetchDailyDiscoverDeck(options?: {
       const raceCap = new Promise<never>((_, rej) => {
         raceTid = globalThis.setTimeout(() => {
           raceTid = null
-          rej(Object.assign(new Error(`探索 RPC ${deckRpcRaceMs}ms 硬逾時`), { name: 'AbortError' }))
+          rej(
+            Object.assign(new Error(`探索 RPC ${deckRpcRaceMs}ms 硬逾時`), { name: 'TimeoutError' }),
+          )
         }, deckRpcRaceMs)
       })
       res = await Promise.race([query, raceCap])
@@ -763,6 +765,23 @@ export async function fetchDailyDiscoverDeck(options?: {
         attempt,
         name: e && typeof e === 'object' && 'name' in e ? String((e as { name?: string }).name) : '?',
       })
+      const msg = e instanceof Error ? e.message : String(e)
+      const isHardTimeout = msg.includes('硬逾時')
+      const isAbortLike =
+        (e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && e.name === 'AbortError')
+      /** UI 新一輪取代／effect cleanup 會 abort 上一輪；不應 console.error 也不應當伺服器錯誤重試 */
+      if (isAbortLike && !isHardTimeout) {
+        return {
+          data: null as unknown,
+          error: {
+            message: msg,
+            code: 'ABORTED',
+            hint: 'Request superseded (new discover load or flight cleanup)',
+            details: '',
+          },
+        }
+      }
       return {
         data: null as unknown,
         error: {
@@ -789,20 +808,41 @@ export async function fetchDailyDiscoverDeck(options?: {
 
   let { data, error } = await rpcDeck(1)
 
+  const errCode = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : ''
+  if (errCode === 'ABORTED') {
+    actionTrace('db.fetchDailyDiscoverDeck', 'omitAbortSuperseded（新一輪已取代）', {})
+    return fin([], null)
+  }
+
   if (error && fg()) {
     await repairAuthAfterResume()
     await ensureConnectionWithBudget(12_000)
     ;({ data, error } = await rpcDeck(2))
+    const c2 = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : ''
+    if (c2 === 'ABORTED') {
+      actionTrace('db.fetchDailyDiscoverDeck', 'omitAbortSuperseded（attempt2）', {})
+      return fin([], null)
+    }
   }
 
   if (error && fg()) {
     await repairAuthAfterResume()
     ;({ data, error } = await rpcDeck(3))
+    const c3 = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : ''
+    if (c3 === 'ABORTED') {
+      actionTrace('db.fetchDailyDiscoverDeck', 'omitAbortSuperseded（attempt3）', {})
+      return fin([], null)
+    }
   }
 
   if (error && fg()) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await rpcDeck(4))
+    const c4 = error && typeof error === 'object' && 'code' in error ? String((error as { code?: string }).code) : ''
+    if (c4 === 'ABORTED') {
+      actionTrace('db.fetchDailyDiscoverDeck', 'omitAbortSuperseded（attempt4）', {})
+      return fin([], null)
+    }
   }
 
   /** WebKit／切 App：`fetch` AbortError（或 budget abort）發生在背景時不應對使用者推「伺服器錯誤」，回前景後 MainScreen nonce 會重抓 */
@@ -812,6 +852,10 @@ export async function fetchDailyDiscoverDeck(options?: {
         ? String((error as { message?: string }).message).slice(0, 72)
         : '—',
     })
+    return fin([], null)
+  }
+
+  if (error && typeof error === 'object' && (error as { code?: string }).code === 'ABORTED') {
     return fin([], null)
   }
 
