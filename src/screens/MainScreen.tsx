@@ -49,6 +49,7 @@ import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import AdminScreen from '@/screens/AdminScreen'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -519,7 +520,13 @@ interface NotifSettings {
   weeklyDigest: boolean
 }
 
-function NotificationModal({ onClose }: { onClose: () => void }) {
+function NotificationModal({
+  onClose,
+  userId,
+}: {
+  onClose: () => void
+  userId?: string | null
+}) {
   const [settings, setSettings] = useState<NotifSettings>(() => {
     const defaults: NotifSettings = { newMatch: false, messages: false, newProfile: false, weeklyDigest: false }
     try {
@@ -551,6 +558,7 @@ function NotificationModal({ onClose }: { onClose: () => void }) {
     try {
       const p = await Notification.requestPermission()
       setPermission(p)
+      if (p === 'granted' && userId) void subscribeWebPushForCurrentUser(userId)
       return p
     } catch {
       setPermission('denied')
@@ -591,6 +599,7 @@ function NotificationModal({ onClose }: { onClose: () => void }) {
       } else {
         new Notification(title, options)
       }
+      if (userId) void subscribeWebPushForCurrentUser(userId)
       setTestStatus('sent')
       setTimeout(() => setTestStatus('idle'), 2500)
     } catch (e) {
@@ -2332,7 +2341,9 @@ function DiscoverTab({
 
       {/* Notification modal */}
       <AnimatePresence>
-        {showNotifModal && <NotificationModal onClose={() => setShowNotifModal(false)} />}
+        {showNotifModal && (
+          <NotificationModal onClose={() => setShowNotifModal(false)} userId={userId} />
+        )}
       </AnimatePresence>
 
       <AnimatePresence>
@@ -6234,7 +6245,7 @@ function ProfileTab({
 
       {/* Notification modal */}
       <AnimatePresence>
-        {showNotif && <NotificationModal onClose={() => setShowNotif(false)} />}
+        {showNotif && <NotificationModal onClose={() => setShowNotif(false)} userId={userId} />}
       </AnimatePresence>
 
       <AnimatePresence>
@@ -6412,6 +6423,20 @@ export default function MainScreen({
     if (!user?.id) {
       setMatchSplash(null)
     }
+  }, [user?.id])
+
+  /** Web Push：已授權通知時寫入訂閱（可於開啟 App 或從系統設定開通知後觸發）。 */
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+    const run = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void subscribeWebPushForCurrentUser(uid)
+      }
+    }
+    run()
+    document.addEventListener('visibilitychange', run)
+    return () => document.removeEventListener('visibilitychange', run)
   }, [user?.id])
 
   /** 後台 app_notifications：全分頁彈窗；同一 id 會話內只會排入佇列一次，按「知道了」後標已讀再顯示下一則。 */

@@ -34,32 +34,13 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'favicon.svg', 'manifest.json', 'icons/*.png', 'hero.png', 'landing-photo.png'],
       manifest: false,
-      workbox: {
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,json}'],
-        /** Eruda 僅在 `?eruda=1` 等啟用時動態載入，勿預快取 ~500KB 除錯包 */
         globIgnores: ['**/*eruda*.js'],
-        skipWaiting: true,
-        clientsClaim: true,
-        // build-id 一律走網路，避免 SW／HTTP 快取讓版本檢查讀到舊檔
-        // Supabase：**整個 *.supabase.co 主機一律 NetworkOnly、不 method 細拆**，
-        // 含 OPTIONS（CORS）、REST、Auth、Realtime upgrade；可避免 SW／快取鎖進錯誤的離線快照。
-        // iOS PWA：勿改回 StaleWhileRevalidate 或依 method 分拆 — 易造成假連線／僵死請求。
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) =>
-              url.pathname === '/api/git-sha' || url.pathname.endsWith('/api/git-sha'),
-            handler: 'NetworkOnly',
-          },
-          {
-            urlPattern: ({ url }) =>
-              url.pathname === '/build-id.txt' || url.pathname.endsWith('/build-id.txt'),
-            handler: 'NetworkOnly',
-          },
-          {
-            urlPattern: ({ url }) => url.hostname.endsWith('.supabase.co'),
-            handler: 'NetworkOnly',
-          },
-        ],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
     }),
     emitBuildIdPlugin(),

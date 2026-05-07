@@ -5,6 +5,12 @@
       "destination": "/api/git-sha"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/cron-discover-rollover-push",
+      "schedule": "0 14 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/api/git-sha",
