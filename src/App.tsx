@@ -14,6 +14,7 @@ import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
   resumeHardReloadDisabledGlobally,
+  resumeHardReloadEnabled,
   touchMediaPickerGraceSession,
   isWithinMediaPickerGracePeriod,
   windowBlurWakeLikelyForResumeReload,
@@ -103,6 +104,22 @@ export default function App() {
   const femaleNeedsLifePhotoOnboarding = (profile: import('@/lib/types').ProfileRow | null) =>
     Boolean(profile?.gender === 'female' && !profileHasMinPhotos(profile))
 
+  const securityOkStorageKey = (userId: string) => `tm_security_ok_v1_${userId}`
+  const readSecurityOnboardingDone = (userId: string) => {
+    try {
+      return localStorage.getItem(securityOkStorageKey(userId)) === '1'
+    } catch {
+      return false
+    }
+  }
+  const writeSecurityOnboardingDone = (userId: string) => {
+    try {
+      localStorage.setItem(securityOkStorageKey(userId), '1')
+    } catch {
+      /* private mode */
+    }
+  }
+
   const launchMainFromProfile = (profile: import('@/lib/types').ProfileRow | null) => {
     if (!profile) {
       setMainInitialTab('discover')
@@ -125,10 +142,14 @@ export default function App() {
     launchMainFromProfile(profile)
   }
 
-  // Always go through security check first, regardless of progress.
-  const routeByProfile = (profile: import('@/lib/types').ProfileRow | null) => {
+  // 首次登入仍走安全頁；同一裝置同一帳號看過一次後改走 routeAfterSecurityCheck，避免重整／推播冷啟反覆卡住。
+  const routeByProfile = (profile: import('@/lib/types').ProfileRow | null, userId: string) => {
     if (profile?.gender) setUserGender(profile.gender)
     if (profile?.name) setCurrentProfileName(profile.name)
+    if (readSecurityOnboardingDone(userId)) {
+      routeAfterSecurityCheck(profile)
+      return
+    }
     go('security-check')
   }
 
@@ -223,7 +244,8 @@ export default function App() {
 
   /**
    * 主殼：背景／凍結回前景若 JS fetch transport 僵死 → 直接整頁重載。
-   * 不依賴 UA 判定（先前易漏）；桌機若在主殼也需避開可自行開 `?noHardResume=1`。
+   * 僅在 PWA standalone、iOS／iPadOS、Android 手機 Chrome 註冊；一般桌機分頁不註冊，避免切換分頁即整頁重整。
+   * 若仍要關閉自動重載可用 `?noHardResume=1`（sessionStorage）。
    * 監聽只註冊一次，用 ref 對齊 `screen`/user id，避免 `[user]` 身分重算時拆掉 listener 錯過事件。
    */
   const resumeHardReloadMainRef = useRef(false)
@@ -233,6 +255,7 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
+    if (!resumeHardReloadEnabled()) return
 
     const MIN_HIDDEN_MS = 600
     const dbg =
@@ -404,7 +427,7 @@ export default function App() {
           await ensureConnectionWithBudget()
         }
         const profile = await getProfile(u.id)
-        routeByProfile(profile)
+        routeByProfile(profile, u.id)
       } else {
         go('landing')
       }
@@ -418,7 +441,7 @@ export default function App() {
       // 信箱確認信（PKCE）：首屏 getSession 仍為 null，換券完成後才會觸發 SIGNED_IN，須在此接 onboarding 路由
       if (event === 'SIGNED_IN' && session?.user) {
         const profile = await getProfile(session.user.id)
-        routeByProfile(profile)
+        routeByProfile(profile, session.user.id)
       }
     })
 
@@ -564,7 +587,7 @@ export default function App() {
               // getSession timing races right after login.
               setUser(signedInUser)
               const profile = await getProfile(signedInUser.id)
-              routeByProfile(profile)
+              routeByProfile(profile, signedInUser.id)
             }}
             onBack={() => go('landing')}
           />
@@ -575,6 +598,7 @@ export default function App() {
             onContinue={async () => {
               const activeUser = await getActiveUser()
               if (!activeUser) return go('profile-setup')
+              writeSecurityOnboardingDone(activeUser.id)
               const profile = await getProfile(activeUser.id)
               routeAfterSecurityCheck(profile)
             }}

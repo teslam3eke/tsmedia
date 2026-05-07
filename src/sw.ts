@@ -24,7 +24,7 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('push', (event: PushEvent) => {
-  let title = 'tsMedia'
+  let title = '新訊息'
   let body = ''
   let tag = 'tsmedia'
   let openUrl = '/'

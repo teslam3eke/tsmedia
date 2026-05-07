@@ -36,6 +36,22 @@ export function windowBlurWakeLikelyForResumeReload(): boolean {
   return standaloneDisplayModeLikely() || iosOrIpadosLikely()
 }
 
+/**
+ * 是否註冊「主殼回前景整頁重載」監聽。一般桌機瀏覽器分頁僅用 visibility 就會在切換分頁時誤觸重載；
+ * 僅在 PWA standalone、iOS／iPadOS、或 Android 手機瀏覽器啟用（與 blur／focus 補洞範圍對齊並略含 Android Chrome）。
+ */
+export function resumeHardReloadEnabled(): boolean {
+  if (standaloneDisplayModeLikely()) return true
+  if (iosOrIpadosLikely()) return true
+  try {
+    const ua = navigator.userAgent || ''
+    if (/Android/i.test(ua) && /Mobile/i.test(ua)) return true
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
 export function resumeHardReloadDisabledGlobally(): boolean {
   try {
     const q = new URLSearchParams(window.location.search)
