@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+﻿import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -55,6 +55,7 @@ import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/r
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { notifyServiceWorkerActiveChatMatch } from '@/lib/swActiveChat'
 import { TM_APP_DEEP_LINK_EVENT, TM_FOREGROUND_TRANSPORT_KICK_EVENT } from '@/lib/appDeepLinkEvents'
+import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -1072,6 +1073,66 @@ function collectProfilePhotoUrls(p: Profile): string[] {
   return []
 }
 
+const DISCOVER_DECK_PROFILE_CACHE_VERSION = 3 as const
+
+function readDiscoverDeckProfileCache(uid: string, dayKey: string): Profile[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(discoverDeckLocalStorageKey(uid, dayKey))
+    if (!raw) return []
+    const o = JSON.parse(raw) as { v?: number; profiles?: unknown }
+    if (o.v !== DISCOVER_DECK_PROFILE_CACHE_VERSION || !Array.isArray(o.profiles)) return []
+    return o.profiles as Profile[]
+  } catch {
+    return []
+  }
+}
+
+function writeDiscoverDeckProfileCache(uid: string, dayKey: string, profiles: Profile[]) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(
+      discoverDeckLocalStorageKey(uid, dayKey),
+      JSON.stringify({
+        v: DISCOVER_DECK_PROFILE_CACHE_VERSION,
+        t: Date.now(),
+        profiles,
+      }),
+    )
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** 名單最前面連續累計至多 `max` 張相片 URL（用於預載）。 */
+function collectTopDiscoverPhotoUrls(profiles: Profile[], max = 3): string[] {
+  const out: string[] = []
+  outer: for (const p of profiles) {
+    for (const u of collectProfilePhotoUrls(p)) {
+      const s = String(u).trim()
+      if (s) out.push(s)
+      if (out.length >= max) break outer
+    }
+  }
+  return out
+}
+
+function preloadDiscoverImageUrls(urls: readonly string[]): void {
+  if (typeof window === 'undefined') return
+  for (const u of urls) {
+    const img = new Image()
+    try {
+      if ('fetchPriority' in img) {
+        ;(img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'high'
+      }
+    } catch {
+      /* ignore */
+    }
+    img.decoding = 'async'
+    img.src = u
+  }
+}
+
 const DEMO_PUZZLE_CLEARED_KEY = 'tsm-demo-puzzle-cleared-slots'
 
 function discoverChatPuzzleIntroStorageKey(userId: string) {
@@ -1138,6 +1199,8 @@ function BlurredProfilePhotoSlideshow({
   compatScore,
   onReportClick,
   unblockedIndices,
+  /** 探索：前 N 張 slide 使用 `fetchPriority="high"`（搭配 `preloadDiscoverImageUrls`）。 */
+  highFetchPrioritySlideCount = 0,
 }: {
   profileKey: string | number
   photoUrls: string[]
@@ -1149,6 +1212,7 @@ function BlurredProfilePhotoSlideshow({
   onReportClick: () => void
   /** 在聊天中已完整解鎖的相片的索引（0-based），不套用模糊。 */
   unblockedIndices?: ReadonlySet<number> | number[]
+  highFetchPrioritySlideCount?: number
 }) {
   const [index, setIndex] = useState(0)
   const touchStartX = useRef<number | null>(null)
@@ -1206,6 +1270,11 @@ function BlurredProfilePhotoSlideshow({
               key={`${profileKey}-ph-${i}`}
               src={src}
               alt=""
+              fetchPriority={
+                variant === 'discover' && highFetchPrioritySlideCount > 0 && i < highFetchPrioritySlideCount
+                  ? 'high'
+                  : undefined
+              }
               className={cn(
                 'absolute inset-0 h-full w-full object-cover scale-[1.04] transition-opacity duration-200',
                 i === index ? 'z-[1] opacity-100' : 'z-0 opacity-0 pointer-events-none',
@@ -1381,8 +1450,14 @@ function DiscoverTab({
 }) {
   // Men see female profiles, women see male profiles (demo 另以 preferredRegion 篩選；已登入者由伺服器每日 6 人＋區域邏輯）
   const [blockedKeys, setBlockedKeys] = useState<string[]>([])
-  const [liveDeck, setLiveDeck] = useState<Profile[]>([])
-  const [liveDeckStatus, setLiveDeckStatus] = useState<'idle' | 'loading' | 'ready'>('idle')
+  const initialDiscoverCache =
+    typeof window !== 'undefined' && userId
+      ? readDiscoverDeckProfileCache(userId, discoverDeckDayKey)
+      : []
+  const [liveDeck, setLiveDeck] = useState<Profile[]>(() => initialDiscoverCache)
+  const [liveDeckStatus, setLiveDeckStatus] = useState<'idle' | 'loading' | 'ready'>(() =>
+    initialDiscoverCache.length > 0 ? 'ready' : 'idle',
+  )
   /** RPC／逾時／例外時直接顯示在探索頁，方便 iOS 使用者回報 */
   const [deckLoadDiagnostic, setDeckLoadDiagnostic] = useState<string | null>(null)
   /** 探索載入失敗時，逐鍵診斷哪種恢復方式有效 */
@@ -1418,6 +1493,18 @@ function DiscoverTab({
     [currentUserGender, preferredRegion],
   )
 
+  /** 換帳號／換日：從 localStorage 拉回上一輪成功的名單，避免進探索先看到全屏轉圈（與 RPC 並行 SWR）。 */
+  useLayoutEffect(() => {
+    if (!userId) {
+      setLiveDeck([])
+      setLiveDeckStatus('idle')
+      return
+    }
+    const cached = readDiscoverDeckProfileCache(userId, discoverDeckDayKey)
+    setLiveDeck(cached)
+    setLiveDeckStatus(cached.length > 0 ? 'ready' : 'idle')
+  }, [userId, discoverDeckDayKey])
+
   const baseList = userId ? liveDeck : demoBase
 
   const visibleProfiles = useMemo(
@@ -1431,6 +1518,23 @@ function DiscoverTab({
     }),
     [baseList, blockedKeys, currentUserGender, userId],
   )
+
+  const discoverTopPhotosSig = useMemo(
+    () => JSON.stringify(collectTopDiscoverPhotoUrls(visibleProfiles, 3)),
+    [visibleProfiles],
+  )
+
+  useEffect(() => {
+    if (!userId) return
+    let urls: string[] = []
+    try {
+      urls = JSON.parse(discoverTopPhotosSig) as string[]
+    } catch {
+      return
+    }
+    if (!Array.isArray(urls) || urls.length === 0) return
+    preloadDiscoverImageUrls(urls)
+  }, [userId, discoverTopPhotosSig])
 
   const [index, setIndex] = useState(() => discoverUiSnap?.cardIndex ?? 0)
   const [direction, setDirection] = useState<'next' | 'prev'>('next')
@@ -1565,11 +1669,12 @@ function DiscoverTab({
         const rpcFlightSig = discoverDeckRpcFlightRef.current.signal
 
         const ctx = { uid: userId, dk: discoverDeckDayKey }
-        const ctxChanged =
-          lastDeckFetchCtxRef.current?.uid !== ctx.uid ||
-          lastDeckFetchCtxRef.current?.dk !== ctx.dk
+        const keepStaleVisible =
+          liveDeckRef.current.length > 0 &&
+          (lastDeckFetchCtxRef.current == null ||
+            (lastDeckFetchCtxRef.current.uid === ctx.uid &&
+              lastDeckFetchCtxRef.current.dk === ctx.dk))
         lastDeckFetchCtxRef.current = ctx
-        const keepStaleVisible = !ctxChanged && liveDeckRef.current.length > 0
 
         const myEpoch = ++deckLoadEpochRef.current
 
@@ -1597,6 +1702,10 @@ function DiscoverTab({
               actionTrace('discover.deck', 'work:進入', { phase: 'pre-ensure', myEpoch })
               if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
                 await ensureConnectionWithBudget()
+              }
+              /** SWR 背景層：靜默觸發 PostgREST（與 RPC 並行，不阻塞 UI）。 */
+              if (userId) {
+                void supabase.from('profiles').select('id').eq('id', userId).limit(1).maybeSingle()
               }
               actionTrace('discover.deck', 'work:ensureConnection 結束', { myEpoch })
               if (cancelledOuter || deckLoadEpochRef.current !== myEpoch) {
@@ -1686,6 +1795,7 @@ function DiscoverTab({
                     clearDiscoverFailAutoReloadFlag()
                     setLiveDeck(profiles)
                     setLiveDeckStatus('ready')
+                    writeDiscoverDeckProfileCache(userId, discoverDeckDayKey, profiles)
                     actionTrace('discover.deck', 'work:完成', {
                       profileCount: profiles.length,
                       myEpoch,
@@ -2202,6 +2312,7 @@ function DiscoverTab({
                   gradientFrom={profile.gradientFrom}
                   gradientTo={profile.gradientTo}
                   variant="discover"
+                  highFetchPrioritySlideCount={index === 0 ? 3 : 0}
                   onReportClick={() => setReportTarget({
                     profileKey: profile.profileKey,
                     displayName: getPublicName(profile),

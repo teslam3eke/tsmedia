@@ -1,5 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 
+import { clearDiscoverDeckLocalCaches } from './discoverDeckLocalCache'
+
 /** 與 `main.tsx` persist persister、`clearAppQueryCache` 共用 */
 export const QUERY_CACHE_STORAGE_KEY = 'tsmedia-tanstack-query'
 
@@ -18,7 +20,9 @@ export const QUERY_CACHE_STORAGE_KEY = 'tsmedia-tanstack-query'
  * 3. **持久化 Cache（可選）**
  *    `PersistQueryClientProvider` + `createSyncStoragePersister` 見 `main.tsx`；冷啟可先還原
  *    已快取的 `useQuery`（敏感資料請在 query `meta.persistOffline === false` 排除）。
- *    主殼探索／配對／聊天仍多以元件 state + sessionStorage 為主，與此並行。
+ *    **探索**：另見 `discoverDeckLocalCache.ts`，成功載入的探索 deck 會寫入 localStorage（SWR）；
+ *    登出時隨 {@link clearAppQueryCache} 一併刪除。
+ *    主殼探索／配對／聊天仍多以元件 state + sessionStorage / 上述 LS 並行。
  *
  * 登出務必 `clearAppQueryCache()`，避免下一使用者看到 dehydrated 資料。
  */
@@ -41,6 +45,7 @@ export const queryClient = new QueryClient({
 
 export function clearAppQueryCache(): void {
   queryClient.clear()
+  clearDiscoverDeckLocalCaches()
   try {
     localStorage.removeItem(QUERY_CACHE_STORAGE_KEY)
   } catch {
