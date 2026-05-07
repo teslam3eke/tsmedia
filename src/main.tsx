@@ -16,6 +16,21 @@ import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 void maybeInitEruda()
 markPwaStandaloneSeenIfNeeded()
 
+/** Service Worker 無 `navigate` 時，由主執行緒改寫 location（推播點擊直達 ?tab=…） */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (ev: MessageEvent) => {
+    const d = ev.data as { type?: string; url?: string } | undefined
+    if (d?.type !== 'TM_NAVIGATE' || typeof d.url !== 'string') return
+    try {
+      const u = new URL(d.url, window.location.origin)
+      if (u.origin !== window.location.origin) return
+      window.location.assign(u.pathname + u.search + u.hash)
+    } catch {
+      /* ignore */
+    }
+  })
+}
+
 registerSW({
   immediate: true,
   onNeedRefresh() {

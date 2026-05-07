@@ -54,6 +54,18 @@ const SLIDE: Record<'forward' | 'back', { initial: TargetAndTransition; exit: Ta
   back:    { initial: { opacity: 0, x: -40 }, exit: { opacity: 0, x: 40 } },
 }
 
+/** 推播／分享連結 `?tab=`：進入主殼時優先開該分頁（生活照未達標仍強制「我的」） */
+function readMainTabHintFromLocation(): MainScreenTab | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const t = new URLSearchParams(window.location.search).get('tab')
+    if (t === 'discover' || t === 'matches' || t === 'messages' || t === 'profile') return t
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
 // ── Splash loader ─────────────────────────────────────────────────────────────
 function SplashScreen() {
   return (
@@ -121,12 +133,18 @@ export default function App() {
   }
 
   const launchMainFromProfile = (profile: import('@/lib/types').ProfileRow | null) => {
+    const tabHint = readMainTabHintFromLocation()
     if (!profile) {
-      setMainInitialTab('discover')
+      setMainInitialTab(tabHint ?? 'discover')
       go('main')
       return
     }
-    setMainInitialTab(profileHasMinPhotos(profile) ? 'discover' : 'profile')
+    if (!profileHasMinPhotos(profile)) {
+      setMainInitialTab('profile')
+      go('main')
+      return
+    }
+    setMainInitialTab(tabHint ?? 'discover')
     go('main')
   }
 

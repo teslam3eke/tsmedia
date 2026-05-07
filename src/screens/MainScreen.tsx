@@ -4365,8 +4365,10 @@ function MessagesTab({
   useEffect(() => {
     if (requestedConversationId == null) return
     const conv = chatList.find((c) => c.id === requestedConversationId)
-    if (conv) setActive(conv)
-    onConversationOpened?.()
+    if (conv) {
+      setActive(conv)
+      onConversationOpened?.()
+    }
   }, [requestedConversationId, chatList, onConversationOpened])
 
   if (active) {
@@ -6470,6 +6472,38 @@ export default function MainScreen({
     })
   }, [])
 
+  /** 推播／分享網址 `?notif` `?tab` `?match`：導向對應分頁、開聊天、標站內通知已讀（不再重複彈窗） */
+  useEffect(() => {
+    if (!user?.id) return
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    const tabParam = url.searchParams.get('tab')
+    const notifId = url.searchParams.get('notif')
+    const matchId = url.searchParams.get('match')
+    if (!tabParam && !notifId && !matchId) return
+
+    url.searchParams.delete('fromPush')
+    url.searchParams.delete('notif')
+    url.searchParams.delete('match')
+    url.searchParams.delete('tab')
+    const rest = url.searchParams.toString()
+    window.history.replaceState({}, '', url.pathname + (rest ? `?${rest}` : ''))
+
+    if (tabParam === 'discover' || tabParam === 'matches' || tabParam === 'messages' || tabParam === 'profile') {
+      setActiveTab(tabParam)
+    }
+    if (notifId) {
+      appNotifQueuedOnceIdsRef.current.add(notifId)
+      appNotifPopupQueueRef.current = appNotifPopupQueueRef.current.filter((n) => n.id !== notifId)
+      setActiveAppNotifPopup((cur) => (cur?.id === notifId ? null : cur))
+      void markAppNotificationRead(notifId)
+    }
+    if (matchId) {
+      setActiveTab('messages')
+      setPendingChatId(matchId)
+    }
+  }, [user?.id])
+
   useEffect(() => {
     const uid = user?.id
     if (!uid) return
@@ -6839,6 +6873,15 @@ export default function MainScreen({
     ),
   }
 
+  const messagesTabUnreadCount = useMemo(() => {
+    return liveMatchThreads.reduce((sum, conv) => {
+      const n = conv.messages.filter(
+        (m) => m.from === 'them' && !hasMyReplyAfter(m, conv.messages),
+      ).length
+      return sum + n
+    }, 0)
+  }, [liveMatchThreads])
+
   const showTabBar = !(activeTab === 'messages' && hideTabBarForChatKeyboard)
 
   return (
@@ -6928,7 +6971,14 @@ export default function MainScreen({
                     transition={{ type: 'spring', stiffness: 400, damping: 35 }}
                   />
                 )}
-                <Icon className={cn('w-5 h-5 transition-colors', activeTab === tab ? 'text-slate-900' : 'text-slate-400')} />
+                <span className="relative inline-flex">
+                  <Icon className={cn('w-5 h-5 transition-colors', activeTab === tab ? 'text-slate-900' : 'text-slate-400')} />
+                  {tab === 'messages' && messagesTabUnreadCount > 0 && (
+                    <span className="absolute -right-1.5 -top-1 min-w-[15px] h-3.5 px-[3px] rounded-full bg-rose-500 text-[9px] font-bold leading-none text-white flex items-center justify-center tabular-nums">
+                      {messagesTabUnreadCount > 99 ? '99+' : messagesTabUnreadCount}
+                    </span>
+                  )}
+                </span>
                 <span className={cn('text-[10px] font-medium transition-colors', activeTab === tab ? 'text-slate-900' : 'text-slate-400')}>
                   {label}
                 </span>

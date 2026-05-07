@@ -114,6 +114,8 @@ export interface AppNotificationRow {
   kind: AppNotificationKind
   title: string
   body: string
+  /** 訊息通知時為對應配對 ID（供推播 deep link） */
+  ref_match_id: string | null
   read_at: string | null
   created_at: string
 }

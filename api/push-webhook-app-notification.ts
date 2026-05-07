@@ -15,6 +15,29 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { sendWebPushToUser } from './_utils/pushSend.js'
 
+/** 與前端 MainScreen / App 的 `?tab=` 對齊；含 `notif` 以便開啟後標已讀、不重複站內彈窗 */
+function buildOpenUrlForAppNotification(record: {
+  id?: string
+  kind?: string
+  ref_match_id?: string | null
+}): string {
+  const p = new URLSearchParams()
+  if (record.id) p.set('notif', record.id)
+  const kind = record.kind ?? ''
+  if (kind === 'message_received') {
+    p.set('tab', 'messages')
+    if (record.ref_match_id) p.set('match', record.ref_match_id)
+  } else if (kind === 'super_like_received') {
+    p.set('tab', 'discover')
+  } else if (kind === 'verification_approved' || kind === 'verification_rejected') {
+    p.set('tab', 'profile')
+  } else {
+    p.set('tab', 'discover')
+  }
+  p.set('fromPush', '1')
+  return `/?${p.toString()}`
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== 'POST') {
     res.status(405).end()
@@ -36,7 +59,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const table = body?.table as string | undefined
     const record = (body?.record ??
       body?.payload?.record ??
-      body?.new) as { user_id?: string; title?: string; body?: string; kind?: string } | undefined
+      body?.new) as {
+      id?: string
+      user_id?: string
+      title?: string
+      body?: string
+      kind?: string
+      ref_match_id?: string | null
+    } | undefined
 
     if (type !== 'INSERT' || table !== 'app_notifications' || !record?.user_id || !record.title) {
       res.status(400).json({ error: 'expected INSERT on app_notifications with user_id and title' })
@@ -48,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       title: record.title,
       body: record.body ?? '',
       tag,
-      url: '/',
+      url: buildOpenUrlForAppNotification(record),
     })
     res.status(200).json({ ok: true, ...result })
   } catch (e) {

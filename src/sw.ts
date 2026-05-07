@@ -65,10 +65,25 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
     (async () => {
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       for (const c of all) {
-        if (c instanceof WindowClient && c.url.startsWith(self.location.origin)) {
-          await c.focus()
-          return
+        if (!(c instanceof WindowClient)) continue
+        if (!c.url.startsWith(self.location.origin)) continue
+        const w = c as WindowClient & { navigate?: (u: string) => Promise<WindowClient | null> }
+        if (typeof w.navigate === 'function') {
+          try {
+            await w.navigate(target)
+            await c.focus()
+            return
+          } catch {
+            /* 部分 WebKit 不實作或拒絕 navigate */
+          }
         }
+        await c.focus()
+        try {
+          c.postMessage({ type: 'TM_NAVIGATE', url: target })
+        } catch {
+          /* ignore */
+        }
+        return
       }
       await self.clients.openWindow(target)
     })(),
