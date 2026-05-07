@@ -6,7 +6,10 @@ import {
   reportResumeEvent,
 } from './resumeRealtimeTelemetry'
 import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
-import { TM_FOREGROUND_TRANSPORT_KICK_EVENT } from './appDeepLinkEvents'
+import {
+  TM_FOREGROUND_TRANSPORT_KICK_EVENT,
+  TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
+} from './appDeepLinkEvents'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -205,19 +208,33 @@ const PROFILE_WARM_BUDGET_MS = 12_000
 
 let lastForegroundTransportKickMs = 0
 
+export type ForegroundTransportKickOptions = {
+  /** 預設 true；`hidden`→`visible` 物理卸頻道時已由外層先廣播 HTTP  kick，此處應 false 避免雙重 bump。 */
+  emitTransportKick?: boolean
+  /** `true` 時略過 `FG_TRANSPORT_KICK_DEBOUNCE_MS`（僅用於自 `hidden` 回前景的單次序列）。 */
+  ignoreDebounce?: boolean
+}
+
 /**
  * 回前景：喚醒 PostgREST + 檢查 Realtime（含 `worker: true` 時由同一 client 走 Worker）。
  * 1. `setAuth` + `profiles` REST 一筆（名單類畫面可先靠後續 refetch，不必等 WS）。
  * 2. 若 {@link RealtimeClient.isConnected} 為 false：{@link RealtimeClient.connect}（已連線則不強制 disconnect，避免整頁每次 focus 都拆線）。
- * 3. 廣播 {@link TM_FOREGROUND_TRANSPORT_KICK_EVENT}，MainScreen 會遞增 nonce 重抓。
+ * 3. 預設廣播 {@link TM_FOREGROUND_TRANSPORT_KICK_EVENT}，MainScreen 會遞增 nonce 重抓（**HTTP 先行**，勿等 WS SUBSCRIBED）。
  */
-export async function foregroundKickProfilesThenRealtimeRecycle(): Promise<void> {
+export async function foregroundKickProfilesThenRealtimeRecycle(
+  options?: ForegroundTransportKickOptions,
+): Promise<void> {
   if (typeof window === 'undefined' || typeof document === 'undefined') return
   if (document.visibilityState !== 'visible') return
 
   const now = Date.now()
-  if (now - lastForegroundTransportKickMs < FG_TRANSPORT_KICK_DEBOUNCE_MS) return
-  lastForegroundTransportKickMs = now
+  const useDebounce = !options?.ignoreDebounce
+  if (useDebounce && now - lastForegroundTransportKickMs < FG_TRANSPORT_KICK_DEBOUNCE_MS) return
+  if (useDebounce) {
+    lastForegroundTransportKickMs = now
+  } else {
+    lastForegroundTransportKickMs = Math.max(lastForegroundTransportKickMs, now)
+  }
 
   reportResumeEvent('foreground_transport_kick_start')
 
@@ -252,11 +269,45 @@ export async function foregroundKickProfilesThenRealtimeRecycle(): Promise<void>
 
   reportResumeEvent('foreground_transport_kick_done')
 
-  try {
-    window.dispatchEvent(new CustomEvent(TM_FOREGROUND_TRANSPORT_KICK_EVENT))
-  } catch {
-    /* ignore */
+  const emitKick = options?.emitTransportKick !== false
+  if (emitKick) {
+    try {
+      window.dispatchEvent(new CustomEvent(TM_FOREGROUND_TRANSPORT_KICK_EVENT))
+    } catch {
+      /* ignore */
+    }
   }
+}
+
+const PHYSICAL_RESUBSCRIBE_AFTER_REMOVE_MS = 500
+
+/** Reddit 推薦的 physical reset：`removeAllChannels` → auth／connect →延遲讓 UI 重建 subscribe（見 {@link TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT}）。 */
+async function physicalChannelResetAfterHiddenResume(): Promise<void> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  if (document.visibilityState !== 'visible') return
+
+  reportResumeEvent('physical_remove_all_channels_start')
+  try {
+    await supabase.realtime.removeAllChannels()
+  } catch {
+    /* ignore：半開態／競態仍以後續 connect + resubscribe 補救 */
+  }
+  reportResumeEvent('physical_remove_all_channels_done')
+
+  await foregroundKickProfilesThenRealtimeRecycle({
+    emitTransportKick: false,
+    ignoreDebounce: true,
+  })
+
+  window.setTimeout(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    try {
+      window.dispatchEvent(new CustomEvent(TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT))
+    } catch {
+      /* ignore */
+    }
+    reportResumeEvent('physical_resubscribe_event_dispatched')
+  }, PHYSICAL_RESUBSCRIBE_AFTER_REMOVE_MS)
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -297,16 +348,36 @@ function clearIosResumeFullAuthRepairFlag(): void {
   }
 }
 
+/** 前一個 visibility，用來偵測 `hidden`→`visible`（冷啟整頁常為 visible，不視為「從 hidden 回来」）。 */
+let lastVisibilityStateForPhysicalReset: DocumentVisibilityState =
+  typeof document !== 'undefined' ? document.visibilityState : 'hidden'
+
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
+    const prevVis = lastVisibilityStateForPhysicalReset
+    const v = document.visibilityState
+
+    if (v === 'hidden') {
       markIosNeedsFullAuthRepairAfterHiddenOrCache()
       reportResumeEvent('visibility_hidden')
-    } else if (document.visibilityState === 'visible') {
+    } else if (v === 'visible') {
       reportResumeEvent('visibility_visible')
-      /** 頁面回前景：`isConnected()` 為 false 時 {@link foregroundKickProfilesThenRealtimeRecycle} 內會 `connect()`（Worker/WebSocket）。 */
-      void foregroundKickProfilesThenRealtimeRecycle()
+      const fromHiddenToVisible = prevVis === 'hidden'
+      /** 資料先行：**不等** WS 自癒——立刻廣 transport kick，`MainScreen` 以 HTTP／RPC 重抓列表並關閉 loading（見 Discover／配對對話 nonce）。 */
+      if (fromHiddenToVisible) {
+        try {
+          window.dispatchEvent(new CustomEvent(TM_FOREGROUND_TRANSPORT_KICK_EVENT))
+        } catch {
+          /* ignore */
+        }
+        reportResumeEvent('visibility_immediate_http_list_kick')
+        void physicalChannelResetAfterHiddenResume()
+      } else {
+        void foregroundKickProfilesThenRealtimeRecycle()
+      }
     }
+
+    lastVisibilityStateForPhysicalReset = v
   })
   /** BFCache：`visibilitychange` 未必再發；persisted pageshow 視同冷凍復原後必須重撿連線狀態。 */
   window.addEventListener('pageshow', (ev: Event) => {

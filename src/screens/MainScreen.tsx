@@ -54,7 +54,11 @@ import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { notifyServiceWorkerActiveChatMatch } from '@/lib/swActiveChat'
-import { TM_APP_DEEP_LINK_EVENT, TM_FOREGROUND_TRANSPORT_KICK_EVENT } from '@/lib/appDeepLinkEvents'
+import {
+  TM_APP_DEEP_LINK_EVENT,
+  TM_FOREGROUND_TRANSPORT_KICK_EVENT,
+  TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
+} from '@/lib/appDeepLinkEvents'
 import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
@@ -3992,6 +3996,7 @@ function ChatRoomView({
   onDemoPuzzleSlotCleared,
   onBlurUnlockSpent,
   foregroundReloadNonce,
+  physicalChannelResubscribeNonce,
 }: {
   conversation: Conversation
   currentUserId: string | null
@@ -4007,6 +4012,7 @@ function ChatRoomView({
   onBlurUnlockSpent?: () => void
   /** 前景 wake 後遞增：重綁 Realtime、重抓訊息（避免 WS 僵死後聊天／列表不出貨）。 */
   foregroundReloadNonce: number
+  physicalChannelResubscribeNonce: number
 }) {
   const isLive = Boolean(conversation.matchId && currentUserId)
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -4060,7 +4066,7 @@ function ChatRoomView({
     return () => {
       cancelled = true
     }
-  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce])
+  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId || !currentUserId) return
@@ -4068,7 +4074,7 @@ function ChatRoomView({
       const msg = formatChatMessageFromRow(row, currentUserId)
       setMessages((prev) => mergeUniqueChatMessages(prev, msg))
     })
-  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce])
+  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
@@ -4081,7 +4087,7 @@ function ChatRoomView({
     return () => {
       cancelled = true
     }
-  }, [isLive, conversation.matchId, foregroundReloadNonce])
+  }, [isLive, conversation.matchId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -4489,6 +4495,7 @@ function MessagesTab({
   onDemoPuzzleSlotCleared,
   onBlurUnlockSpent,
   foregroundReloadNonce,
+  physicalChannelResubscribeNonce,
 }: {
   currentUserId: string | null
   liveConversations: Conversation[]
@@ -4505,6 +4512,8 @@ function MessagesTab({
   onDemoPuzzleSlotCleared?: (profileId: number, slotIndex: number) => void
   onBlurUnlockSpent?: () => void
   foregroundReloadNonce: number
+  /** `removeAllChannels` 後遞增：強制 teardown + 重訂閱該對話 messages channel。 */
+  physicalChannelResubscribeNonce: number
 }) {
   const [active, setActive] = useState<Conversation | null>(null)
 
@@ -4550,6 +4559,7 @@ function MessagesTab({
         onDemoPuzzleSlotCleared={onDemoPuzzleSlotCleared}
         onBlurUnlockSpent={onBlurUnlockSpent}
         foregroundReloadNonce={foregroundReloadNonce}
+        physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
       />
     )
   }
@@ -6489,6 +6499,8 @@ export default function MainScreen({
   const [photoGateToast, setPhotoGateToast] = useState(false)
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
+  /** `removeAllChannels` 後延遲 500ms 廣播：重綁 matches／聊天 Realtime postgres_changes（見 `supabase.ts`）。 */
+  const [physicalChannelResubscribeNonce, setPhysicalChannelResubscribeNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
 
@@ -6501,6 +6513,13 @@ export default function MainScreen({
     }
     window.addEventListener(TM_FOREGROUND_TRANSPORT_KICK_EVENT, bump)
     return () => window.removeEventListener(TM_FOREGROUND_TRANSPORT_KICK_EVENT, bump)
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const bump = () => setPhysicalChannelResubscribeNonce((n) => n + 1)
+    window.addEventListener(TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT, bump)
+    return () => window.removeEventListener(TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT, bump)
   }, [user?.id])
 
   /**
@@ -6943,7 +6962,7 @@ export default function MainScreen({
       setMatchSplash({ matchId: row.id, peerUserId: peerId })
       void loadLiveMatchThreads('soft')
     })
-  }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce])
+  }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   // "Start chat with <id>" — jump to messages tab and tell MessagesTab which
   // conversation to auto-open. If the id isn't a known conversation yet (e.g.
@@ -7040,6 +7059,7 @@ export default function MainScreen({
         onNeedSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
         foregroundReloadNonce={foregroundReloadNonce}
+        physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         onDemoBlurSpent={() =>
           setCreditBalance((b) => ({
             ...b,

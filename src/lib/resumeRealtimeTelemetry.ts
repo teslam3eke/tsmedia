@@ -19,6 +19,16 @@ type ResumeSource =
   /** supabase foregroundKick：profiles REST 後硬 recycle Realtime（teardown buffer 對策） */
   | 'foreground_transport_kick_start'
   | 'foreground_transport_kick_done'
+  /** `hidden`→`visible`：先廣 TM_FOREGROUND_TRANSPORT_KICK（HTTP 名單）再移除所有 Realtime channels */
+  | 'visibility_immediate_http_list_kick'
+  | 'physical_remove_all_channels_start'
+  | 'physical_remove_all_channels_done'
+  | 'physical_resubscribe_event_dispatched'
+  /** `hidden`→`visible`：先廣 TM_FOREGROUND_TRANSPORT_KICK（HTTP 名單）再移除所有 Realtime channels */
+  | 'visibility_immediate_http_list_kick'
+  | 'physical_remove_all_channels_start'
+  | 'physical_remove_all_channels_done'
+  | 'physical_resubscribe_event_dispatched'
 
 type RealtimeEnginePhase =
   | 'wake_attempt_start'
