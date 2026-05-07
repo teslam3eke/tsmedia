@@ -48,7 +48,7 @@ import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import AdminScreen from '@/screens/AdminScreen'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
-import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -4919,7 +4919,7 @@ function EditProfileScreen({
             {photos.length < PROFILE_PHOTO_MAX && (
               <motion.button
                 whileTap={{ scale: 0.95 }}
-                onClick={() => photoInputRef.current?.click()}
+                onClick={() => clickFileInputWithGrace(photoInputRef.current)}
                 className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 bg-white"
               >
                 <Camera className="w-5 h-5 text-slate-300" />
@@ -5074,7 +5074,10 @@ function EditProfileScreen({
                   onChange={(e) => setIncomeUploadFile(e.target.files?.[0] ?? null)}
                 />
                 <button
-                  onClick={() => canSubmitIncomeVerification && incomeDocRef.current?.click()}
+                  onClick={() => {
+                    if (!canSubmitIncomeVerification) return
+                    clickFileInputWithGrace(incomeDocRef.current)
+                  }}
                   disabled={!canSubmitIncomeVerification}
                   className={cn(
                     'w-full rounded-2xl border-2 border-dashed py-4 flex flex-col items-center gap-1.5 transition-all',
@@ -5626,7 +5629,7 @@ function CompanyVerifyScreen({
                 onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
               />
               <button
-                onClick={() => fileRef.current?.click()}
+                onClick={() => clickFileInputWithGrace(fileRef.current)}
                 className={cn(
                   'w-full rounded-2xl border-2 border-dashed py-5 flex flex-col items-center gap-2 transition-all',
                   docFile ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50',

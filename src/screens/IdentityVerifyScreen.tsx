@@ -15,6 +15,7 @@ import type { DocType, IncomeTier } from '@/lib/types'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
+import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
 
 interface Props {
   userId?: string
@@ -576,7 +577,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                     {/* Add more slot */}
                     {photos.length < PROFILE_PHOTO_MAX && (
                       <button
-                        onClick={() => photoInputRef.current?.click()}
+                        onClick={() => clickFileInputWithGrace(photoInputRef.current)}
                         className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 bg-white hover:border-slate-400 transition-colors"
                       >
                         <Upload className="w-5 h-5 text-slate-300" />
@@ -589,7 +590,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 {/* Upload button when empty */}
                 {photos.length === 0 && (
                   <button
-                    onClick={() => photoInputRef.current?.click()}
+                    onClick={() => clickFileInputWithGrace(photoInputRef.current)}
                     className="w-full bg-white rounded-3xl p-8 shadow-sm ring-1 ring-slate-100 flex flex-col items-center gap-3 hover:ring-slate-300 transition-all"
                   >
                     <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
@@ -703,7 +704,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 {/* Upload area */}
                 {proofs.length === 0 ? (
                   <button
-                    onClick={() => proofInputRef.current?.click()}
+                    onClick={() => clickFileInputWithGrace(proofInputRef.current)}
                     disabled={selectedCompany === ''}
                     className={cn(
                       'w-full rounded-3xl p-6 flex flex-col items-center gap-3 transition-all',
@@ -877,7 +878,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
 
                     {incomeDoc === null ? (
                       <button
-                        onClick={() => incomeInputRef.current?.click()}
+                        onClick={() => clickFileInputWithGrace(incomeInputRef.current)}
                         className="w-full rounded-3xl p-6 flex flex-col items-center gap-3 bg-white ring-1 ring-slate-100 shadow-sm active:scale-[0.99] transition-all"
                       >
                         <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">

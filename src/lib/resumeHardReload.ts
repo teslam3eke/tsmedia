@@ -59,6 +59,15 @@ export function touchMediaPickerGraceSession(): void {
   }
 }
 
+/**
+ * 若用 button `onClick` 再程式呼叫 `input.click()`，使用者的 pointer 目標不是 file input，
+ * 僅監聽 `input[type=file]` 的 grace 永遠不會觸發。一律由此開啟相簿／檔案選擇器。
+ */
+export function clickFileInputWithGrace(input: HTMLInputElement | null | undefined): void {
+  touchMediaPickerGraceSession()
+  input?.click()
+}
+
 export function isWithinMediaPickerGracePeriod(): boolean {
   try {
     const v = sessionStorage.getItem(MEDIA_PICKER_GRACE_KEY)
