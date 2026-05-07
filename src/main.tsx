@@ -88,6 +88,8 @@ function onDocumentForegroundAlignment() {
   if (document.visibilityState === 'visible') {
     void repairAuthAfterResume()
     void ensureConnectionWithBudget()
+    /** 配對／列表多依元件 state + realtime；invalidate 迫近端立刻重抓而非乾等 WS */
+    void queryClient.invalidateQueries()
     void checkRemoteBuildIdAndReload()
   }
 }

@@ -170,6 +170,7 @@ function supabaseTimedFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 
 export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
   auth: {
+    /** 桌機縮視窗並不會抹去 localStorage／session（GoTrue 預設）；明確標註便於追查凍結與復原問題。 */
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
@@ -187,10 +188,56 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
     /** PostgREST：官方逾時；與 global.fetch 並用避免只靠其中一層 */
     timeout: 28_000,
   },
+  /** Realtime transports：略縮心跳間隔並自訂重連曲線（瀏覽器凍結後仍要靠前景 wake + channel 級重試補強）。 */
+  realtime: {
+    heartbeatIntervalMs: 22_000,
+    reconnectAfterMs: (tries) => Math.min(32_000, 900 * Math.pow(2, Math.min(tries, 5))),
+  },
   global: {
     fetch: supabaseTimedFetch,
   },
 })
+
+let lastRealtimeAuthHintMs = 0
+const REALTIME_AUTH_HINT_DEBOUNCE_MS = 320
+
+/**
+ * 視窗／分頁回前景：**先**用快取的 access token 對齊 `realtime.setAuth`。
+ * 完整換發 + disconnect／connect 仍由 `repairAuthAfterResume`／`wakeSupabaseAuthFromBackground` 負責（見 `main.tsx`）。
+ */
+export async function hintRealtimeAuthFromStoredSession(): Promise<void> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  if (document.visibilityState !== 'visible') return
+  const now = Date.now()
+  if (now - lastRealtimeAuthHintMs < REALTIME_AUTH_HINT_DEBOUNCE_MS) return
+  lastRealtimeAuthHintMs = now
+  try {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession()
+    if (error || !session?.access_token) return
+    await supabase.realtime.setAuth(session.access_token)
+  } catch {
+    /* private mode / 競態 */
+  }
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void hintRealtimeAuthFromStoredSession()
+  })
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  let lastFocusHint = 0
+  window.addEventListener('focus', () => {
+    if (document.visibilityState !== 'visible') return
+    const now = Date.now()
+    if (now - lastFocusHint < REALTIME_AUTH_HINT_DEBOUNCE_MS) return
+    lastFocusHint = now
+    void hintRealtimeAuthFromStoredSession()
+  })
+}
 
 /**
  * iOS PWA：`getSession` 常瞬間得到「看似有效」的 JWT，REST 仍整批掛死；用 sessionStorage 在

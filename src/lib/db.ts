@@ -1,7 +1,9 @@
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume } from './supabase'
+import { queryClient } from './queryClient'
 import { actionTrace, shortId } from './clientActionTrace'
 import { reportRealtimeChannel } from './resumeRealtimeTelemetry'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
   AiConfidence, VerificationDocWithProfile, AppNotificationKind, AppNotificationRow,
@@ -1033,36 +1035,109 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
   return (data ?? []) as MatchRow[]
 }
 
+type RealtimeSubscribeLabel = 'matches' | 'messages'
+
+/**
+ * postgres_changes 頻道：`subscribe` 若回報 CHANNEL_ERROR／TIMED_OUT（Phoenix transport 層故障在客戶端常被歸成這兩類，
+ * 另稿寫的 TPS／tps_error 即屬此層）則遞增 backoff 後 remove + 重建，並觸發 TanStack 全量 invalidate 讓列表立刻重抓。
+ */
+function subscribePostgresChannelWithBackoff(
+  label: RealtimeSubscribeLabel,
+  buildChannel: () => RealtimeChannel,
+): () => void {
+  let destroyed = false
+  let backoffAttempt = 0
+  let retryTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+  let current: RealtimeChannel | null = null
+
+  const clearRetryTimer = () => {
+    if (retryTimer !== null) {
+      globalThis.clearTimeout(retryTimer)
+      retryTimer = null
+    }
+  }
+
+  const teardownChannel = async () => {
+    clearRetryTimer()
+    if (!current) return
+    const ch = current
+    current = null
+    await supabase.removeChannel(ch)
+  }
+
+  const scheduleReconnect = () => {
+    if (destroyed) return
+    clearRetryTimer()
+    backoffAttempt += 1
+    const exp = Math.min(6, backoffAttempt)
+    const base = Math.min(30_000, 480 * Math.pow(2, exp))
+    const jitter = Math.floor(Math.random() * 500)
+    retryTimer = globalThis.setTimeout(async () => {
+      retryTimer = null
+      if (destroyed) return
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      await repairAuthAfterResume()
+      try {
+        void queryClient.invalidateQueries()
+      } catch {
+        /* ignore */
+      }
+      await teardownChannel()
+      attach()
+    }, base + jitter)
+  }
+
+  const attach = () => {
+    if (destroyed) return
+    clearRetryTimer()
+    const channel = buildChannel()
+    current = channel
+    channel.subscribe((status) => {
+      reportRealtimeChannel(label, String(status))
+      if (status === 'SUBSCRIBED') {
+        backoffAttempt = 0
+        return
+      }
+      if (destroyed || !current) return
+      const transportBad = status === 'CHANNEL_ERROR' || status === 'TIMED_OUT'
+      if (transportBad) scheduleReconnect()
+    })
+  }
+
+  attach()
+
+  return () => {
+    destroyed = true
+    clearRetryTimer()
+    void teardownChannel()
+  }
+}
+
 /** Realtime：監聽本人相關的新配對（public.matches 須在 publication supabase_realtime） */
 export function subscribeToNewMatches(
   userId: string,
   onInsert: (row: MatchRow) => void,
 ): () => void {
-  const channel = supabase
-    .channel(`realtime-matches:${userId}`)
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'matches', filter: `user_a=eq.${userId}` },
-      (payload) => {
-        const row = payload.new as MatchRow | null
-        if (row) onInsert(row)
-      },
-    )
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'matches', filter: `user_b=eq.${userId}` },
-      (payload) => {
-        const row = payload.new as MatchRow | null
-        if (row) onInsert(row)
-      },
-    )
-    .subscribe((status) => {
-      reportRealtimeChannel('matches', String(status))
-    })
-
-  return () => {
-    void supabase.removeChannel(channel)
-  }
+  return subscribePostgresChannelWithBackoff('matches', () =>
+    supabase
+      .channel(`realtime-matches:${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'matches', filter: `user_a=eq.${userId}` },
+        (payload) => {
+          const row = payload.new as MatchRow | null
+          if (row) onInsert(row)
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'matches', filter: `user_b=eq.${userId}` },
+        (payload) => {
+          const row = payload.new as MatchRow | null
+          if (row) onInsert(row)
+        },
+      )
+  )
 }
 
 /** 成功為陣列（可能為空）；失敗為 null — 前景重載時勿清空聊天（避免誤以為訊息遺失）。 */
@@ -1167,9 +1242,8 @@ export function subscribeToMatchMessages(
   matchId: string,
   onInsert: (row: MessageRow) => void,
 ): () => void {
-  const channel = supabase
-    .channel(`match-messages:${matchId}`)
-    .on(
+  return subscribePostgresChannelWithBackoff('messages', () =>
+    supabase.channel(`match-messages:${matchId}`).on(
       'postgres_changes',
       {
         event: 'INSERT',
@@ -1181,16 +1255,7 @@ export function subscribeToMatchMessages(
         onInsert(payload.new as MessageRow)
       },
     )
-    .subscribe((status) => {
-      reportRealtimeChannel('messages', String(status))
-      if (status === 'CHANNEL_ERROR') {
-        console.error('[db] subscribeToMatchMessages channel error', matchId)
-      }
-    })
-
-  return () => {
-    void supabase.removeChannel(channel)
-  }
+  )
 }
 
 export async function getPhotoUnlockState(matchId: string): Promise<PhotoUnlockStateRow | null> {
