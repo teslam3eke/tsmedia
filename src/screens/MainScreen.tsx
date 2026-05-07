@@ -21,6 +21,7 @@ import {
   ensureConnectionWithBudget,
   repairAuthAfterResume,
   prepareSupabaseForProfileReads,
+  supabase,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
@@ -4364,7 +4365,16 @@ function MessagesTab({
   // React to "open this conversation" requests from the parent
   useEffect(() => {
     if (requestedConversationId == null) return
-    const conv = chatList.find((c) => c.id === requestedConversationId)
+    const rq: number | string =
+      typeof requestedConversationId === 'string'
+        ? requestedConversationId.trim().toLowerCase()
+        : requestedConversationId
+    const conv = chatList.find((c) => {
+      if (typeof rq === 'number') return c.id === rq
+      if (typeof c.id === 'string' && c.id.trim().toLowerCase() === rq) return true
+      if (typeof c.matchId === 'string' && c.matchId.trim().toLowerCase() === rq) return true
+      return false
+    })
     if (conv) {
       setActive(conv)
       onConversationOpened?.()
@@ -6328,6 +6338,14 @@ export default function MainScreen({
 }) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const prevTab = useRef<Tab>('discover')
+  /** 給桌機自動整頁重載／冷啟還原分頁（與 App `readPreferredMainShellTab` 同 key） */
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('tm_last_main_tab_v1', activeTab)
+    } catch {
+      /* private mode */
+    }
+  }, [activeTab])
   const [currentUserGender, setCurrentUserGender] = useState<'male' | 'female'>(initialDiscoverGender)
   const [currentUserPreferredRegion, setCurrentUserPreferredRegion] = useState<import('@/lib/types').Region | null>(null)
   const [hideTabBarForChatKeyboard, setHideTabBarForChatKeyboard] = useState(false)
@@ -6472,15 +6490,18 @@ export default function MainScreen({
     })
   }, [])
 
-  /** 推播／分享網址 `?notif` `?tab` `?match`：導向對應分頁、開聊天、標站內通知已讀（不再重複彈窗） */
+  /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id（舊推播或 URL 無 match）。 */
   useEffect(() => {
     if (!user?.id) return
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
     const tabParam = url.searchParams.get('tab')
-    const notifId = url.searchParams.get('notif')
-    const matchId = url.searchParams.get('match')
-    if (!tabParam && !notifId && !matchId) return
+    const notifRaw = url.searchParams.get('notif')
+    const matchRaw = url.searchParams.get('match')
+    if (!tabParam && !notifRaw && !matchRaw) return
+
+    const notifId = typeof notifRaw === 'string' ? notifRaw.trim() : ''
+    const urlMatchLc = typeof matchRaw === 'string' ? matchRaw.trim().toLowerCase() : ''
 
     url.searchParams.delete('fromPush')
     url.searchParams.delete('notif')
@@ -6492,15 +6513,40 @@ export default function MainScreen({
     if (tabParam === 'discover' || tabParam === 'matches' || tabParam === 'messages' || tabParam === 'profile') {
       setActiveTab(tabParam)
     }
+
+    const openMatchRoom = (matchUuidLc: string) => {
+      if (!matchUuidLc) return
+      setActiveTab('messages')
+      setPendingChatId(matchUuidLc)
+    }
+
     if (notifId) {
       appNotifQueuedOnceIdsRef.current.add(notifId)
-      appNotifPopupQueueRef.current = appNotifPopupQueueRef.current.filter((n) => n.id !== notifId)
-      setActiveAppNotifPopup((cur) => (cur?.id === notifId ? null : cur))
+      appNotifPopupQueueRef.current = appNotifPopupQueueRef.current.filter(
+        (n) => n.id !== notifId && n.id.toLowerCase() !== notifId.toLowerCase(),
+      )
+      setActiveAppNotifPopup((cur) =>
+        cur && (cur.id === notifId || cur.id.toLowerCase() === notifId.toLowerCase()) ? null : cur,
+      )
       void markAppNotificationRead(notifId)
     }
-    if (matchId) {
-      setActiveTab('messages')
-      setPendingChatId(matchId)
+
+    if (urlMatchLc) openMatchRoom(urlMatchLc)
+    else if (notifId) {
+      void (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('app_notifications')
+            .select('ref_match_id')
+            .eq('id', notifId)
+            .maybeSingle()
+          if (error || !data) return
+          const mid = typeof data.ref_match_id === 'string' ? data.ref_match_id.trim().toLowerCase() : ''
+          if (mid) openMatchRoom(mid)
+        } catch {
+          /* 無 ref_match_id 欄位或離線 */
+        }
+      })()
     }
   }, [user?.id])
 

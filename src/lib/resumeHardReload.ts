@@ -52,6 +52,22 @@ export function resumeHardReloadEnabled(): boolean {
   return false
 }
 
+/** 一般桌機「瀏覽器分頁」：不依 document.visibility（切換分頁會誤載），改偵測視窗長時間離開／回來，修復 Supabase／Realtime 僵死。 */
+export function resumeDesktopWindowBlurRepairLikely(): boolean {
+  if (standaloneDisplayModeLikely()) return false
+  if (iosOrIpadosLikely()) return false
+  try {
+    const ua = navigator.userAgent || ''
+    if (/Android/i.test(ua) && /Mobile/i.test(ua)) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 視窗離開至少多久後回焦才重整；短暫 blur（工具列／檔選）避免誤載。見 `touchMediaPickerGraceSession`。 */
+export const RESUME_DESKTOP_WINDOW_BLUR_MIN_MS = 3_600
+
 export function resumeHardReloadDisabledGlobally(): boolean {
   try {
     const q = new URLSearchParams(window.location.search)

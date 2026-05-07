@@ -15,6 +15,8 @@ import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type Con
 import {
   resumeHardReloadDisabledGlobally,
   resumeHardReloadEnabled,
+  resumeDesktopWindowBlurRepairLikely,
+  RESUME_DESKTOP_WINDOW_BLUR_MIN_MS,
   touchMediaPickerGraceSession,
   isWithinMediaPickerGracePeriod,
   windowBlurWakeLikelyForResumeReload,
@@ -54,11 +56,19 @@ const SLIDE: Record<'forward' | 'back', { initial: TargetAndTransition; exit: Ta
   back:    { initial: { opacity: 0, x: -40 }, exit: { opacity: 0, x: 40 } },
 }
 
-/** 推播／分享連結 `?tab=`：進入主殼時優先開該分頁（生活照未達標仍強制「我的」） */
-function readMainTabHintFromLocation(): MainScreenTab | null {
+const SESSION_LAST_MAIN_TAB_KEY = 'tm_last_main_tab_v1'
+
+/** 網址 `?tab=` 優先；否則用 sessionStorage（整頁重載／桌機自動 refresh 後還原分頁）。 */
+function readPreferredMainShellTab(): MainScreenTab | null {
   if (typeof window === 'undefined') return null
   try {
     const t = new URLSearchParams(window.location.search).get('tab')
+    if (t === 'discover' || t === 'matches' || t === 'messages' || t === 'profile') return t
+  } catch {
+    /* ignore */
+  }
+  try {
+    const t = sessionStorage.getItem(SESSION_LAST_MAIN_TAB_KEY)
     if (t === 'discover' || t === 'matches' || t === 'messages' || t === 'profile') return t
   } catch {
     /* ignore */
@@ -133,7 +143,7 @@ export default function App() {
   }
 
   const launchMainFromProfile = (profile: import('@/lib/types').ProfileRow | null) => {
-    const tabHint = readMainTabHintFromLocation()
+    const tabHint = readPreferredMainShellTab()
     if (!profile) {
       setMainInitialTab(tabHint ?? 'discover')
       go('main')
@@ -261,10 +271,11 @@ export default function App() {
   }, [screen])
 
   /**
-   * 主殼：背景／凍結回前景若 JS fetch transport 僵死 → 直接整頁重載。
-   * 僅在 PWA standalone、iOS／iPadOS、Android 手機 Chrome 註冊；一般桌機分頁不註冊，避免切換分頁即整頁重整。
-   * 若仍要關閉自動重載可用 `?noHardResume=1`（sessionStorage）。
-   * 監聽只註冊一次，用 ref 對齊 `screen`/user id，避免 `[user]` 身分重算時拆掉 listener 錯過事件。
+   * 主殼：回前景若 transport 僵死 → 整頁重載。
+   * - 手機／PWA：document.visibility + pagehide 等（短閾值），另 iOS／standalone 加 blur／focus。
+   * - 一般桌機「瀏覽器分頁」：不註冊 visibility（避免切分頁狂重整），改視窗 blur→focus 長閾值（切到其他 App 再回來）。
+   * 已通過安全頁者有 localStorage，`reload` 不會再卡住安全動畫。`?tab=` 或由 MainScreen 寫入的 session 可還原分頁。
+   * `?noHardResume=1` 停用（sessionStorage）。
    */
   const resumeHardReloadMainRef = useRef(false)
   useEffect(() => {
@@ -273,9 +284,12 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
-    if (!resumeHardReloadEnabled()) return
 
-    const MIN_HIDDEN_MS = 600
+    const useVisibilityResume = resumeHardReloadEnabled()
+    const useDesktopBlurRepair = resumeDesktopWindowBlurRepairLikely()
+    if (!useVisibilityResume && !useDesktopBlurRepair) return
+
+    const MIN_VISIBILITY_HIDDEN_MS = 600
     const dbg =
       new URLSearchParams(window.location.search).get('debugHardResume') === '1'
     const log = (...a: unknown[]) => {
@@ -283,6 +297,7 @@ export default function App() {
     }
 
     let hiddenAt: number | null = null
+    let desktopBlurAt: number | null = null
     let reloading = false
 
     const reload = () => {
@@ -306,77 +321,110 @@ export default function App() {
       })
     }
 
-    const markHidden = () => {
-      log('markHidden', { visibility: document.visibilityState })
+    const markHiddenVisibility = () => {
       hiddenAt = Date.now()
+      log('markHidden (mobile/PWA)', document.visibilityState)
     }
 
-    const tryReloadAfterWake = () => {
-      if (!resumeHardReloadMainRef.current) {
-        log('tryWake: skip (not main / no user)')
+    const tryReloadAfterWakeVisibility = () => {
+      if (!useVisibilityResume || !resumeHardReloadMainRef.current) {
+        log('tryWake vis: skip')
         return
       }
       if (document.visibilityState !== 'visible') {
-        log('tryWake: skip (not visible)', document.visibilityState)
+        log('tryWake vis: skip — not visible', document.visibilityState)
         return
       }
       if (hiddenAt == null) {
-        log('tryWake: skip (never marked hidden)')
+        log('tryWake vis: skip — never marked')
         return
       }
       const elapsed = Date.now() - hiddenAt
       hiddenAt = null
-      log('tryWake', { elapsed, min: MIN_HIDDEN_MS })
-      if (elapsed < MIN_HIDDEN_MS) return
+      log('tryWake vis', { elapsed, min: MIN_VISIBILITY_HIDDEN_MS })
+      if (elapsed < MIN_VISIBILITY_HIDDEN_MS) return
       reload()
     }
 
     const onPageShow = (ev: Event) => {
-      if (!resumeHardReloadMainRef.current) return
+      if (!useVisibilityResume || !resumeHardReloadMainRef.current) return
       const e = ev as PageTransitionEvent
       if (e.persisted) {
         log('pageshow persisted → reload')
         reload()
         return
       }
-      tryReloadAfterWake()
+      tryReloadAfterWakeVisibility()
     }
 
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') markHidden()
-      else tryReloadAfterWake()
+      if (!useVisibilityResume) return
+      if (document.visibilityState === 'hidden') markHiddenVisibility()
+      else tryReloadAfterWakeVisibility()
     }
 
-    /** iOS：Safari 分頁＋主畫面皆常見；blur／focus 補 visibility／pagehide 漏發。 */
     const winWakeBlur = windowBlurWakeLikelyForResumeReload()
+
+    const finalizeDesktopBlurReload = () => {
+      if (!useDesktopBlurRepair || winWakeBlur) return
+      if (!resumeHardReloadMainRef.current) {
+        desktopBlurAt = null
+        return
+      }
+      if (resumeHardReloadDisabledGlobally()) {
+        desktopBlurAt = null
+        return
+      }
+      if (isWithinMediaPickerGracePeriod()) {
+        desktopBlurAt = null
+        return
+      }
+      if (document.visibilityState !== 'visible') {
+        desktopBlurAt = null
+        return
+      }
+      if (desktopBlurAt == null) return
+      const elapsed = Date.now() - desktopBlurAt
+      desktopBlurAt = null
+      log('desktop window blur→focus', { elapsed, min: RESUME_DESKTOP_WINDOW_BLUR_MIN_MS })
+      if (elapsed < RESUME_DESKTOP_WINDOW_BLUR_MIN_MS) return
+      reload()
+    }
+
     const onWinBlur = () => {
-      log('window blur')
-      markHidden()
+      if (winWakeBlur) markHiddenVisibility()
+      else if (useDesktopBlurRepair) {
+        desktopBlurAt = Date.now()
+        log('desktop markBlur')
+      }
     }
     const onWinFocus = () => {
-      log('window focus')
-      tryReloadAfterWake()
+      if (winWakeBlur) tryReloadAfterWakeVisibility()
+      finalizeDesktopBlurReload()
     }
 
-    document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('pageshow', onPageShow)
-    /** iOS／部分 WebKit：切 App 時 pagehide 比 visibility 可靠 */
-    window.addEventListener('pagehide', markHidden)
-    document.addEventListener('freeze', markHidden)
-    document.addEventListener('resume', tryReloadAfterWake)
+    if (useVisibilityResume) {
+      document.addEventListener('visibilitychange', onVisibility)
+      window.addEventListener('pageshow', onPageShow)
+      window.addEventListener('pagehide', markHiddenVisibility)
+      document.addEventListener('freeze', markHiddenVisibility)
+      document.addEventListener('resume', tryReloadAfterWakeVisibility)
+    }
 
-    if (winWakeBlur) {
+    if (winWakeBlur || useDesktopBlurRepair) {
       window.addEventListener('blur', onWinBlur)
       window.addEventListener('focus', onWinFocus)
     }
 
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('pageshow', onPageShow)
-      window.removeEventListener('pagehide', markHidden)
-      document.removeEventListener('freeze', markHidden)
-      document.removeEventListener('resume', tryReloadAfterWake)
-      if (winWakeBlur) {
+      if (useVisibilityResume) {
+        document.removeEventListener('visibilitychange', onVisibility)
+        window.removeEventListener('pageshow', onPageShow)
+        window.removeEventListener('pagehide', markHiddenVisibility)
+        document.removeEventListener('freeze', markHiddenVisibility)
+        document.removeEventListener('resume', tryReloadAfterWakeVisibility)
+      }
+      if (winWakeBlur || useDesktopBlurRepair) {
         window.removeEventListener('blur', onWinBlur)
         window.removeEventListener('focus', onWinFocus)
       }
