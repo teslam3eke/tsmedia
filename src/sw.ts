@@ -24,35 +24,65 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('push', (event: PushEvent) => {
-  let title = '新訊息'
-  let body = ''
-  let tag = 'tsmedia'
-  let openUrl = '/'
-  try {
-    if (event.data) {
-      const j = event.data.json() as { title?: string; body?: string; tag?: string; url?: string }
-      if (j.title) title = j.title
-      if (typeof j.body === 'string') body = j.body
-      if (j.tag) tag = j.tag
-      if (typeof j.url === 'string') openUrl = j.url
-    }
-  } catch {
-    try {
-      const t = event.data?.text()
-      if (t) body = t
-    } catch {
-      /* ignore */
-    }
-  }
-  const o: NotificationOptions & { renotify?: boolean } = {
-    body: body || undefined,
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    tag,
-    data: { url: openUrl },
-    renotify: true,
-  }
-  event.waitUntil(self.registration.showNotification(title, o))
+  event.waitUntil(
+    (async () => {
+      let title = '新訊息'
+      let body = ''
+      let tag = 'tsmedia'
+      let openUrl = '/'
+      try {
+        if (event.data) {
+          const j = event.data.json() as { title?: string; body?: string; tag?: string; url?: string }
+          if (j.title) title = j.title
+          if (typeof j.body === 'string') body = j.body
+          if (j.tag) tag = j.tag
+          if (typeof j.url === 'string') openUrl = j.url
+        }
+      } catch {
+        try {
+          const t = event.data?.text()
+          if (t) body = t
+        } catch {
+          /* ignore */
+        }
+      }
+
+      /** 與 LINE 類似：App 已在前景且視窗有焦點時，新訊息不彈系統橫幅（站內改用即時聊天／角標） */
+      const isMessageReceivedTag = tag === 'app-notif-message_received'
+      if (isMessageReceivedTag) {
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        const focusedHere = clients.some(
+          (x) =>
+            x instanceof WindowClient &&
+            x.focused === true &&
+            typeof x.url === 'string' &&
+            x.url.startsWith(self.location.origin),
+        )
+        if (focusedHere) {
+          for (const x of clients) {
+            if (!(x instanceof WindowClient)) continue
+            if (!x.url.startsWith(self.location.origin)) continue
+            try {
+              x.postMessage({ type: 'TM_PUSH_MESSAGE_RECEIVED_FOREGROUND' })
+            } catch {
+              /* ignore */
+            }
+          }
+          return
+        }
+      }
+
+      const o: NotificationOptions & { renotify?: boolean } = {
+        body: body || undefined,
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        tag,
+        data: { url: openUrl },
+        renotify: true,
+      }
+      await self.registration.showNotification(title, o)
+    })(),
+  )
 })
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {

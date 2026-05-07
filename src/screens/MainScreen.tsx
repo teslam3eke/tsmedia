@@ -6561,6 +6561,11 @@ export default function MainScreen({
         const list = await getUnreadAppNotifications(uid)
         if (cancelled) return
         for (const n of list) {
+          /** LINE 類 UX：新訊息不插隊全螢「知道了」，只靠聊天室／角標；背景推播由 SW 負責 */
+          if (n.kind === 'message_received') {
+            void markAppNotificationRead(n.id)
+            continue
+          }
           if (!appNotifQueuedOnceIdsRef.current.has(n.id)) {
             appNotifQueuedOnceIdsRef.current.add(n.id)
             appNotifPopupQueueRef.current.push(n)
@@ -6579,6 +6584,15 @@ export default function MainScreen({
       window.clearInterval(iv)
     }
   }, [user?.id, foregroundReloadNonce, tryDequeueAppNotifPopup])
+
+  /** SW 在前景擋掉訊息橫幅時，補一輪對話列表（Realtime 未連上時） */
+  useEffect(() => {
+    const handler = () => {
+      void loadLiveMatchThreads('soft')
+    }
+    window.addEventListener('tm_foreground_message_push', handler)
+    return () => window.removeEventListener('tm_foreground_message_push', handler)
+  }, [loadLiveMatchThreads])
 
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
