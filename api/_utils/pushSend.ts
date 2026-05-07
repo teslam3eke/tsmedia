@@ -49,7 +49,7 @@ async function sendToSubscription(
 
 export async function sendWebPushToUser(
   userId: string,
-  payload: { title: string; body: string; tag: string; url?: string },
+  payload: { title: string; body: string; tag: string; url?: string; matchId?: string | null },
 ): Promise<{ sent: number; failed: number }> {
   configureWebPush()
   const supabase = adminSupabase()
@@ -66,6 +66,9 @@ export async function sendWebPushToUser(
     body: payload.body,
     tag: payload.tag,
     url: payload.url ?? '/',
+    ...(typeof payload.matchId === 'string' && payload.matchId.trim()
+      ? { matchId: payload.matchId.trim() }
+      : {}),
   })
 
   let sent = 0

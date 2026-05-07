@@ -12,9 +12,22 @@ import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
 import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
 
 void maybeInitEruda()
 markPwaStandaloneSeenIfNeeded()
+
+/** SW：推播點擊 → replaceState（避免 navigate 不重跑 SPA）再通知 MainScreen 吃 tab/match */
+function applyHrefFromServiceWorker(hrefLike: string) {
+  try {
+    const u = new URL(hrefLike, window.location.origin)
+    if (u.origin !== window.location.origin) return
+    window.history.replaceState({}, '', u.pathname + u.search + u.hash)
+    window.dispatchEvent(new CustomEvent(TM_APP_DEEP_LINK_EVENT))
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Service Worker → 前景訊息推播改由站內更新，不彈系統通知 */
 if ('serviceWorker' in navigator) {
@@ -22,15 +35,9 @@ if ('serviceWorker' in navigator) {
     const d = ev.data as { type?: string; url?: string } | undefined
     if (!d?.type) return
 
-    if (d.type === 'TM_NAVIGATE') {
+    if (d.type === 'TM_NAVIGATE' || d.type === 'TM_PUSH_OPEN') {
       if (typeof d.url !== 'string') return
-      try {
-        const u = new URL(d.url, window.location.origin)
-        if (u.origin !== window.location.origin) return
-        window.location.assign(u.pathname + u.search + u.hash)
-      } catch {
-        /* ignore */
-      }
+      applyHrefFromServiceWorker(d.url)
       return
     }
 
@@ -89,6 +96,16 @@ syncReactQueryFocusFromPageVisibility()
 void checkRemoteBuildIdAndReload()
 document.addEventListener('visibilitychange', onDocumentForegroundAlignment)
 window.addEventListener('pageshow', onDocumentForegroundAlignment)
+/** 桌機縮至工作列再回到 Chrome：`visibilitychange` 有時順序／漏發，`focus` 補打一輪換發／ensure（與 Realtime WS 復原一致）。 */
+let lastTmWindowFocusAlign = 0
+function onWindowFocusForegroundAlignment() {
+  if (document.visibilityState !== 'visible') return
+  const now = Date.now()
+  if (now - lastTmWindowFocusAlign < 320) return
+  lastTmWindowFocusAlign = now
+  onDocumentForegroundAlignment()
+}
+window.addEventListener('focus', onWindowFocusForegroundAlignment)
 window.addEventListener('online', () => onlineManager.setOnline(true))
 window.addEventListener('offline', () => onlineManager.setOnline(false))
 

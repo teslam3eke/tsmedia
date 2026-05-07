@@ -5,13 +5,17 @@
 export function notifyServiceWorkerActiveChatMatch(matchUuid: string | null | undefined): void {
   try {
     if (typeof navigator === 'undefined') return
-    const c = navigator.serviceWorker?.controller
-    if (!c) return
     const trimmed = typeof matchUuid === 'string' ? matchUuid.trim().toLowerCase() : ''
-    c.postMessage({
-      type: 'TM_ACTIVE_CHAT_MATCH',
+    const msg = {
+      type: 'TM_ACTIVE_CHAT_MATCH' as const,
       matchId: trimmed.length > 0 ? trimmed : null,
-    })
+    }
+    const ctl = navigator.serviceWorker?.controller
+    if (ctl) {
+      ctl.postMessage(msg)
+      return
+    }
+    void navigator.serviceWorker?.ready.then((reg) => reg.active?.postMessage(msg))
   } catch {
     /* private mode / SW 未控制 */
   }

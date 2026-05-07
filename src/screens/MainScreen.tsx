@@ -52,6 +52,7 @@ import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { notifyServiceWorkerActiveChatMatch } from '@/lib/swActiveChat'
+import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -1442,6 +1443,28 @@ function DiscoverTab({
   const skipDiscoverIndexScrollResetRef = useRef(true)
   /** 前景 nonce 往往在數百毫秒內連跳 2〜4（mount ensure + invalidate + visibility debounce）；每次 bump deck 會拆掉上一輪探索 async → 只看到「略過 stale」。合併成單次 bump */
   const discoverDeckBumpTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  /** 回前景／視窗時若仍卡在載入上一輪可能已被 Abort，補 bump（節流避免連打） */
+  const deckWakeBumpStatusRef = useRef(liveDeckStatus)
+  deckWakeBumpStatusRef.current = liveDeckStatus
+  const lastDeckWakeBumpAtRef = useRef(0)
+
+  useEffect(() => {
+    if (!userId) return
+    const maybeBumpAfterWake = () => {
+      if (document.visibilityState !== 'visible') return
+      if (deckWakeBumpStatusRef.current !== 'loading') return
+      const now = Date.now()
+      if (now - lastDeckWakeBumpAtRef.current < 700) return
+      lastDeckWakeBumpAtRef.current = now
+      setDeckRefresh((r) => r + 1)
+    }
+    document.addEventListener('visibilitychange', maybeBumpAfterWake)
+    window.addEventListener('focus', maybeBumpAfterWake)
+    return () => {
+      document.removeEventListener('visibilitychange', maybeBumpAfterWake)
+      window.removeEventListener('focus', maybeBumpAfterWake)
+    }
+  }, [userId])
 
   useEffect(() => {
     if (foregroundReloadNonce === 0) return
@@ -1727,7 +1750,7 @@ function DiscoverTab({
       if (cancelled) return
       if (document.visibilityState !== 'visible') return
       setDeckRefresh((r) => r + 1)
-    }, 42_000)
+    }, 14_000)
     return () => {
       cancelled = true
       window.clearTimeout(tid)
@@ -3888,11 +3911,18 @@ function ChatRoomView({
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
 
-  /** 回報 SW：已開進此配對的聊天室，同一對象來訊不打 OS 橫幅 */
+  /** 回報 SW：此配對聊天開著時略過同對象推播；SW 重啟／切回前景時重新 arm */
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
-    notifyServiceWorkerActiveChatMatch(conversation.matchId)
+    const arm = () => notifyServiceWorkerActiveChatMatch(conversation.matchId)
+    arm()
+    document.addEventListener('visibilitychange', arm)
+    const sw = navigator.serviceWorker
+    const onCtl = () => arm()
+    sw?.addEventListener('controllerchange', onCtl)
     return () => {
+      document.removeEventListener('visibilitychange', arm)
+      sw?.removeEventListener('controllerchange', onCtl)
       notifyServiceWorkerActiveChatMatch(null)
     }
   }, [isLive, conversation.matchId])
@@ -6442,9 +6472,11 @@ export default function MainScreen({
 
     document.addEventListener('visibilitychange', schedule)
     window.addEventListener('pageshow', schedule)
+    window.addEventListener('focus', schedule)
     return () => {
       document.removeEventListener('visibilitychange', schedule)
       window.removeEventListener('pageshow', schedule)
+      window.removeEventListener('focus', schedule)
       if (debounceTimer) clearTimeout(debounceTimer)
     }
   }, [])
@@ -6500,8 +6532,8 @@ export default function MainScreen({
     })
   }, [])
 
-  /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id（舊推播或 URL 無 match）。 */
-  useEffect(() => {
+  /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id。SW 點通知時 replaceState 後再觸發此邏輯。 */
+  const consumeUrlPushDeepLink = useCallback(() => {
     if (!user?.id) return
     if (typeof window === 'undefined') return
     const url = new URL(window.location.href)
@@ -6559,6 +6591,17 @@ export default function MainScreen({
       })()
     }
   }, [user?.id])
+
+  useEffect(() => {
+    consumeUrlPushDeepLink()
+  }, [consumeUrlPushDeepLink])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = () => consumeUrlPushDeepLink()
+    window.addEventListener(TM_APP_DEEP_LINK_EVENT, handler)
+    return () => window.removeEventListener(TM_APP_DEEP_LINK_EVENT, handler)
+  }, [consumeUrlPushDeepLink])
 
   useEffect(() => {
     const uid = user?.id

@@ -70,13 +70,23 @@ self.addEventListener('push', (event: PushEvent) => {
       let body = ''
       let tag = 'tsmedia'
       let openUrl = '/'
+      let payloadMatchLc: string | null = null
       try {
         if (event.data) {
-          const j = event.data.json() as { title?: string; body?: string; tag?: string; url?: string }
+          const j = event.data.json() as {
+            title?: string
+            body?: string
+            tag?: string
+            url?: string
+            matchId?: string
+          }
           if (j.title) title = j.title
           if (typeof j.body === 'string') body = j.body
           if (j.tag) tag = j.tag
           if (typeof j.url === 'string') openUrl = j.url
+          if (typeof j.matchId === 'string' && j.matchId.trim()) {
+            payloadMatchLc = j.matchId.trim().toLowerCase()
+          }
         }
       } catch {
         try {
@@ -87,10 +97,10 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
-      /** 與 LINE 類似：（1）正開在同一配對聊天室 （2）或前景有焦點 → 不彈 OS 橫幅 */
+      /** 與 LINE 類似：同 chat match id／或多數瀏覽器 `visibilityState:visible` 時不橫幅（補齊 `focused` 在 iOS 失準） */
       const isMessageReceivedTag = tag === 'app-notif-message_received'
       if (isMessageReceivedTag) {
-        const incomingMatchLc = matchIdFromPayloadUrl(openUrl)
+        const incomingMatchLc = payloadMatchLc ?? matchIdFromPayloadUrl(openUrl)
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
         if (
@@ -109,7 +119,8 @@ self.addEventListener('push', (event: PushEvent) => {
             typeof x.url === 'string' &&
             x.url.startsWith(self.location.origin),
         )
-        if (focusedHere) {
+        /** 舊 payload 無 match：`focused` 時仍不強打橫幅（站内靠列表／角標） */
+        if (focusedHere && incomingMatchLc == null) {
           await pingClientsForegroundMessageQuiet()
           return
         }
@@ -140,19 +151,9 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
       for (const c of all) {
         if (!(c instanceof WindowClient)) continue
         if (!c.url.startsWith(self.location.origin)) continue
-        const w = c as WindowClient & { navigate?: (u: string) => Promise<WindowClient | null> }
-        if (typeof w.navigate === 'function') {
-          try {
-            await w.navigate(target)
-            await c.focus()
-            return
-          } catch {
-            /* 部分 WebKit 不實作或拒絕 navigate */
-          }
-        }
         await c.focus()
         try {
-          c.postMessage({ type: 'TM_NAVIGATE', url: target })
+          c.postMessage({ type: 'TM_PUSH_OPEN', url: target })
         } catch {
           /* ignore */
         }

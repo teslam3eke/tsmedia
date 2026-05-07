@@ -74,11 +74,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     const tag = `app-notif-${record.kind ?? 'generic'}`
+    const url = buildOpenUrlForAppNotification(record)
     const result = await sendWebPushToUser(record.user_id, {
       title: record.title,
       body: record.body ?? '',
       tag,
-      url: buildOpenUrlForAppNotification(record),
+      url,
+      matchId:
+        record.kind === 'message_received' && typeof record.ref_match_id === 'string'
+          ? record.ref_match_id
+          : undefined,
     })
     res.status(200).json({ ok: true, ...result })
   } catch (e) {
