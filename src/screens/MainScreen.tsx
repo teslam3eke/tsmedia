@@ -35,7 +35,7 @@ import {
   formatChatMessageFromRow, mergeUniqueChatMessages,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches,
 } from '@/lib/db'
-import { getAppDayKey, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
+import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
@@ -6499,8 +6499,25 @@ export default function MainScreen({
     setDiscoverDeckRolloverTick(0)
   }, [user?.id])
 
+  /** 換日若發生在 APP 未開時，登入時 ref 會直接對齊新 key，timer 偵測路徑不會進入。對照 localStorage 上一次 key 仍補一則系統通知（權限內）。 */
   useEffect(() => {
-    const tick = () => {
+    if (!user?.id) return
+    const LS = 'tm_last_seen_app_day_key_v1'
+    const k = getAppDayKey()
+    try {
+      const prev = localStorage.getItem(LS)
+      if (prev != null && prev !== k) void showDiscoverDeckRolloverNotification(k)
+      localStorage.setItem(LS, k)
+    } catch {
+      /* private mode — 不中斷 */
+    }
+  }, [user?.id])
+
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof window.setTimeout> | undefined
+    let intervalId: ReturnType<typeof window.setInterval> | undefined
+
+    const applyRollover = () => {
       const k = getAppDayKey()
       if (k === discoverDeckDayRef.current) return
       discoverDeckDayRef.current = k
@@ -6508,9 +6525,31 @@ export default function MainScreen({
       setDiscoverDeckRolloverTick((n) => n + 1)
       if (user?.id) void showDiscoverDeckRolloverNotification(k)
     }
-    tick()
-    const id = window.setInterval(tick, 20_000)
-    return () => window.clearInterval(id)
+
+    const scheduleDeadline = () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+      const delay = msUntilNextAppDayKeyChange()
+      timeoutId = window.setTimeout(() => {
+        applyRollover()
+        scheduleDeadline()
+      }, delay)
+    }
+
+    applyRollover()
+    scheduleDeadline()
+    /** OS 休眠／背景节流時 timeout 不可靠，每分鐘補檢一次。 */
+    intervalId = window.setInterval(applyRollover, 60_000)
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') applyRollover()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+      if (intervalId !== undefined) window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [user?.id])
 
   const refreshCredits = useCallback(async () => {
