@@ -26,12 +26,20 @@ self.addEventListener('activate', (event) => {
 /** 主執行緒回報：使用者正待在與該 match 的一對一聊；此 match 的新訊息不顯示推播橫幅 */
 let activeChatMatchIdLc: string | null = null
 
+/** 與 URL / JSON 可能帶 hyphen 的 uuid 對齊：比對時一律 compact 小寫 hex */
+function normalizeMatchIdForCompare(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const t = raw.trim().toLowerCase()
+  if (!t) return null
+  const compact = t.replace(/-/g, '')
+  return compact.length > 0 ? compact : null
+}
+
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   try {
     const d = event.data as { type?: string; matchId?: string | null } | undefined
     if (d?.type !== 'TM_ACTIVE_CHAT_MATCH') return
-    activeChatMatchIdLc =
-      typeof d.matchId === 'string' && d.matchId.trim().length > 0 ? d.matchId.trim().toLowerCase() : null
+    activeChatMatchIdLc = normalizeMatchIdForCompare(d.matchId)
   } catch {
     /* ignore */
   }
@@ -44,7 +52,7 @@ function matchIdFromPayloadUrl(openUrlPath: string): string | null {
       : new URL(openUrlPath, self.location.origin)
     const raw = u.searchParams.get('match')
     if (!raw || !raw.trim()) return null
-    return raw.trim().toLowerCase()
+    return normalizeMatchIdForCompare(raw)
   } catch {
     return null
   }
@@ -85,7 +93,7 @@ self.addEventListener('push', (event: PushEvent) => {
           if (j.tag) tag = j.tag
           if (typeof j.url === 'string') openUrl = j.url
           if (typeof j.matchId === 'string' && j.matchId.trim()) {
-            payloadMatchLc = j.matchId.trim().toLowerCase()
+            payloadMatchLc = normalizeMatchIdForCompare(j.matchId)
           }
         }
       } catch {
@@ -98,7 +106,8 @@ self.addEventListener('push', (event: PushEvent) => {
       }
 
       /** 與 LINE 類似：同 chat match id／或多數瀏覽器 `visibilityState:visible` 時不橫幅（補齊 `focused` 在 iOS 失準） */
-      const isMessageReceivedTag = tag === 'app-notif-message_received'
+      const isMessageReceivedTag =
+        tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
       if (isMessageReceivedTag) {
         const incomingMatchLc = payloadMatchLc ?? matchIdFromPayloadUrl(openUrl)
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

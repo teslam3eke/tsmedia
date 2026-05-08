@@ -4030,16 +4030,23 @@ function ChatRoomView({
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
 
-  /** 回報 SW：此配對聊天開著時略過同對象推播；SW 重啟／切回前景時重新 arm */
+  /** 回報 SW：此配對聊天開著時略過同對象推播；SW 重啟／切回前景時重新 arm；短週期 heartbeat 對齊 iOS／多 registration */
+  useLayoutEffect(() => {
+    if (!isLive || !conversation.matchId) return
+    notifyServiceWorkerActiveChatMatch(conversation.matchId)
+  }, [isLive, conversation.matchId])
+
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
     const arm = () => notifyServiceWorkerActiveChatMatch(conversation.matchId)
     arm()
+    const hb = window.setInterval(arm, 2500)
     document.addEventListener('visibilitychange', arm)
     const sw = navigator.serviceWorker
     const onCtl = () => arm()
     sw?.addEventListener('controllerchange', onCtl)
     return () => {
+      clearInterval(hb)
       document.removeEventListener('visibilitychange', arm)
       sw?.removeEventListener('controllerchange', onCtl)
       notifyServiceWorkerActiveChatMatch(null)
@@ -4097,26 +4104,44 @@ function ChatRoomView({
   // latest message stays in view rather than getting hidden behind the composer.
   useEffect(() => {
     const vv = window.visualViewport
+    let raf = 0
+    const scrollBottomRetries = () => {
+      const run = () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      run()
+      window.setTimeout(run, 60)
+      window.setTimeout(run, 200)
+      window.setTimeout(run, 420)
+    }
     const updateKeyboardState = () => {
-      const inputFocused = document.activeElement === inputRef.current
-      const viewportShrunk = vv ? vv.height < window.innerHeight - 120 : false
-      setIsKeyboardOpen(inputFocused || viewportShrunk)
-      if (vv) {
-        const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const layoutH = window.innerHeight
+        const inputFocused = document.activeElement === inputRef.current
+        const vvH = vv?.height ?? layoutH
+        const vvTop = vv?.offsetTop ?? 0
+        /** iOS WKWebView 有時漏更新 offsetTop；雙公式取較大可減輕鍵盤遮擋 */
+        const insetFromOffset = vv ? Math.max(0, layoutH - vvH - vvTop) : 0
+        const insetSansTop = vv ? Math.max(0, layoutH - vvH) : 0
+        const inset =
+          vv && inputFocused ? Math.max(insetFromOffset, Math.min(insetSansTop, layoutH * 0.5)) : insetFromOffset
+        const viewportShrunk = vv ? vvH < layoutH - 100 : false
+        setIsKeyboardOpen(inputFocused || viewportShrunk)
         setKeyboardInsetBottom(inset)
-      } else {
-        setKeyboardInsetBottom(0)
-      }
-      window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 50)
+        scrollBottomRetries()
+      })
     }
     updateKeyboardState()
     vv?.addEventListener('resize', updateKeyboardState)
     vv?.addEventListener('scroll', updateKeyboardState)
+    window.addEventListener('resize', updateKeyboardState)
     document.addEventListener('focusin', updateKeyboardState)
     document.addEventListener('focusout', updateKeyboardState)
     return () => {
+      if (raf) cancelAnimationFrame(raf)
       vv?.removeEventListener('resize', updateKeyboardState)
       vv?.removeEventListener('scroll', updateKeyboardState)
+      window.removeEventListener('resize', updateKeyboardState)
       document.removeEventListener('focusin', updateKeyboardState)
       document.removeEventListener('focusout', updateKeyboardState)
     }
@@ -4319,7 +4344,10 @@ function ChatRoomView({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1 bg-slate-50/70" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1 bg-slate-50/70"
+        style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
+      >
         <div className="mb-2 flex justify-center">
           {!isLive && (
             <button
@@ -4399,7 +4427,7 @@ function ChatRoomView({
             </div>
           )
         })}
-        <div ref={bottomRef} />
+        <div ref={bottomRef} className="h-px shrink-0" aria-hidden />
       </div>
 
       {/* Composer */}
@@ -4420,7 +4448,10 @@ function ChatRoomView({
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
             onFocus={() => {
               setIsKeyboardOpen(true)
-              window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 80)
+              const run = () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+              run()
+              window.setTimeout(run, 100)
+              window.setTimeout(run, 300)
               onChatInputFocus?.()
             }}
             onBlur={() => {
