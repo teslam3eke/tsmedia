@@ -1680,6 +1680,11 @@ function DiscoverTab({
               lastDeckFetchCtxRef.current.dk === ctx.dk))
         lastDeckFetchCtxRef.current = ctx
 
+        if (keepStaleVisible) {
+          /** 前景靜默重抓時維持 ready，免得上一輪 loading 卡住全屏轉圈 */
+          setLiveDeckStatus('ready')
+        }
+
         const myEpoch = ++deckLoadEpochRef.current
 
         actionTrace('discover.deck', 'effect:開始', {
@@ -2739,11 +2744,6 @@ function MatchesTab({
 
   return (
     <div className="flex flex-col h-full">
-      {isLoggedIn && liveConversationsLoading && liveConversations.length > 0 && (
-        <div className="mx-5 mt-2 shrink-0 rounded-xl bg-slate-50 px-3 py-2 text-center text-[11px] font-medium text-slate-500 ring-1 ring-slate-100">
-          正在同步最新配對…
-        </div>
-      )}
       <div className="px-5 pt-4 pb-2">
         <h1 className="text-[22px] font-bold text-slate-900 tracking-tight">配對</h1>
         <p className="text-xs text-slate-400 mt-0.5">你的 {count} 個配對</p>
@@ -3884,24 +3884,54 @@ function ChatListView({
   onOpen: (conv: Conversation) => void
   onOpenPerson?: (p: PersonSummary) => void
 }) {
+  const [chatSearch, setChatSearch] = useState('')
+  const qlc = chatSearch.trim().toLowerCase()
+  const rows = useMemo(() => {
+    if (!qlc) return conversations
+    return conversations.filter((c) => {
+      const name = c.name.toLowerCase()
+      const sub = c.subtitle.toLowerCase()
+      const sorted = [...c.messages].sort(compareChatMessageTime)
+      const last = sorted[sorted.length - 1]
+      const lastText = (last?.text ?? '').toLowerCase()
+      return name.includes(qlc) || sub.includes(qlc) || lastText.includes(qlc)
+    })
+  }, [conversations, qlc])
+
   return (
     <div className="flex flex-col h-full bg-white pt-safe-bar">
-      {/* Header — 訊息分頁沒有主畫面頂列，需自行預留 safe-area，避免被瀏海／狀態列遮字 */}
-      <div className="flex-shrink-0 px-5 pb-3 flex items-center justify-between">
-        <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight">聊天</h1>
-        <button className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center">
-          <Search className="w-[18px] h-[18px] text-slate-600" />
-        </button>
+      {/* Header — 訊息分頁：導覽＋搜尋列靜態固定，不依賴連線狀態；篩選為本地、零載入（與「點搜尋才做事情」同精神） */}
+      <div className="flex-shrink-0 px-5 pb-3">
+        <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight mb-2">聊天</h1>
+        <div className="relative">
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-[17px] w-[17px] -translate-y-1/2 text-slate-400"
+            aria-hidden
+          />
+          <input
+            type="search"
+            enterKeyHint="search"
+            value={chatSearch}
+            onChange={(e) => setChatSearch(e.target.value)}
+            placeholder="搜尋名稱或訊息"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ fontSize: '16px' }}
+            className="w-full rounded-xl border border-transparent bg-slate-100 py-2.5 pl-[38px] pr-3 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-200 focus:bg-white focus:ring-2 focus:ring-slate-200/80"
+          />
+        </div>
       </div>
 
       {/* List */}
       <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-        {conversations.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="text-center text-slate-400 text-sm px-8 py-16 leading-relaxed">
-            尚無聊天室。配對成功後會出現在這裡。
+            {conversations.length === 0
+              ? '尚無聊天室。配對成功後會出現在這裡。'
+              : '找不到符合「' + chatSearch.trim() + '」的對話'}
           </p>
         ) : (
-          conversations.map((conv) => {
+          rows.map((conv) => {
           const last = [...conv.messages].sort(compareChatMessageTime)[conv.messages.length - 1]
           const unread = conv.messages.filter(
             (m) => m.from === 'them' && !hasMyReplyAfter(m, conv.messages),
@@ -6524,6 +6554,11 @@ export default function MainScreen({
   const [pendingChatId, setPendingChatId] = useState<number | string | null>(null)
   const [liveMatchThreads, setLiveMatchThreads] = useState<Conversation[]>([])
   const [liveMatchThreadsLoading, setLiveMatchThreadsLoading] = useState(false)
+  /** 給 {@link loadLiveMatchThreads} 判定是否已有 UI／session 快取——前景靜默刷新不致開全屏轉圈 */
+  const liveMatchThreadsRef = useRef<Conversation[]>([])
+  useEffect(() => {
+    liveMatchThreadsRef.current = liveMatchThreads
+  }, [liveMatchThreads])
   const [demoPuzzleClearedByProfile, setDemoPuzzleClearedByProfile] = useState<Record<number, number[]>>(() => loadDemoPuzzleClearedSlots())
   const discoverDeckDayRef = useRef(getAppDayKey())
   const [discoverDeckDayKey, setDiscoverDeckDayKey] = useState(() => getAppDayKey())
@@ -6917,7 +6952,12 @@ export default function MainScreen({
       await ensureConnectionWithBudget()
     }
     const gen = ++liveMatchThreadsLoadGenRef.current
-    const blockSpinner = mode === 'full'
+    const sessionWarm = readLiveConvSessionCache(user.id)
+    const sessionLen = sessionWarm?.length ?? 0
+    const memLen = liveMatchThreadsRef.current.length
+    /** 任一來源已有名單則視為 SWR：`full` 亦不擋 UI（連線／WS 抖動不算「無資料」） */
+    const hasWarmConversationList = sessionLen > 0 || memLen > 0
+    const blockSpinner = mode === 'full' && !hasWarmConversationList
     if (blockSpinner) setLiveMatchThreadsLoading(true)
     const SAFETY_MS = 22_000
     const safetyTimer = window.setTimeout(() => {
@@ -6993,7 +7033,7 @@ export default function MainScreen({
 
   useEffect(() => {
     if (!user?.id || foregroundReloadNonce === 0) return
-    void loadLiveMatchThreads('full')
+    void loadLiveMatchThreads('soft')
   }, [user?.id, foregroundReloadNonce, loadLiveMatchThreads])
 
   useEffect(() => {
