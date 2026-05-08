@@ -4029,6 +4029,9 @@ function ChatRoomView({
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
+  /** 避免因 sub-pixel vv 數值無限 setState → 捲動 → visualViewport 抖動／地震 */
+  const lastInsetCommitRef = useRef<number | null>(null)
+  const lastKbOpenCommitRef = useRef<boolean | null>(null)
 
   /** 回報 SW：此配對聊天開著時略過同對象推播；SW 重啟／切回前景時重新 arm；短週期 heartbeat 對齊 iOS／多 registration */
   useLayoutEffect(() => {
@@ -4097,50 +4100,65 @@ function ChatRoomView({
   }, [isLive, conversation.matchId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, isKeyboardOpen, keyboardInsetBottom])
+    bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+  }, [messages])
 
   // When the keyboard opens/closes the viewport resizes — make sure the
   // latest message stays in view rather than getting hidden behind the composer.
   useEffect(() => {
     const vv = window.visualViewport
     let raf = 0
-    const scrollBottomRetries = () => {
-      const run = () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-      run()
-      window.setTimeout(run, 60)
-      window.setTimeout(run, 200)
-      window.setTimeout(run, 420)
+    const scrollBottomOnceSoon = () => {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 200)
     }
     const updateKeyboardState = () => {
       if (raf) cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
         raf = 0
         const layoutH = window.innerHeight
-        const inputFocused = document.activeElement === inputRef.current
         const vvH = vv?.height ?? layoutH
         const vvTop = vv?.offsetTop ?? 0
-        /** iOS WKWebView 有時漏更新 offsetTop；雙公式取較大可減輕鍵盤遮擋 */
-        const insetFromOffset = vv ? Math.max(0, layoutH - vvH - vvTop) : 0
-        const insetSansTop = vv ? Math.max(0, layoutH - vvH) : 0
-        const inset =
-          vv && inputFocused ? Math.max(insetFromOffset, Math.min(insetSansTop, layoutH * 0.5)) : insetFromOffset
-        const viewportShrunk = vv ? vvH < layoutH - 100 : false
-        setIsKeyboardOpen(inputFocused || viewportShrunk)
-        setKeyboardInsetBottom(inset)
-        scrollBottomRetries()
+        /** 勿訂閱 visualViewport.scroll — 與 scrollIntoView 互觸發會整頁上下震 */
+        const rawInset = vv ? Math.max(0, layoutH - vvH - vvTop) : 0
+        const roundedInset = Math.max(0, Math.round(rawInset))
+        const inputFocused = document.activeElement === inputRef.current
+        const viewportShrunk = vv ? vvH < layoutH - 110 : false
+        /** 進房時瀏覽列／視窗細微調整易被算成小 inset；非鍵盤情境歸零，避免 padding 抖動 */
+        const ghostInset =
+          roundedInset <= 36 && roundedInset > 0 && !inputFocused && !viewportShrunk
+
+        const nextInset = ghostInset ? 0 : roundedInset
+        const nextOpen = inputFocused || viewportShrunk
+
+        const prevI = lastInsetCommitRef.current
+        const prevO = lastKbOpenCommitRef.current
+        /** 門檻內視為同值，免得 sub-pixel vv 無限 rerender／捲動 */
+        const insetChanged =
+          prevI === null ||
+          (nextInset !== prevI &&
+            (Math.abs(nextInset - prevI) >= 12 || nextInset === 0 || prevI === 0))
+        const openChanged = prevO === null || prevO !== nextOpen
+
+        if (insetChanged) {
+          lastInsetCommitRef.current = nextInset
+          setKeyboardInsetBottom(nextInset)
+        }
+        if (openChanged) {
+          lastKbOpenCommitRef.current = nextOpen
+          setIsKeyboardOpen(nextOpen)
+        }
+        if (insetChanged || openChanged) scrollBottomOnceSoon()
       })
     }
     updateKeyboardState()
     vv?.addEventListener('resize', updateKeyboardState)
-    vv?.addEventListener('scroll', updateKeyboardState)
     window.addEventListener('resize', updateKeyboardState)
     document.addEventListener('focusin', updateKeyboardState)
     document.addEventListener('focusout', updateKeyboardState)
     return () => {
       if (raf) cancelAnimationFrame(raf)
       vv?.removeEventListener('resize', updateKeyboardState)
-      vv?.removeEventListener('scroll', updateKeyboardState)
       window.removeEventListener('resize', updateKeyboardState)
       document.removeEventListener('focusin', updateKeyboardState)
       document.removeEventListener('focusout', updateKeyboardState)
@@ -4447,15 +4465,11 @@ function ChatRoomView({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
             onFocus={() => {
-              setIsKeyboardOpen(true)
-              const run = () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-              run()
-              window.setTimeout(run, 100)
-              window.setTimeout(run, 300)
+              /** 交由 focusin + visualViewport resize 統一推算；此處只做鍵盤動畫後一次補捲避免與 vv 對打 */
+              window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 280)
               onChatInputFocus?.()
             }}
             onBlur={() => {
-              setIsKeyboardOpen(false)
               onChatInputBlur?.()
             }}
             placeholder="輸入訊息"
