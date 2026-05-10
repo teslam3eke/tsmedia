@@ -42,7 +42,7 @@ import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotif
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
-import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
+import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
@@ -3205,58 +3205,6 @@ function clearLiveConvSessionCache(userId: string) {
 }
 
 const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
-const DEMO_MATCHED_AT = Date.now() - 10 * 60 * 1000
-
-const CONVERSATIONS: Conversation[] = [
-  {
-    id: 101,
-    name: '王雅婷',
-    subtitle: '理律法律事務所 · 律師',
-    initials: '王',
-    from: '#7c3aed',
-    to: '#6d28d9',
-    photoUrl: MATCH_PROFILES.find((p) => p.id === 101)?.photoUrl,
-    photoUrls: collectProfilePhotoUrls(MATCH_PROFILES.find((p) => p.id === 101)!),
-    matchedAt: DEMO_MATCHED_AT,
-    messages: [
-      { id: 'd101-1', text: '你也喜歡手沖嗎？我最近在練習 V60 ☕',             from: 'them', time: '14:32', date: '今天', createdAt: '2025-01-15T14:32:00.000+08:00' },
-      { id: 'd101-2', text: '早安，剛剛看到你分享的那篇文章',                  from: 'them', time: '14:32', date: '今天', createdAt: '2025-01-15T14:32:15.000+08:00' },
-      { id: 'd101-3', text: '對！最近迷上了衣索比亞豆，果香真的很迷人',        from: 'me',   time: '14:35', date: '今天', read: true, createdAt: '2025-01-15T14:35:00.000+08:00' },
-      { id: 'd101-4', text: '哇，品味很好耶！你在新竹嗎？有一間小店推薦你',    from: 'them', time: '14:36', date: '今天', createdAt: '2025-01-15T14:36:00.000+08:00' },
-      { id: 'd101-5', text: '在台北，週末才會回新竹',                          from: 'me',   time: '14:40', date: '今天', read: false, createdAt: '2025-01-15T14:40:00.000+08:00' },
-    ],
-  },
-  {
-    id: 102,
-    name: '劉承恩',
-    subtitle: 'TSMC · 製程研發工程師',
-    initials: '劉',
-    from: '#0f766e',
-    to: '#0d9488',
-    photoUrl: MATCH_PROFILES.find((p) => p.id === 102)?.photoUrl,
-    photoUrls: collectProfilePhotoUrls(MATCH_PROFILES.find((p) => p.id === 102)!),
-    matchedAt: DEMO_MATCHED_AT,
-    messages: [
-      { id: 'd102-1', text: '週末要一起去陽明山嗎？', from: 'them', time: '11:20', date: '今天', createdAt: '2025-01-16T11:20:00.000+08:00' },
-      { id: 'd102-2', text: '氣象預報看起來不錯',     from: 'them', time: '11:21', date: '今天', createdAt: '2025-01-16T11:21:00.000+08:00' },
-    ],
-  },
-  {
-    id: 103,
-    name: '蔡佩如',
-    subtitle: 'MediaTek · 數位設計工程師',
-    initials: '蔡',
-    from: '#b45309',
-    to: '#d97706',
-    photoUrl: MATCH_PROFILES.find((p) => p.id === 103)?.photoUrl,
-    photoUrls: collectProfilePhotoUrls(MATCH_PROFILES.find((p) => p.id === 103)!),
-    matchedAt: DEMO_MATCHED_AT,
-    messages: [
-      { id: 'd103-1', text: '那部紀錄片我也很想看！', from: 'them', time: '昨天', date: '昨天', createdAt: '2025-01-14T20:00:00.000+08:00' },
-      { id: 'd103-2', text: '下週末有空嗎？',          from: 'me',   time: '昨天', date: '昨天', read: true, createdAt: '2025-01-14T20:30:00.000+08:00' },
-    ],
-  },
-]
 
 function compareChatMessageTime(a: ChatMessage, b: ChatMessage): number {
   if (a.createdAt && b.createdAt) {
@@ -3264,8 +3212,6 @@ function compareChatMessageTime(a: ChatMessage, b: ChatMessage): number {
   }
   return String(a.id).localeCompare(String(b.id))
 }
-
-const PUZZLE_MAX_PHOTO_SLOTS = 3
 
 const PUZZLE_UNLOCK_ORDER = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15]
 

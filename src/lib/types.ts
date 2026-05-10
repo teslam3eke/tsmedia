@@ -34,6 +34,9 @@ export const REGION_LABELS: Record<Region, string> = {
 export const PROFILE_PHOTO_MIN = 1
 export const PROFILE_PHOTO_MAX = 3
 
+/** 拼圖／即時房頭像裁剪與生活照 slice 上限（與 {@link PROFILE_PHOTO_MAX} 一致） */
+export const PUZZLE_MAX_PHOTO_SLOTS = PROFILE_PHOTO_MAX
+
 export interface QuestionnaireEntry {
   id: number
   category: string
