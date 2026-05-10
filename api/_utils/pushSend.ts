@@ -24,6 +24,27 @@ function adminSupabase() {
 
 const PUSH_PAYLOAD_OPTIONS = { TTL: 86_400 } as const
 
+/** 與探索「每晚 10 點」同一曆日（Asia/Taipei）；tag 加分日避免被推播 SDK 過度去重 */
+function discoverRolloverTagSuffix(): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+async function parallelMapChunks<T>(
+  items: readonly T[],
+  chunkSize: number,
+  mapper: (item: T) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize)
+    await Promise.all(chunk.map((item) => mapper(item)))
+  }
+}
+
 async function sendToSubscription(
   supabase: ReturnType<typeof adminSupabase>,
   row: { endpoint: string; p256dh: string; auth: string },
@@ -88,14 +109,18 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{ sent: numbe
 
   const title = '探索名單已更新'
   const body = '每日晚上 10 點換日，今日配對推薦已重新產生。'
+  const dayTag = `tsm-discover-deck-day-${discoverRolloverTagSuffix()}`
   const payloadText = JSON.stringify({
     title,
     body,
-    tag: 'tsm-discover-deck-day',
+    tag: dayTag,
     url: '/',
   })
 
-  const pageSize = 400
+  /** 並行發送以降低 Vercel serverless 逾時造成「後段訂閱全沒發到」 */
+  const pageSize = 500
+  /** 同一批內併發數（FCM/APNs 可承受適度平行；過高易觸發速率限制） */
+  const concurrency = 32
   let offset = 0
   let sent = 0
   let failed = 0
@@ -110,11 +135,11 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{ sent: numbe
     if (error) throw error
     if (!rows?.length) break
 
-    for (const r of rows) {
+    await parallelMapChunks(rows, concurrency, async (r) => {
       const out = await sendToSubscription(supabase, r, payloadText)
       if (out === 'ok') sent++
       else failed++
-    }
+    })
     offset += rows.length
     if (rows.length < pageSize) break
   }

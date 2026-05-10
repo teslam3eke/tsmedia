@@ -10,6 +10,16 @@ export function getAppDayKey(date = new Date()): string {
   return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 
+/** 台北曆日 yyyy-mm-dd（與換日推播 `tag` 後綴對齊）。 */
+export function taipeiWallCalendarKey(d = new Date()): string {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
+}
+
 /** 離「app 日」切換（本地 22:00 邊界）還剩幾 ms；上限內無變化則回退 60s（避免異常鎖死）。 */
 export function msUntilNextAppDayKeyChange(now = new Date(), capMs = 25 * 60 * 60 * 1000): number {
   const k0 = getAppDayKey(now)
@@ -26,7 +36,8 @@ export function msUntilNextAppDayKeyChange(now = new Date(), capMs = 25 * 60 * 6
  *
  * 僅在 **此行有執行中 JS（曾開啟 PWA 或仍於前景）** 時才會被呼叫；APP 完全未開啟或 OS 凍結 JS 時無法準點發送。
  * 若要在鎖屏／未開啟 APP 仍於 22:00 收到通知，須由 **伺服器發 Web Push**，單靠前端 timer 無法達成。
- */export async function showDiscoverDeckRolloverNotification(dayKey: string): Promise<void> {
+ */
+export async function showDiscoverDeckRolloverNotification(dayKey: string): Promise<void> {
   if (typeof window === 'undefined' || !('Notification' in window)) return
   if (Notification.permission !== 'granted') return
   const mark = `tsm_discover_rollover_notified_${dayKey}`
@@ -38,7 +49,7 @@ export function msUntilNextAppDayKeyChange(now = new Date(), capMs = 25 * 60 * 6
     body,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: 'tsm-discover-deck-day',
+    tag: `tsm-discover-deck-day-${taipeiWallCalendarKey()}`,
     renotify: true,
   }
   try {

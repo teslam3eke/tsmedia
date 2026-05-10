@@ -11,6 +11,11 @@
       "schedule": "0 14 * * *"
     }
   ],
+  "functions": {
+    "api/cron-discover-rollover-push.ts": {
+      "maxDuration": 120
+    }
+  },
   "headers": [
     {
       "source": "/api/git-sha",
