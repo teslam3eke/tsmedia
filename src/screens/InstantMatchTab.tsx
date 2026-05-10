@@ -56,14 +56,15 @@ export default function InstantMatchTab({
     let cancelled = false
     async function poke() {
       if (doneHoldRef.current) return
-      const r = await instantMatchPoll()
+      const res = await instantMatchPoll()
       if (cancelled) return
       setPollReady(true)
-      if (!r) {
-        setPollError('無法連線取得配對狀態')
+      if (!res.ok) {
+        setPollError(res.error)
         return
       }
       setPollError(null)
+      const r = res.data
       setSnapshot((prev) => {
         if (prev?.status === 'done') return prev
         if (r.status === 'done' && r.mutual_friend) onMutualFriendMatchCreated?.()
@@ -158,8 +159,9 @@ export default function InstantMatchTab({
     setBusy(true)
     setPollError(null)
     try {
-      const r = await instantMatchPoll()
-      if (r) setSnapshot(r)
+      const res = await instantMatchPoll()
+      if (res.ok) setSnapshot(res.data)
+      else setPollError(res.error)
     } finally {
       setBusy(false)
     }
@@ -168,8 +170,13 @@ export default function InstantMatchTab({
   const leaveQueueClick = async () => {
     setBusy(true)
     await instantMatchLeaveQueue()
-    const r = await instantMatchPoll()
-    if (r) setSnapshot(r)
+    const res = await instantMatchPoll()
+    if (res.ok) {
+      setPollError(null)
+      setSnapshot(res.data)
+    } else {
+      setPollError(res.error)
+    }
     setBusy(false)
   }
 
@@ -276,7 +283,14 @@ export default function InstantMatchTab({
           onClick={() => {
             doneHoldRef.current = false
             setSnapshot(null)
-            void instantMatchPoll().then((r) => r && setSnapshot(r))
+            void instantMatchPoll().then((res) => {
+              if (res.ok) {
+                setPollError(null)
+                setSnapshot(res.data)
+              } else {
+                setPollError(res.error)
+              }
+            })
           }}
         >
           我知道了
@@ -400,8 +414,9 @@ export default function InstantMatchTab({
                     const res = await instantSessionDecide(sessionId, 'friend')
                     if (!res.ok) setPollError(res.error ?? '')
                     else onMutualFriendMatchCreated?.()
-                    const r = await instantMatchPoll()
-                    if (r) setSnapshot(r)
+                    const resPoll = await instantMatchPoll()
+                    if (resPoll.ok) setSnapshot(resPoll.data)
+                    else setPollError(resPoll.error)
                   })()
                 }
               >
@@ -414,8 +429,9 @@ export default function InstantMatchTab({
                   void (async () => {
                     const res = await instantSessionDecide(sessionId, 'pass')
                     if (!res.ok) setPollError(res.error ?? '')
-                    const r = await instantMatchPoll()
-                    if (r) setSnapshot(r)
+                    const resPoll = await instantMatchPoll()
+                    if (resPoll.ok) setSnapshot(resPoll.data)
+                    else setPollError(resPoll.error)
                   })()
                 }
               >

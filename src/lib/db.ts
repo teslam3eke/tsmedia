@@ -1373,13 +1373,76 @@ export type InstantMatchPollResult =
       mutual_friend: boolean
     }
 
-export async function instantMatchPoll(): Promise<InstantMatchPollResult | null> {
+export type InstantMatchPollResponse =
+  | { ok: true; data: InstantMatchPollResult }
+  | { ok: false; error: string }
+
+function mapInstantMatchPollFailure(err: {
+  message?: string
+  code?: string
+  details?: string
+  hint?: string
+}): string {
+  const raw = String(err.message ?? '')
+  const msg = raw.toLowerCase()
+  const detail = String(err.details ?? '').toLowerCase()
+  const hint = String(err.hint ?? '').toLowerCase()
+  const blob = `${msg} ${detail} ${hint}`
+
+  if (blob.includes('failed to fetch') || blob.includes('networkerror') || blob.includes('load failed')) {
+    return '網路連線異常，請檢查連線後再試。'
+  }
+
+  if (
+    blob.includes('not authenticated') ||
+    blob.includes('jwt expired') ||
+    blob.includes('invalid jwt') ||
+    blob.includes('invalid claim') ||
+    err.code === 'PGRST303'
+  ) {
+    return '登入已失效或尚未登入。請重新整理頁面並再登入。'
+  }
+
+  if (
+    blob.includes('permission denied for function') ||
+    err.code === '42501' ||
+    (blob.includes('permission denied') && blob.includes('instant'))
+  ) {
+    return '目前身分無法呼叫即時配對。請確認使用已登入的一般帳號（非僅訪客）。'
+  }
+
+  if (
+    err.code === 'PGRST202' ||
+    err.code === '42883' ||
+    (blob.includes('could not find') && blob.includes('instant_match_poll')) ||
+    (blob.includes('does not exist') && blob.includes('instant_match_poll'))
+  ) {
+    return (
+      '後端尚未註冊 instant_match_poll（常見：Supabase 尚未套用 migration 048）。' +
+      '請在專案執行 supabase migration / 貼上 `048_instant_match_sessions.sql`，' +
+      '並在 SQL Editor 執行 NOTIFY pgrst, \'reload schema\'; 稍後重試。'
+    )
+  }
+
+  const trimmed = raw.trim()
+  if (trimmed) return trimmed
+  return '無法取得配對狀態。'
+}
+
+export async function instantMatchPoll(): Promise<InstantMatchPollResponse> {
   const { data, error } = await (supabase as any).rpc('instant_match_poll')
   if (error) {
-    console.error('[db] instantMatchPoll', error.message)
-    return null
+    console.error('[db] instantMatchPoll', error.code, error.message, error.details, error.hint)
+    return { ok: false, error: mapInstantMatchPollFailure(error) }
   }
-  return data as InstantMatchPollResult
+  if (data == null || typeof data !== 'object') {
+    return {
+      ok: false,
+      error:
+        '伺服器未回傳有效 JSON。請確認已套用 migration 048，並重載 PostgREST schema（pg_notify pgrst）。',
+    }
+  }
+  return { ok: true, data: data as InstantMatchPollResult }
 }
 
 export async function instantMatchLeaveQueue(): Promise<{ ok: boolean; error?: string }> {
