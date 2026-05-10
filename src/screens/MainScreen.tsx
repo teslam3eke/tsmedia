@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   Camera, Trash2, ImageIcon, Users, Star,
-  Search, Plus, Smile, BellRing, AlertCircle, Gem,
+  Plus, Smile, BellRing, AlertCircle, Gem,
   FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -48,6 +48,7 @@ import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
+import InstantMatchTab from '@/screens/InstantMatchTab'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import AdminScreen from '@/screens/AdminScreen'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
@@ -130,7 +131,7 @@ interface Profile {
   superLikedToday?: boolean
 }
 
-export type MainScreenTab = 'discover' | 'matches' | 'messages' | 'profile'
+export type MainScreenTab = 'discover' | 'matches' | 'instant' | 'profile'
 type Tab = MainScreenTab
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -3873,141 +3874,6 @@ function hasMyReplyAfter(themMsg: ChatMessage, all: ChatMessage[]): boolean {
   })
 }
 
-// ─── Chat List View ──────────────────────────────────────────────────────────
-
-function ChatListView({
-  conversations,
-  onOpen,
-  onOpenPerson,
-}: {
-  conversations: Conversation[]
-  onOpen: (conv: Conversation) => void
-  onOpenPerson?: (p: PersonSummary) => void
-}) {
-  const [chatSearch, setChatSearch] = useState('')
-  const qlc = chatSearch.trim().toLowerCase()
-  const rows = useMemo(() => {
-    if (!qlc) return conversations
-    return conversations.filter((c) => {
-      const name = c.name.toLowerCase()
-      const sub = c.subtitle.toLowerCase()
-      const sorted = [...c.messages].sort(compareChatMessageTime)
-      const last = sorted[sorted.length - 1]
-      const lastText = (last?.text ?? '').toLowerCase()
-      return name.includes(qlc) || sub.includes(qlc) || lastText.includes(qlc)
-    })
-  }, [conversations, qlc])
-
-  return (
-    <div className="flex flex-col h-full bg-white pt-safe-bar">
-      {/* Header — 訊息分頁：導覽＋搜尋列靜態固定，不依賴連線狀態；篩選為本地、零載入（與「點搜尋才做事情」同精神） */}
-      <div className="flex-shrink-0 px-5 pb-3">
-        <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight mb-2">聊天</h1>
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-[17px] w-[17px] -translate-y-1/2 text-slate-400"
-            aria-hidden
-          />
-          <input
-            type="search"
-            enterKeyHint="search"
-            value={chatSearch}
-            onChange={(e) => setChatSearch(e.target.value)}
-            placeholder="搜尋名稱或訊息"
-            autoComplete="off"
-            spellCheck={false}
-            style={{ fontSize: '16px' }}
-            className="w-full rounded-xl border border-transparent bg-slate-100 py-2.5 pl-[38px] pr-3 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-200 focus:bg-white focus:ring-2 focus:ring-slate-200/80"
-          />
-        </div>
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
-        {rows.length === 0 ? (
-          <p className="text-center text-slate-400 text-sm px-8 py-16 leading-relaxed">
-            {conversations.length === 0
-              ? '尚無聊天室。配對成功後會出現在這裡。'
-              : '找不到符合「' + chatSearch.trim() + '」的對話'}
-          </p>
-        ) : (
-          rows.map((conv) => {
-          const last = [...conv.messages].sort(compareChatMessageTime)[conv.messages.length - 1]
-          const unread = conv.messages.filter(
-            (m) => m.from === 'them' && !hasMyReplyAfter(m, conv.messages),
-          ).length
-          const rowKey = typeof conv.id === 'string' ? conv.id : `demo-${conv.id}`
-          const isDemo = typeof conv.id === 'number'
-          return (
-            <div
-              key={rowKey}
-              className="w-full flex items-center gap-3 px-4 py-3 border-b border-slate-50"
-            >
-              {/* Avatar — separate tap target → opens partner profile */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (isDemo) {
-                    onOpenPerson?.({
-                      id: conv.id as number, name: conv.name, initials: conv.initials,
-                      gradientFrom: conv.from, gradientTo: conv.to,
-                      company: conv.subtitle.split(' · ')[0] ?? '',
-                      role:    conv.subtitle.split(' · ')[1] ?? '',
-                      subtitle: conv.subtitle,
-                    })
-                  } else if (conv.peerUserId) {
-                    const idSlot = (Math.abs(hashFromUuid(conv.peerUserId)) % 1_000_000) + 10_000
-                    onOpenPerson?.({
-                      id: idSlot,
-                      name: conv.name,
-                      initials: conv.initials,
-                      gradientFrom: conv.from,
-                      gradientTo: conv.to,
-                      company: conv.subtitle.split(' · ')[0] ?? '',
-                      role: conv.subtitle.split(' · ')[1] ?? conv.subtitle,
-                      subtitle: conv.subtitle,
-                      peerUserId: conv.peerUserId,
-                      matchId: conv.matchId ?? String(conv.id),
-                    })
-                  }
-                }}
-                className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0 active:scale-95 transition-transform"
-                style={{ background: `linear-gradient(135deg, ${conv.from}, ${conv.to})` }}
-                aria-label={`查看 ${conv.name} 的個人檔案`}
-              >
-                {conv.initials}
-              </button>
-              {/* Rest of row — tap opens chat */}
-              <button
-                type="button"
-                onClick={() => onOpen(conv)}
-                className="flex-1 min-w-0 text-left active:bg-slate-50 transition-colors rounded-lg -mx-1 px-1 py-1"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[15px] font-semibold text-slate-900 truncate">{conv.name}</p>
-                  <span className="text-[11px] text-slate-400 flex-shrink-0">{last?.time ?? ''}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2 mt-0.5">
-                  <p className="text-[13px] text-slate-500 truncate">
-                    {last?.from === 'me' ? '你：' : ''}{last?.text ?? ''}
-                  </p>
-                  {unread > 0 && (
-                    <span className="flex-shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
-                      {unread}
-                    </span>
-                  )}
-                </div>
-              </button>
-            </div>
-          )
-        })
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ─── Chat Room View (LINE-style) ─────────────────────────────────────────────
 // 版本 0430：聊天室鍵盤遮擋僅在此元件處理（visualViewport + paddingBottom）。
 // 之後要比對／還原：git show 0430 或 git checkout 0430 -- src/screens/MainScreen.tsx
@@ -4551,95 +4417,6 @@ function ChatRoomView({
       </AnimatePresence>
     </div>
   )
-}
-
-// ─── Messages Tab — chat list ⇄ chat room ────────────────────────────────────
-
-function MessagesTab({
-  currentUserId,
-  liveConversations,
-  blurUnlockBalance,
-  onNeedSubscription,
-  refreshCredits,
-  onDemoBlurSpent,
-  onChatInputFocus,
-  onChatInputBlur,
-  requestedConversationId,
-  onConversationOpened,
-  onOpenPerson,
-  onDemoPuzzleSlotCleared,
-  onBlurUnlockSpent,
-  foregroundReloadNonce,
-  physicalChannelResubscribeNonce,
-}: {
-  currentUserId: string | null
-  liveConversations: Conversation[]
-  blurUnlockBalance: number
-  onNeedSubscription: () => void
-  refreshCredits: () => void
-  onDemoBlurSpent: () => void
-  onChatInputFocus?: () => void
-  onChatInputBlur?: () => void
-  /** Demo 為數字 id；已登入為 match uuid。 */
-  requestedConversationId?: number | string | null
-  onConversationOpened?: () => void
-  onOpenPerson?: (p: PersonSummary) => void
-  onDemoPuzzleSlotCleared?: (profileId: number, slotIndex: number) => void
-  onBlurUnlockSpent?: () => void
-  foregroundReloadNonce: number
-  /** `removeAllChannels` 後遞增：強制 teardown + 重訂閱該對話 messages channel。 */
-  physicalChannelResubscribeNonce: number
-}) {
-  const [active, setActive] = useState<Conversation | null>(null)
-
-  const chatList = currentUserId ? liveConversations : CONVERSATIONS
-
-  // Ensure keyboard-state flag clears when we leave the chat room
-  useEffect(() => {
-    if (!active) onChatInputBlur?.()
-  }, [active, onChatInputBlur])
-
-  // React to "open this conversation" requests from the parent
-  useEffect(() => {
-    if (requestedConversationId == null) return
-    const rq: number | string =
-      typeof requestedConversationId === 'string'
-        ? requestedConversationId.trim().toLowerCase()
-        : requestedConversationId
-    const conv = chatList.find((c) => {
-      if (typeof rq === 'number') return c.id === rq
-      if (typeof c.id === 'string' && c.id.trim().toLowerCase() === rq) return true
-      if (typeof c.matchId === 'string' && c.matchId.trim().toLowerCase() === rq) return true
-      return false
-    })
-    if (conv) {
-      setActive(conv)
-      onConversationOpened?.()
-    }
-  }, [requestedConversationId, chatList, onConversationOpened])
-
-  if (active) {
-    return (
-      <ChatRoomView
-        key={typeof active.id === 'string' ? active.id : `demo-${active.id}`}
-        conversation={active}
-        currentUserId={currentUserId}
-        blurUnlockBalance={blurUnlockBalance}
-        onNeedSubscription={onNeedSubscription}
-        refreshCredits={refreshCredits}
-        onDemoBlurSpent={onDemoBlurSpent}
-        onBack={() => setActive(null)}
-        onChatInputFocus={onChatInputFocus}
-        onChatInputBlur={onChatInputBlur}
-        onDemoPuzzleSlotCleared={onDemoPuzzleSlotCleared}
-        onBlurUnlockSpent={onBlurUnlockSpent}
-        foregroundReloadNonce={foregroundReloadNonce}
-        physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
-      />
-    )
-  }
-
-  return <ChatListView conversations={chatList} onOpen={setActive} onOpenPerson={onOpenPerson} />
 }
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
@@ -6518,7 +6295,7 @@ function ProfileTab({
 const NAV_ITEMS: { tab: Tab; icon: React.ElementType; label: string }[] = [
   { tab: 'discover', icon: Compass, label: '探索' },
   { tab: 'matches', icon: Heart, label: '配對' },
-  { tab: 'messages', icon: MessageCircle, label: '訊息' },
+  { tab: 'instant', icon: Zap, label: '即時配對' },
   { tab: 'profile', icon: User, label: '我的' },
 ]
 
@@ -6552,6 +6329,8 @@ export default function MainScreen({
   const [hideTabBarForChatKeyboard, setHideTabBarForChatKeyboard] = useState(false)
   const [viewingPerson, setViewingPerson] = useState<PersonSummary | null>(null)
   const [pendingChatId, setPendingChatId] = useState<number | string | null>(null)
+  /** 配對分頁內嵌一般聊天（取代獨立「訊息」分頁） */
+  const [matchesChatConversation, setMatchesChatConversation] = useState<Conversation | null>(null)
   const [liveMatchThreads, setLiveMatchThreads] = useState<Conversation[]>([])
   const [liveMatchThreadsLoading, setLiveMatchThreadsLoading] = useState(false)
   /** 給 {@link loadLiveMatchThreads} 判定是否已有 UI／session 快取——前景靜默刷新不致開全屏轉圈 */
@@ -6738,13 +6517,13 @@ export default function MainScreen({
     const rest = url.searchParams.toString()
     window.history.replaceState({}, '', url.pathname + (rest ? `?${rest}` : ''))
 
-    if (tabParam === 'discover' || tabParam === 'matches' || tabParam === 'messages' || tabParam === 'profile') {
+    if (tabParam === 'discover' || tabParam === 'matches' || tabParam === 'instant' || tabParam === 'profile') {
       setActiveTab(tabParam)
     }
 
     const openMatchRoom = (matchUuidLc: string) => {
       if (!matchUuidLc) return
-      setActiveTab('messages')
+      setActiveTab('matches')
       setPendingChatId(matchUuidLc)
     }
 
@@ -7037,7 +6816,11 @@ export default function MainScreen({
   }, [user?.id, foregroundReloadNonce, loadLiveMatchThreads])
 
   useEffect(() => {
-    if (activeTab !== 'messages') setHideTabBarForChatKeyboard(false)
+    if (activeTab !== 'matches') setHideTabBarForChatKeyboard(false)
+  }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab !== 'matches') setMatchesChatConversation(null)
   }, [activeTab])
 
   useEffect(() => {
@@ -7049,12 +6832,26 @@ export default function MainScreen({
     })
   }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
-  // "Start chat with <id>" — jump to messages tab and tell MessagesTab which
-  // conversation to auto-open. If the id isn't a known conversation yet (e.g.
-  // future case: match without messages), we'll still switch tabs.
+  useEffect(() => {
+    if (pendingChatId == null) return
+    const rq: number | string =
+      typeof pendingChatId === 'string' ? pendingChatId.trim().toLowerCase() : pendingChatId
+    const conv = liveMatchThreads.find((c) => {
+      if (typeof rq === 'number') return c.id === rq
+      if (typeof c.id === 'string' && c.id.trim().toLowerCase() === rq) return true
+      if (typeof c.matchId === 'string' && c.matchId.trim().toLowerCase() === rq) return true
+      return false
+    })
+    if (conv) {
+      setMatchesChatConversation(conv)
+      setPendingChatId(null)
+    }
+  }, [pendingChatId, liveMatchThreads])
+
+  // "Start chat with <id>" — 配對分頁內開啟聊天室
   const startChatWith = (id: number | string) => {
     setViewingPerson(null)
-    setActiveTab('messages')
+    setActiveTab('matches')
     setPendingChatId(id)
   }
 
@@ -7127,24 +6924,14 @@ export default function MainScreen({
         }}
       />
     ),
-    matches: (
-      <MatchesTab
-        currentUserId={user?.id}
-        liveConversations={liveMatchThreads}
-        liveConversationsLoading={liveMatchThreadsLoading}
-        onOpenPerson={setViewingPerson}
-        onStartChat={startChatWith}
-      />
-    ),
-    messages: (
-      <MessagesTab
+    matches: matchesChatConversation ? (
+      <ChatRoomView
+        key={typeof matchesChatConversation.id === 'string' ? matchesChatConversation.id : `demo-${matchesChatConversation.id}`}
+        conversation={matchesChatConversation}
         currentUserId={user?.id ?? null}
-        liveConversations={liveMatchThreads}
         blurUnlockBalance={creditBalance.blur_unlock}
         onNeedSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
-        foregroundReloadNonce={foregroundReloadNonce}
-        physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         onDemoBlurSpent={() =>
           setCreditBalance((b) => ({
             ...b,
@@ -7153,9 +6940,6 @@ export default function MainScreen({
         }
         onChatInputFocus={() => setHideTabBarForChatKeyboard(true)}
         onChatInputBlur={() => setHideTabBarForChatKeyboard(false)}
-        requestedConversationId={pendingChatId}
-        onConversationOpened={() => setPendingChatId(null)}
-        onOpenPerson={setViewingPerson}
         onDemoPuzzleSlotCleared={recordDemoPuzzleSlot}
         onBlurUnlockSpent={() =>
           setRewardFlash({
@@ -7164,7 +6948,29 @@ export default function MainScreen({
             subtitle: '繼續聊天累積進度',
           })
         }
+        onBack={() => setMatchesChatConversation(null)}
+        foregroundReloadNonce={foregroundReloadNonce}
+        physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
       />
+    ) : (
+      <MatchesTab
+        currentUserId={user?.id}
+        liveConversations={liveMatchThreads}
+        liveConversationsLoading={liveMatchThreadsLoading}
+        onOpenPerson={setViewingPerson}
+        onStartChat={startChatWith}
+      />
+    ),
+    instant: user?.id ? (
+      <InstantMatchTab
+        userId={user.id}
+        foregroundReloadNonce={foregroundReloadNonce}
+        onMutualFriendMatchCreated={() => void loadLiveMatchThreads('soft')}
+      />
+    ) : (
+      <div className="flex flex-col items-center justify-center h-full px-8 text-center text-sm text-slate-500">
+        請先登入以使用即時配對。
+      </div>
     ),
     profile: (
       <ProfileTab
@@ -7178,7 +6984,7 @@ export default function MainScreen({
     ),
   }
 
-  const messagesTabUnreadCount = useMemo(() => {
+  const matchesTabUnreadCount = useMemo(() => {
     return liveMatchThreads.reduce((sum, conv) => {
       const n = conv.messages.filter(
         (m) => m.from === 'them' && !hasMyReplyAfter(m, conv.messages),
@@ -7187,11 +6993,16 @@ export default function MainScreen({
     }, 0)
   }, [liveMatchThreads])
 
-  const showTabBar = !(activeTab === 'messages' && hideTabBarForChatKeyboard)
+  const showTabBar = !(activeTab === 'matches' && matchesChatConversation && hideTabBarForChatKeyboard)
+
+  const suppressTopChrome = activeTab === 'instant' || (activeTab === 'matches' && matchesChatConversation != null)
+
+  /** 配對內開聊天／即時頁自用頂區：外殼不重複長條 header */
+  const mainOverflowHidden = suppressTopChrome && activeTab === 'matches'
 
   return (
     <div className="max-w-md mx-auto w-full flex-1 flex flex-col min-h-0 bg-white">
-      {activeTab !== 'messages' && (
+      {!suppressTopChrome && (
         <div className="flex-none flex items-center px-4 pb-3 pt-safe-bar border-b border-gray-200 bg-white">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
@@ -7220,13 +7031,13 @@ export default function MainScreen({
         ref={contentScrollRef}
         className={cn(
           'flex-1 min-h-0',
-          activeTab === 'messages' ? 'overflow-hidden' : 'overflow-y-auto',
+          mainOverflowHidden ? 'overflow-hidden' : 'overflow-y-auto',
         )}
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
         <AnimatePresence mode="wait">
           <motion.div
-            key={activeTab}
+            key={`${activeTab}-${activeTab === 'matches' ? (matchesChatConversation ? `chat:${matchesChatConversation.matchId ?? matchesChatConversation.id}` : 'list') : ''}`}
             className="h-full flex flex-col"
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
@@ -7278,9 +7089,9 @@ export default function MainScreen({
                 )}
                 <span className="relative inline-flex">
                   <Icon className={cn('w-5 h-5 transition-colors', activeTab === tab ? 'text-slate-900' : 'text-slate-400')} />
-                  {tab === 'messages' && messagesTabUnreadCount > 0 && (
+                  {tab === 'matches' && matchesTabUnreadCount > 0 && (
                     <span className="absolute -right-1.5 -top-1 min-w-[15px] h-3.5 px-[3px] rounded-full bg-rose-500 text-[9px] font-bold leading-none text-white flex items-center justify-center tabular-nums">
-                      {messagesTabUnreadCount > 99 ? '99+' : messagesTabUnreadCount}
+                      {matchesTabUnreadCount > 99 ? '99+' : matchesTabUnreadCount}
                     </span>
                   )}
                 </span>
@@ -7293,7 +7104,7 @@ export default function MainScreen({
         </nav>
       )}
 
-      {/* Partner profile overlay — shared by Matches & Messages taps */}
+      {/* Partner profile overlay — shared by 配對列表等 */}
       <AnimatePresence>
         {viewingPerson && (
           <PersonDetailView

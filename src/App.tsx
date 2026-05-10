@@ -63,13 +63,15 @@ function readPreferredMainShellTab(): MainScreenTab | null {
   if (typeof window === 'undefined') return null
   try {
     const t = new URLSearchParams(window.location.search).get('tab')
-    if (t === 'discover' || t === 'matches' || t === 'messages' || t === 'profile') return t
+    if (t === 'messages') return 'matches'
+    if (t === 'discover' || t === 'matches' || t === 'instant' || t === 'profile') return t
   } catch {
     /* ignore */
   }
   try {
     const t = sessionStorage.getItem(SESSION_LAST_MAIN_TAB_KEY)
-    if (t === 'discover' || t === 'matches' || t === 'messages' || t === 'profile') return t
+    if (t === 'messages') return 'matches'
+    if (t === 'discover' || t === 'matches' || t === 'instant' || t === 'profile') return t
   } catch {
     /* ignore */
   }

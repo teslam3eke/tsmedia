@@ -25,7 +25,7 @@ function buildOpenUrlForAppNotification(record: {
   if (record.id) p.set('notif', record.id)
   const kind = record.kind ?? ''
   if (kind === 'message_received') {
-    p.set('tab', 'messages')
+    p.set('tab', 'matches')
     if (record.ref_match_id) p.set('match', record.ref_match_id)
   } else if (kind === 'super_like_received') {
     p.set('tab', 'discover')

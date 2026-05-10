@@ -69,10 +69,10 @@
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "我的訊息",
-      "short_name": "訊息",
-      "description": "查看配對訊息",
-      "url": "/?tab=messages&utm_source=pwa_shortcut",
+      "name": "我的配對",
+      "short_name": "配對",
+      "description": "配對對象與聊天",
+      "url": "/?tab=matches&utm_source=pwa_shortcut",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]

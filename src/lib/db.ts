@@ -1078,7 +1078,7 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
   return (data ?? []) as MatchRow[]
 }
 
-type RealtimeSubscribeLabel = 'matches' | 'messages'
+type RealtimeSubscribeLabel = 'matches' | 'messages' | 'instant_session_messages'
 
 /** 任一頻道本地重建與時間錯開，降低與全域 wake 同一幀 teardown 競態（Console 會噴連線在半開又被關）。 */
 let lastRealtimeChannelLocalRecycleTs = 0
@@ -1350,6 +1350,102 @@ export async function simulatePartnerMatchMessage(matchId: string, body?: string
     return { ok: false, error: error.message }
   }
   return { ok: true, message: data as MessageRow }
+}
+
+// ─── 即時配對（7 分鐘房） ─────────────────────────────────────────────────────
+
+export type InstantMatchPollResult =
+  | { status: 'waiting'; hint?: string }
+  | {
+      status: 'in_session'
+      phase: 'chat' | 'decide' | 'mutual_friend' | 'closed'
+      session_id: string
+      peer_user_id: string
+      created_at: string
+      chat_ends_at: string
+      decision_a: string
+      decision_b: string
+    }
+  | {
+      status: 'done'
+      session_id: string
+      promoted_match_id: string
+      mutual_friend: boolean
+    }
+
+export async function instantMatchPoll(): Promise<InstantMatchPollResult | null> {
+  const { data, error } = await (supabase as any).rpc('instant_match_poll')
+  if (error) {
+    console.error('[db] instantMatchPoll', error.message)
+    return null
+  }
+  return data as InstantMatchPollResult
+}
+
+export async function instantMatchLeaveQueue(): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await (supabase as any).rpc('instant_match_leave_queue')
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export type InstantSessionMessageRow = {
+  id: string
+  session_id: string
+  sender_id: string
+  body: string
+  created_at: string
+}
+
+export async function getInstantSessionMessages(sessionId: string): Promise<InstantSessionMessageRow[] | null> {
+  const { data, error } = await supabase
+    .from('instant_session_messages')
+    .select('id,session_id,sender_id,body,created_at')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('[db] getInstantSessionMessages', error.message)
+    return null
+  }
+  return (data ?? []) as InstantSessionMessageRow[]
+}
+
+export async function sendInstantSessionMessage(sessionId: string, body: string): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const { data, error } = await (supabase as any).rpc('instant_session_send_message', {
+    p_session_id: sessionId,
+    p_body: body,
+  })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, id: data as string }
+}
+
+export async function instantSessionDecide(
+  sessionId: string,
+  choice: 'friend' | 'pass',
+): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
+  const { data, error } = await (supabase as any).rpc('instant_session_decide', {
+    p_session_id: sessionId,
+    p_choice: choice,
+  })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data: data as Record<string, unknown> }
+}
+
+export function subscribeToInstantSessionMessages(sessionId: string, onInsert: (row: InstantSessionMessageRow) => void): () => void {
+  return subscribePostgresChannelWithBackoff('instant_session_messages', () =>
+    supabase.channel(`instant-sess-msg:${sessionId}`).on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'instant_session_messages',
+        filter: `session_id=eq.${sessionId}`,
+      },
+      (payload) => {
+        onInsert(payload.new as InstantSessionMessageRow)
+      },
+    ),
+  )
 }
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
