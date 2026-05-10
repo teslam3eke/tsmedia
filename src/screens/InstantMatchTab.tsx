@@ -192,15 +192,7 @@ export default function InstantMatchTab({
 
   const peerDisplay = peer?.nickname?.trim() || peer?.name?.trim() || '神秘對象'
 
-  if (!pollReady) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full px-8 pt-safe-bar">
-        <div className="w-9 h-9 rounded-full border-2 border-slate-200 border-t-slate-600 animate-spin mb-3" />
-        <p className="text-xs text-slate-500 font-medium">準備即時配對…</p>
-      </div>
-    )
-  }
-
+  /** 必須在 `pollReady` 早期 return 之前宣告：否則 poll 完成後 hooks 數量變化會違反 Rules of Hooks（畫面空白／崩潰）。 */
   const teaserPhotoUrls = useMemo(
     () =>
       peer?.photo_urls?.filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS) ?? [],
@@ -220,8 +212,16 @@ export default function InstantMatchTab({
       cancelled = true
     }
   }, [teaserPhotoUrls])
-
   const mainTeaserUrl = resolvedTeaserUrls[0]
+
+  if (!pollReady) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full px-8 pt-safe-bar">
+        <div className="w-9 h-9 rounded-full border-2 border-slate-200 border-t-slate-600 animate-spin mb-3" />
+        <p className="text-xs text-slate-500 font-medium">準備即時配對…</p>
+      </div>
+    )
+  }
 
   if (!snapshot || snapshot.status === 'waiting') {
     return (
