@@ -6845,6 +6845,10 @@ export default function MainScreen({
     onSignOut?.()
   }
 
+  const notifyInstantMutualFriendMatch = useCallback(() => {
+    void loadLiveMatchThreads('soft')
+  }, [loadLiveMatchThreads])
+
   const tabContent: Record<Tab, React.ReactNode> = {
     discover: (
       <DiscoverTab
@@ -6911,7 +6915,7 @@ export default function MainScreen({
       <InstantMatchTab
         userId={user.id}
         foregroundReloadNonce={foregroundReloadNonce}
-        onMutualFriendMatchCreated={() => void loadLiveMatchThreads('soft')}
+        onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
       />
     ) : (
       <div className="flex flex-col items-center justify-center h-full px-8 text-center text-sm text-slate-500">

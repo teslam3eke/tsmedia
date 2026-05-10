@@ -34,6 +34,9 @@ export default function InstantMatchTab({
   foregroundReloadNonce,
   onMutualFriendMatchCreated,
 }: Props) {
+  const onMutualFriendMatchCreatedRef = useRef(onMutualFriendMatchCreated)
+  onMutualFriendMatchCreatedRef.current = onMutualFriendMatchCreated
+
   const [busy, setBusy] = useState(false)
   const [pollError, setPollError] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<InstantMatchPollResult | null>(null)
@@ -56,7 +59,7 @@ export default function InstantMatchTab({
     let cancelled = false
     async function poke() {
       if (doneHoldRef.current) return
-      const res = await instantMatchPoll()
+      const res = await instantMatchPoll({ enqueue: false })
       if (cancelled) return
       setPollReady(true)
       if (!res.ok) {
@@ -67,7 +70,7 @@ export default function InstantMatchTab({
       const r = res.data
       setSnapshot((prev) => {
         if (prev?.status === 'done') return prev
-        if (r.status === 'done' && r.mutual_friend) onMutualFriendMatchCreated?.()
+        if (r.status === 'done' && r.mutual_friend) onMutualFriendMatchCreatedRef.current?.()
         if (r.status === 'done') doneHoldRef.current = true
         return r
       })
@@ -78,7 +81,7 @@ export default function InstantMatchTab({
       cancelled = true
       clearInterval(id)
     }
-  }, [userId, foregroundReloadNonce, onMutualFriendMatchCreated])
+  }, [userId, foregroundReloadNonce])
 
   useEffect(() => {
     setSnapshot(null)
@@ -159,7 +162,7 @@ export default function InstantMatchTab({
     setBusy(true)
     setPollError(null)
     try {
-      const res = await instantMatchPoll()
+      const res = await instantMatchPoll({ enqueue: true })
       if (res.ok) setSnapshot(res.data)
       else setPollError(res.error)
     } finally {
@@ -170,7 +173,7 @@ export default function InstantMatchTab({
   const leaveQueueClick = async () => {
     setBusy(true)
     await instantMatchLeaveQueue()
-    const res = await instantMatchPoll()
+    const res = await instantMatchPoll({ enqueue: false })
     if (res.ok) {
       setPollError(null)
       setSnapshot(res.data)
@@ -230,7 +233,7 @@ export default function InstantMatchTab({
     )
   }
 
-  if (!snapshot || snapshot.status === 'waiting') {
+  if (!snapshot || snapshot.status === 'idle') {
     return (
       <div className="flex flex-col h-full px-5 pt-safe-bar pb-6">
         <div className="pt-4 pb-2">
@@ -243,7 +246,8 @@ export default function InstantMatchTab({
           <div className="rounded-3xl bg-gradient-to-br from-violet-50 to-indigo-50 ring-1 ring-violet-100 p-6 text-center space-y-2">
             <Users className="w-11 h-11 mx-auto text-violet-500" aria-hidden />
             <p className="text-sm font-bold text-slate-800">
-              {snapshot?.hint ?? '排進虛擬大廳，系統自動湊對兩位在線使用者。'}
+              {snapshot?.hint ??
+                '請按下方「開始配對」加入等候列（不會自動幫你排隊）；需另一位使用者同時在等待才會進房。'}
             </p>
           </div>
           {pollError && <p className="text-center text-xs text-red-600 font-medium">{pollError}</p>}
@@ -254,6 +258,36 @@ export default function InstantMatchTab({
             className="w-full rounded-2xl bg-slate-900 text-white font-black py-3.5 disabled:opacity-50"
           >
             {busy ? '處理中…' : '開始配對'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (snapshot.status === 'waiting') {
+    return (
+      <div className="flex flex-col h-full px-5 pt-safe-bar pb-6">
+        <div className="pt-4 pb-2">
+          <h1 className="text-[22px] font-black text-slate-900 tracking-tight">即時配對</h1>
+          <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+            你已加入等候——系統會約每 3 秒自動同步並嘗試與另一位在線使用者配對。
+          </p>
+        </div>
+        <div className="flex-1 flex flex-col justify-center gap-4">
+          <div className="rounded-3xl bg-gradient-to-br from-violet-50 to-indigo-50 ring-1 ring-violet-100 p-6 text-center space-y-2">
+            <Users className="w-11 h-11 mx-auto text-violet-500" aria-hidden />
+            <p className="text-sm font-bold text-slate-800">
+              {snapshot.hint ?? '佇列中，配對成功後會自動進入聊天室。'}
+            </p>
+          </div>
+          {pollError && <p className="text-center text-xs text-red-600 font-medium">{pollError}</p>}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void startQueue()}
+            className="w-full rounded-2xl bg-slate-900 text-white font-black py-3.5 disabled:opacity-50"
+          >
+            {busy ? '同步中…' : '排隊中（手動同步）'}
           </button>
           <button
             type="button"
@@ -283,7 +317,7 @@ export default function InstantMatchTab({
           onClick={() => {
             doneHoldRef.current = false
             setSnapshot(null)
-            void instantMatchPoll().then((res) => {
+            void instantMatchPoll({ enqueue: false }).then((res) => {
               if (res.ok) {
                 setPollError(null)
                 setSnapshot(res.data)
@@ -414,7 +448,7 @@ export default function InstantMatchTab({
                     const res = await instantSessionDecide(sessionId, 'friend')
                     if (!res.ok) setPollError(res.error ?? '')
                     else onMutualFriendMatchCreated?.()
-                    const resPoll = await instantMatchPoll()
+                    const resPoll = await instantMatchPoll({ enqueue: false })
                     if (resPoll.ok) setSnapshot(resPoll.data)
                     else setPollError(resPoll.error)
                   })()
@@ -429,7 +463,7 @@ export default function InstantMatchTab({
                   void (async () => {
                     const res = await instantSessionDecide(sessionId, 'pass')
                     if (!res.ok) setPollError(res.error ?? '')
-                    const resPoll = await instantMatchPoll()
+                    const resPoll = await instantMatchPoll({ enqueue: false })
                     if (resPoll.ok) setSnapshot(resPoll.data)
                     else setPollError(resPoll.error)
                   })()

@@ -1355,6 +1355,7 @@ export async function simulatePartnerMatchMessage(matchId: string, body?: string
 // ─── 即時配對（7 分鐘房） ─────────────────────────────────────────────────────
 
 export type InstantMatchPollResult =
+  | { status: 'idle'; hint?: string }
   | { status: 'waiting'; hint?: string }
   | {
       status: 'in_session'
@@ -1429,8 +1430,14 @@ function mapInstantMatchPollFailure(err: {
   return '無法取得配對狀態。'
 }
 
-export async function instantMatchPoll(): Promise<InstantMatchPollResponse> {
-  const { data, error } = await (supabase as any).rpc('instant_match_poll')
+/**
+ * @param opts.enqueue `true`：寫入／維持等候列並執行撮合（按「開始配對」時）。
+ *   `false`：僅查狀態，不強制入列（背景輪詢、離開佇列後）。
+ */
+export async function instantMatchPoll(opts: { enqueue: boolean }): Promise<InstantMatchPollResponse> {
+  const { data, error } = await (supabase as any).rpc('instant_match_poll', {
+    p_enqueue: opts.enqueue,
+  })
   if (error) {
     console.error('[db] instantMatchPoll', error.code, error.message, error.details, error.hint)
     return { ok: false, error: mapInstantMatchPollFailure(error) }
