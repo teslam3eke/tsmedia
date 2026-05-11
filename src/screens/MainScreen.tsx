@@ -37,6 +37,7 @@ import {
   getMyMatches, getMatchMessages, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches,
+  instantMatchLeaveQueue,
 } from '@/lib/db'
 import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
@@ -6262,6 +6263,58 @@ export default function MainScreen({
 }) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const prevTab = useRef<Tab>('discover')
+  const activeTabRef = useRef<Tab>(initialTab ?? 'discover')
+  activeTabRef.current = activeTab
+
+  /** 即時配對「排隊中」時，攔截切到其他分頁／開聊天等導離行為並先確認 */
+  const [instantQueueWaiting, setInstantQueueWaiting] = useState(false)
+  const instantQueueWaitingRef = useRef(false)
+  useEffect(() => {
+    instantQueueWaitingRef.current = instantQueueWaiting
+  }, [instantQueueWaiting])
+  /** 使用者確認離開 queue 後、換頁完成前：避免 InstantMatchTab 仍以舊 snapshot 回報 waiting=true */
+  const instantWaitingReportLockRef = useRef(false)
+  useEffect(() => {
+    if (activeTab !== 'instant') {
+      instantWaitingReportLockRef.current = false
+    }
+  }, [activeTab])
+  const handleInstantWaitingStateChange = useCallback((waiting: boolean) => {
+    if (waiting && instantWaitingReportLockRef.current) return
+    setInstantQueueWaiting(waiting)
+  }, [])
+  const [instantLeaveGuardOpen, setInstantLeaveGuardOpen] = useState(false)
+  const pendingInstantNavTabRef = useRef<Tab | null>(null)
+
+  const blockInstantNavIfWaiting = useCallback((target: Tab): boolean => {
+    if (activeTabRef.current !== 'instant' || !instantQueueWaitingRef.current || target === 'instant') {
+      return false
+    }
+    pendingInstantNavTabRef.current = target
+    setInstantLeaveGuardOpen(true)
+    return true
+  }, [])
+
+  const dismissInstantLeaveGuard = useCallback(() => {
+    pendingInstantNavTabRef.current = null
+    setInstantLeaveGuardOpen(false)
+  }, [])
+
+  const confirmInstantLeaveGuard = useCallback(async () => {
+    const next = pendingInstantNavTabRef.current
+    pendingInstantNavTabRef.current = null
+    instantWaitingReportLockRef.current = true
+    setInstantLeaveGuardOpen(false)
+    setInstantQueueWaiting(false)
+    instantQueueWaitingRef.current = false
+    await instantMatchLeaveQueue()
+    if (next != null) {
+      prevTab.current = activeTabRef.current
+      setActiveTab(next)
+    } else {
+      instantWaitingReportLockRef.current = false
+    }
+  }, [])
   /** 給桌機自動整頁重載／冷啟還原分頁（與 App `readPreferredMainShellTab` 同 key） */
   useEffect(() => {
     try {
@@ -6464,11 +6517,14 @@ export default function MainScreen({
     window.history.replaceState({}, '', url.pathname + (rest ? `?${rest}` : ''))
 
     if (tabParam === 'discover' || tabParam === 'matches' || tabParam === 'instant' || tabParam === 'profile') {
-      setActiveTab(tabParam)
+      if (!blockInstantNavIfWaiting(tabParam)) {
+        setActiveTab(tabParam)
+      }
     }
 
     const openMatchRoom = (matchUuidLc: string) => {
       if (!matchUuidLc) return
+      if (blockInstantNavIfWaiting('matches')) return
       setActiveTab('matches')
       setPendingChatId(matchUuidLc)
     }
@@ -6501,7 +6557,7 @@ export default function MainScreen({
         }
       })()
     }
-  }, [user?.id])
+  }, [user?.id, blockInstantNavIfWaiting])
 
   useEffect(() => {
     consumeUrlPushDeepLink()
@@ -6796,6 +6852,7 @@ export default function MainScreen({
 
   // "Start chat with <id>" — 配對分頁內開啟聊天室
   const startChatWith = (id: number | string) => {
+    if (blockInstantNavIfWaiting('matches')) return
     setViewingPerson(null)
     setActiveTab('matches')
     setPendingChatId(id)
@@ -6916,6 +6973,7 @@ export default function MainScreen({
         userId={user.id}
         foregroundReloadNonce={foregroundReloadNonce}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
+        onWaitingStateChange={handleInstantWaitingStateChange}
       />
     ) : (
       <div className="flex flex-col items-center justify-center h-full px-8 text-center text-sm text-slate-500">
@@ -7013,6 +7071,7 @@ export default function MainScreen({
                 type="button"
                 onClick={() => {
                   const targetTab = tab
+                  if (blockInstantNavIfWaiting(targetTab)) return
                   if (user?.id && targetTab === 'discover') {
                     // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
                     void getProfile(user.id).then((profile) => {
@@ -7064,6 +7123,56 @@ export default function MainScreen({
             onClose={() => setViewingPerson(null)}
             onStartChat={startChatWith}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {instantLeaveGuardOpen && (
+          <motion.div
+            key="instant-queue-leave-guard"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="instant-leave-title"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[320] flex items-end justify-center bg-black/50 px-4 pb-safe pt-10 sm:items-center sm:pb-8"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) dismissInstantLeaveGuard()
+            }}
+          >
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 14, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+              className="mb-4 w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-xl ring-1 ring-black/[0.04] sm:mb-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="instant-leave-title" className="text-base font-bold text-slate-900">
+                離開將中斷排隊
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                離開「即時配對」頁面會取消目前的等候。確定要離開嗎？
+              </p>
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
+                <button
+                  type="button"
+                  className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white sm:w-auto sm:min-w-[7rem]"
+                  onClick={() => void confirmInstantLeaveGuard()}
+                >
+                  確定離開
+                </button>
+                <button
+                  type="button"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 sm:w-auto sm:min-w-[7rem]"
+                  onClick={dismissInstantLeaveGuard}
+                >
+                  繼續等候
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

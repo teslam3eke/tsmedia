@@ -34,6 +34,8 @@ type Props = {
   userId: string
   foregroundReloadNonce: number
   onMutualFriendMatchCreated?: () => void
+  /** 通知主殼是否在「排隊中」，以便切 tab 時跳出離開確認 */
+  onWaitingStateChange?: (waiting: boolean) => void
 }
 
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
@@ -73,13 +75,13 @@ function MatchingPulseVisual() {
             style={{ width: 56, height: 56 }}
             initial={{ opacity: 0.5 }}
             animate={{ scale: [1, 2.85], opacity: [0.5, 0] }}
-            transition={{ duration: 2.05, repeat: Infinity, delay: i * 0.68, ease: 'easeOut' }}
+            transition={{ duration: 4.6, repeat: Infinity, delay: i * 1.45, ease: 'easeOut' }}
           />
         ))}
         <motion.div
           className="relative z-[1] flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md"
-          animate={{ scale: [1, 1.07, 1] }}
-          transition={{ duration: 1.1, repeat: Infinity, ease: 'easeInOut' }}
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
           aria-hidden
         >
           <Users className="h-8 w-8" strokeWidth={2} />
@@ -94,7 +96,7 @@ function MatchingPulseVisual() {
           className="absolute inset-y-0 w-[42%] rounded-full bg-slate-800"
           initial={{ left: '-42%' }}
           animate={{ left: '100%' }}
-          transition={{ duration: 1.05, repeat: Infinity, ease: 'linear' }}
+          transition={{ duration: 2.6, repeat: Infinity, ease: 'linear' }}
         />
       </div>
     </div>
@@ -109,7 +111,7 @@ function WaitingDots() {
           key={i}
           className="inline-block h-1 w-1 rounded-full bg-slate-800"
           animate={{ opacity: [0.2, 1, 0.2], y: [0, -3, 0] }}
-          transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.2 }}
+          transition={{ duration: 1.55, repeat: Infinity, delay: i * 0.35 }}
         />
       ))}
     </span>
@@ -147,6 +149,7 @@ export default function InstantMatchTab({
   userId,
   foregroundReloadNonce,
   onMutualFriendMatchCreated,
+  onWaitingStateChange,
 }: Props) {
   const onMutualFriendMatchCreatedRef = useRef(onMutualFriendMatchCreated)
   onMutualFriendMatchCreatedRef.current = onMutualFriendMatchCreated
@@ -161,6 +164,17 @@ export default function InstantMatchTab({
   const [teaserTiles, setTeaserTiles] = useState<number[]>([])
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [pollReady, setPollReady] = useState(false)
+
+  useEffect(() => {
+    const waiting = !!(pollReady && snapshot?.status === 'waiting')
+    onWaitingStateChange?.(waiting)
+  }, [pollReady, snapshot, onWaitingStateChange])
+
+  useEffect(() => {
+    return () => {
+      onWaitingStateChange?.(false)
+    }
+  }, [onWaitingStateChange])
 
   useInstantQueueExitOnLeave(snapshot, setSnapshot)
 
