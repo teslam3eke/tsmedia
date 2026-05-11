@@ -14,6 +14,7 @@ import {
   type SetStateAction,
 } from 'react'
 import { motion } from 'framer-motion'
+import { createPortal } from 'react-dom'
 import { Heart, Send, Timer, Users, DoorOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ProfileRow } from '@/lib/types'
@@ -42,6 +43,19 @@ type Props = {
 }
 
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
+
+/** 「我知道了」後 DB 仍會回傳同場次的 done——略過並顯示 idle，避免馬上跳出結束頁 */
+function applyDismissedSessionFilter(
+  data: InstantMatchPollResult,
+  dismissedIds: ReadonlySet<string>,
+): InstantMatchPollResult {
+  if (data.status !== 'done') return data
+  if (!data.session_id || !dismissedIds.has(data.session_id)) return data
+  return {
+    status: 'idle',
+    hint: '尚未加入等候。點「開始配對」加入；需同時有另一位使用者也在等候才會開房。',
+  }
+}
 
 /** 與探索／配對列表一致：白底、灰框、輕陰影 */
 function InstantCard({ children, className }: { children: ReactNode; className?: string }) {
@@ -210,14 +224,24 @@ export default function InstantMatchTab({
   const [pollReady, setPollReady] = useState(false)
 
   const doneHoldRef = useRef(false)
+  /** 使用者已對該场次按「我知道了」——後續 poll 仍會帶舊 done，過濾成 idle */
+  const dismissedInstantSessionIdsRef = useRef<Set<string>>(new Set())
 
-  const ingestPollOk = useCallback((r: InstantMatchPollResult) => {
+  const ingestPollOk = useCallback((raw: InstantMatchPollResult) => {
+    const data = applyDismissedSessionFilter(raw, dismissedInstantSessionIdsRef.current)
     setPollError(null)
     setSnapshot((prev) => {
-      if (prev?.status === 'done') return prev
-      if (r.status === 'done' && r.mutual_friend) onMutualFriendMatchCreatedRef.current?.()
-      if (r.status === 'done') doneHoldRef.current = true
-      return r
+      if (
+        prev?.status === 'done' &&
+        data.status === 'done' &&
+        prev.session_id === data.session_id
+      ) {
+        return prev
+      }
+      if (data.status === 'done' && data.mutual_friend) onMutualFriendMatchCreatedRef.current?.()
+      if (data.status === 'done') doneHoldRef.current = true
+      else doneHoldRef.current = false
+      return data
     })
   }, [])
 
@@ -278,6 +302,7 @@ export default function InstantMatchTab({
     setPollError(null)
     setPollReady(false)
     doneHoldRef.current = false
+    dismissedInstantSessionIdsRef.current.clear()
   }, [userId])
 
   const inSession = snapshot?.status === 'in_session' ? snapshot : null
@@ -357,7 +382,8 @@ export default function InstantMatchTab({
     setPollError(null)
     try {
       const res = await instantMatchPoll({ enqueue: true })
-      if (res.ok) setSnapshot(res.data)
+      if (res.ok)
+        setSnapshot(applyDismissedSessionFilter(res.data, dismissedInstantSessionIdsRef.current))
       else setPollError(res.error)
     } finally {
       setBusy(false)
@@ -370,7 +396,7 @@ export default function InstantMatchTab({
     const res = await instantMatchPoll({ enqueue: false })
     if (res.ok) {
       setPollError(null)
-      setSnapshot(res.data)
+      setSnapshot(applyDismissedSessionFilter(res.data, dismissedInstantSessionIdsRef.current))
     } else {
       setPollError(res.error)
     }
@@ -522,12 +548,17 @@ export default function InstantMatchTab({
             type="button"
             className="rounded-2xl bg-slate-900 px-10 py-3.5 text-sm font-bold text-white"
             onClick={() => {
+              dismissedInstantSessionIdsRef.current.add(snapshot.session_id)
               doneHoldRef.current = false
               setSnapshot(null)
               void instantMatchPoll({ enqueue: false }).then((res) => {
                 if (res.ok) {
                   setPollError(null)
-                  setSnapshot(res.data)
+                  const next = applyDismissedSessionFilter(
+                    res.data,
+                    dismissedInstantSessionIdsRef.current,
+                  )
+                  setSnapshot(next)
                 } else {
                   setPollError(res.error)
                 }
@@ -641,53 +672,69 @@ export default function InstantMatchTab({
           </div>
         </div>
 
-        {showDecide && sessionId && (
-          <div className="fixed inset-0 z-40 flex flex-col justify-end bg-black/55 px-4 pb-safe backdrop-blur-[3px]">
-            <motion.div
-              initial={{ y: 28, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-              className="mx-auto mb-10 w-full max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-xl ring-1 ring-black/[0.06]"
+        {showDecide &&
+          sessionId &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[350] flex flex-col justify-end bg-black/55 px-4 backdrop-blur-[3px]"
+              role="presentation"
+              style={{
+                /* 與 MainScreen 底欄 `h-[60px]` + `env(safe-area-inset-bottom)` 對齊，避免按鈕被蓋住 */
+                paddingBottom: 'calc(60px + env(safe-area-inset-bottom, 0px) + 14px)',
+                paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))',
+              }}
             >
-              <p className="mb-1 text-center text-base font-black text-slate-900">這場七分鐘到了</p>
-              <p className="mb-6 text-center text-xs leading-relaxed text-slate-500">
-                只有你們兩個都選「加為好友」，才會出現在彼此的配對名單裡繼續聊。
-              </p>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  className="w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white"
-                  onClick={() =>
-                    void (async () => {
-                      const res = await instantSessionDecide(sessionId, 'friend')
-                      if (!res.ok) setPollError(res.error ?? '')
-                      const resPoll = await instantMatchPoll({ enqueue: false })
-                      if (resPoll.ok) ingestPollOk(resPoll.data)
-                      else setPollError(resPoll.error)
-                    })()
-                  }
-                >
-                  加為好友
-                </button>
-                <button
-                  type="button"
-                  className="w-full rounded-2xl border border-gray-200 bg-white py-3 text-sm font-bold text-slate-800"
-                  onClick={() =>
-                    void (async () => {
-                      const res = await instantSessionDecide(sessionId, 'pass')
-                      if (!res.ok) setPollError(res.error ?? '')
-                      const resPoll = await instantMatchPoll({ enqueue: false })
-                      if (resPoll.ok) ingestPollOk(resPoll.data)
-                      else setPollError(resPoll.error)
-                    })()
-                  }
-                >
-                  江湖再見
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+              <motion.div
+                initial={{ y: 28, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                className="mx-auto w-full max-w-md rounded-3xl border border-gray-200 bg-white p-5 shadow-xl ring-1 ring-black/[0.06]"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="instant-decide-title"
+              >
+                <p id="instant-decide-title" className="mb-1 text-center text-base font-black text-slate-900">
+                  時間結束，下一步？
+                </p>
+                <p className="mb-5 text-center text-xs leading-relaxed text-slate-500">
+                  只有雙方都選「加為好友」，才會出現在彼此的配對名單裡繼續聊天。
+                </p>
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white"
+                    onClick={() =>
+                      void (async () => {
+                        const res = await instantSessionDecide(sessionId, 'friend')
+                        if (!res.ok) setPollError(res.error ?? '')
+                        const resPoll = await instantMatchPoll({ enqueue: false })
+                        if (resPoll.ok) ingestPollOk(resPoll.data)
+                        else setPollError(resPoll.error)
+                      })()
+                    }
+                  >
+                    加為好友
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl border border-gray-200 bg-white py-3.5 text-sm font-bold text-slate-800"
+                    onClick={() =>
+                      void (async () => {
+                        const res = await instantSessionDecide(sessionId, 'pass')
+                        if (!res.ok) setPollError(res.error ?? '')
+                        const resPoll = await instantMatchPoll({ enqueue: false })
+                        if (resPoll.ok) ingestPollOk(resPoll.data)
+                        else setPollError(resPoll.error)
+                      })()
+                    }
+                  >
+                    不加好友
+                  </button>
+                </div>
+              </motion.div>
+            </div>,
+            document.body,
+          )}
       </div>
     </div>
   )
