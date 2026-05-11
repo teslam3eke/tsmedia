@@ -310,6 +310,9 @@ export default function InstantMatchTab({
   const doneHoldRef = useRef(false)
   /** 使用者已對該场次按「我知道了」——後續 poll 仍會帶舊 done，過濾成 idle */
   const dismissedInstantSessionIdsRef = useRef<Set<string>>(new Set())
+  /** 僅在「等候中」輪詢送 p_enqueue=true，避免僅開分頁之 enqueue:false 清列／刷新誤撮合（見 migration 053）。 */
+  const pollEnqueueWhileWaitingRef = useRef(false)
+  const busyRef = useRef(false)
 
   const ingestPollOk = useCallback((raw: InstantMatchPollResult) => {
     const data = applyDismissedSessionFilter(raw, dismissedInstantSessionIdsRef.current)
@@ -328,6 +331,14 @@ export default function InstantMatchTab({
       return data
     })
   }, [])
+
+  useEffect(() => {
+    pollEnqueueWhileWaitingRef.current = snapshot?.status === 'waiting'
+  }, [snapshot?.status])
+
+  useEffect(() => {
+    busyRef.current = busy
+  }, [busy])
 
   useEffect(() => {
     const waiting = !!(pollReady && snapshot?.status === 'waiting')
@@ -351,7 +362,9 @@ export default function InstantMatchTab({
     let cancelled = false
     async function poke() {
       if (doneHoldRef.current) return
-      const res = await instantMatchPoll({ enqueue: false })
+      if (busyRef.current) return
+      const enqueue = pollEnqueueWhileWaitingRef.current
+      const res = await instantMatchPoll({ enqueue })
       if (cancelled) return
       setPollReady(true)
       if (!res.ok) {
@@ -370,7 +383,9 @@ export default function InstantMatchTab({
 
   const pullInstantPoll = useCallback(async () => {
     if (doneHoldRef.current) return
-    const res = await instantMatchPoll({ enqueue: false })
+    if (busyRef.current) return
+    const enqueue = pollEnqueueWhileWaitingRef.current
+    const res = await instantMatchPoll({ enqueue })
     setPollReady(true)
     if (!res.ok) {
       setPollError(res.error)
@@ -387,6 +402,7 @@ export default function InstantMatchTab({
     setPollError(null)
     setPollReady(false)
     doneHoldRef.current = false
+    pollEnqueueWhileWaitingRef.current = false
     dismissedInstantSessionIdsRef.current = loadDismissedFromStorage(userId)
   }, [userId])
 
@@ -467,9 +483,10 @@ export default function InstantMatchTab({
     setPollError(null)
     try {
       const res = await instantMatchPoll({ enqueue: true })
-      if (res.ok)
+      if (res.ok) {
+        if (res.data.status === 'waiting') pollEnqueueWhileWaitingRef.current = true
         setSnapshot(applyDismissedSessionFilter(res.data, dismissedInstantSessionIdsRef.current))
-      else setPollError(res.error)
+      } else setPollError(res.error)
     } finally {
       setBusy(false)
     }
