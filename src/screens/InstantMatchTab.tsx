@@ -200,7 +200,9 @@ function useInstantTabLifecycleExit(
       void abandonSessionIfActive()
     }
 
-    const onPageHide = () => {
+    const onPageHide = (e: Event) => {
+      const ev = e as PageTransitionEvent
+      if (ev.persisted) return // 進入 BFCache／預載存留，不把排隊視為離開頁面
       void flushQueueIfWaiting()
       void abandonSessionIfActive()
     }
@@ -212,20 +214,17 @@ function useInstantTabLifecycleExit(
     }
 
     document.addEventListener('visibilitychange', onHidden)
-    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('pagehide', onPageHide as EventListener)
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
       document.removeEventListener('visibilitychange', onHidden)
-      window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('pagehide', onPageHide as EventListener)
       window.removeEventListener('beforeunload', onBeforeUnload)
-      const st = snapshotRef.current
-      if (st?.status === 'waiting') {
-        instantMatchLeaveQueueKeepalive()
-        void instantMatchLeaveQueue()
-      } else if (st?.status === 'in_session') {
-        instantSessionAbandonKeepalive(st.session_id)
-        void instantSessionAbandon(st.session_id)
-      }
+      /*
+       * 勿在此呼叫 leave_queue／abandon：
+       * React 18 StrictMode 會在開發環境對「幻象卸載」執行 cleanup，若離隊會幾秒內把使用者踢出等候列。
+       * 實際離開改依 visibility/pagehide／MainScreen 離開確認與確認離開後的 RPC。
+       */
     }
   }, [doneHoldRef, setSnapshot])
 }
