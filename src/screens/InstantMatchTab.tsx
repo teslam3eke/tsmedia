@@ -44,6 +44,7 @@ import {
   peekSkipInstantMatchLeaveOnFullUnload,
   clearSkipInstantMatchLeaveOnFullUnload,
 } from '@/lib/instantMatchUnloadGuard'
+import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
 
 type Props = {
   userId: string
@@ -54,19 +55,6 @@ type Props = {
 }
 
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
-
-/** 「我知道了」後 DB 仍會回傳同場次的 done——略過並顯示 idle，避免馬上跳出結束頁 */
-function applyDismissedSessionFilter(
-  data: InstantMatchPollResult,
-  dismissedIds: ReadonlySet<string>,
-): InstantMatchPollResult {
-  if (data.status !== 'done') return data
-  if (!data.session_id || !dismissedIds.has(data.session_id)) return data
-  return {
-    status: 'idle',
-    hint: '尚未加入等候。點「開始配對」加入；需同時有另一位使用者也在等候才會開房。',
-  }
-}
 
 const INSTANT_DISMISS_STORAGE_PREFIX = 'tm_instant_dismiss_done_v1'
 
@@ -457,11 +445,14 @@ export default function InstantMatchTab({
     }
   }, [inSession?.peer_user_id, peer?.photo_urls])
 
+  // 不可等 getProfile：peer 尚未載入時 puzzleConversation 若為 null，整塊拼圖區會消失（只剩空白）。
   const puzzleConversation: PuzzleConversation | null = useMemo(() => {
-    if (!inSession || !peer || !sessionId) return null
-    const name = peer.nickname?.trim() || peer.name?.trim() || '神秘對象'
+    if (!inSession || !sessionId) return null
+    const peerId = inSession.peer_user_id
+    if (!peerId) return null
+    const name = peer?.nickname?.trim() || peer?.name?.trim() || '神秘對象'
     const initials = (name.slice(0, 2) || '?').toUpperCase()
-    const { from, to } = peerGradientFromUserId(peer.id)
+    const { from, to } = peerGradientFromUserId(peerId)
     return {
       id: `instant:${sessionId}`,
       name,
@@ -543,8 +534,8 @@ export default function InstantMatchTab({
     try {
       const res = await instantMatchPoll({ enqueue: true })
       if (res.ok) {
-        if (res.data.status === 'waiting') pollEnqueueWhileWaitingRef.current = true
-        setSnapshot(applyDismissedSessionFilter(res.data, dismissedInstantSessionIdsRef.current))
+        pollEnqueueWhileWaitingRef.current = res.data.status === 'waiting'
+        ingestPollOk(res.data)
       } else setPollError(res.error)
     } finally {
       setBusy(false)
@@ -555,12 +546,8 @@ export default function InstantMatchTab({
     setBusy(true)
     await instantMatchLeaveQueue()
     const res = await instantMatchPoll({ enqueue: false })
-    if (res.ok) {
-      setPollError(null)
-      setSnapshot(applyDismissedSessionFilter(res.data, dismissedInstantSessionIdsRef.current))
-    } else {
-      setPollError(res.error)
-    }
+    if (res.ok) ingestPollOk(res.data)
+    else setPollError(res.error)
     setBusy(false)
   }
 
@@ -711,19 +698,11 @@ export default function InstantMatchTab({
             onClick={() => {
               dismissedInstantSessionIdsRef.current.add(snapshot.session_id)
               persistDismissedToStorage(userId, dismissedInstantSessionIdsRef.current)
-              doneHoldRef.current = false
-              setSnapshot(null)
+              // 結束頁按「我知道了」仍未表達排隊；須立刻關閉「等候中輪詢送 enqueue:true」以免與 056 前 SQL 行為疊加誤撮合
+              pollEnqueueWhileWaitingRef.current = false
               void instantMatchPoll({ enqueue: false }).then((res) => {
-                if (res.ok) {
-                  setPollError(null)
-                  const next = applyDismissedSessionFilter(
-                    res.data,
-                    dismissedInstantSessionIdsRef.current,
-                  )
-                  setSnapshot(next)
-                } else {
-                  setPollError(res.error)
-                }
+                if (res.ok) ingestPollOk(res.data)
+                else setPollError(res.error)
               })
             }}
           >
