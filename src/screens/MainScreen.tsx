@@ -6945,7 +6945,7 @@ export default function MainScreen({
 
   const showTabBar = !(activeTab === 'matches' && matchesChatConversation && hideTabBarForChatKeyboard)
 
-  const suppressTopChrome = activeTab === 'instant' || (activeTab === 'matches' && matchesChatConversation != null)
+  const suppressTopChrome = activeTab === 'matches' && matchesChatConversation != null
 
   /** 配對內開聊天／即時頁自用頂區：外殼不重複長條 header */
   const mainOverflowHidden = suppressTopChrome && activeTab === 'matches'
