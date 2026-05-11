@@ -33,6 +33,10 @@ import {
   type InstantMatchPollResult,
   type InstantSessionMessageRow,
 } from '@/lib/db'
+import {
+  peekSkipInstantMatchLeaveOnFullUnload,
+  clearSkipInstantMatchLeaveOnFullUnload,
+} from '@/lib/instantMatchUnloadGuard'
 
 type Props = {
   userId: string
@@ -178,7 +182,11 @@ function WaitingDots() {
   )
 }
 
-/** 離開本分頁、切 App 或強制關閉：waiting → leave_queue；in_session → abandon（對方顯示對方已離開）。 */
+/**
+ * 離開等候／聊天：
+ * - **等候列**：僅 `pagehide`（非 BFCache）／`beforeunload`／主殼確認／手動離隊（不依 visibility 延遲，避免 iOS 誤清）。
+ * - **in_session**：長時間 hidden 仍會延遲 abandon；真關頁靠 `pagehide`。
+ */
 function useInstantTabLifecycleExit(
   snapshot: InstantMatchPollResult | null,
   setSnapshot: Dispatch<SetStateAction<InstantMatchPollResult | null>>,
@@ -212,44 +220,53 @@ function useInstantTabLifecycleExit(
       })
     }
 
-    /** iOS／PWA 常短暫 `hidden`；太短易誤清佇列。真正卸載仍靠 `pagehide`（!persisted）。 */
-    const HIDDEN_FLUSH_MS = 4500
-    let hiddenFlushTimer: ReturnType<typeof setTimeout> | null = null
+    /**
+     * 僅「聊天進行中」用 hidden 延遲觸發 abandon（對方顯示已離開）。
+     * 等候列 **不** 依 visibility 離隊：iOS／PWA 常長時間 hidden 或短暫抖動，誤清極常見。
+     */
+    const HIDDEN_ABANDON_MS = 4500
+    let hiddenAbandonTimer: ReturnType<typeof setTimeout> | null = null
 
-    const clearHiddenFlushTimer = () => {
-      if (hiddenFlushTimer) {
-        clearTimeout(hiddenFlushTimer)
-        hiddenFlushTimer = null
+    const clearHiddenAbandonTimer = () => {
+      if (hiddenAbandonTimer) {
+        clearTimeout(hiddenAbandonTimer)
+        hiddenAbandonTimer = null
       }
     }
 
-    const scheduleFlushAfterHidden = () => {
-      clearHiddenFlushTimer()
-      hiddenFlushTimer = setTimeout(() => {
-        hiddenFlushTimer = null
+    const scheduleAbandonAfterHidden = () => {
+      clearHiddenAbandonTimer()
+      hiddenAbandonTimer = setTimeout(() => {
+        hiddenAbandonTimer = null
         if (document.visibilityState !== 'hidden') return
-        void flushQueueIfWaiting()
         void abandonSessionIfActive()
-      }, HIDDEN_FLUSH_MS)
+      }, HIDDEN_ABANDON_MS)
     }
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        clearHiddenFlushTimer()
+        clearHiddenAbandonTimer()
         return
       }
-      scheduleFlushAfterHidden()
+      if (snapshotRef.current?.status === 'in_session') {
+        scheduleAbandonAfterHidden()
+      }
     }
 
     const onPageHide = (e: Event) => {
       const ev = e as PageTransitionEvent
       if (ev.persisted) return
-      clearHiddenFlushTimer()
+      clearHiddenAbandonTimer()
+      if (peekSkipInstantMatchLeaveOnFullUnload()) {
+        clearSkipInstantMatchLeaveOnFullUnload()
+        return
+      }
       void flushQueueIfWaiting()
       void abandonSessionIfActive()
     }
 
     const onBeforeUnload = () => {
+      if (peekSkipInstantMatchLeaveOnFullUnload()) return
       const st = snapshotRef.current
       if (st?.status === 'waiting') instantMatchLeaveQueueKeepalive()
       if (st?.status === 'in_session') instantSessionAbandonKeepalive(st.session_id)
@@ -259,7 +276,7 @@ function useInstantTabLifecycleExit(
     window.addEventListener('pagehide', onPageHide as EventListener)
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
-      clearHiddenFlushTimer()
+      clearHiddenAbandonTimer()
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide as EventListener)
       window.removeEventListener('beforeunload', onBeforeUnload)

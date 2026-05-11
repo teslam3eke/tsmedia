@@ -12,6 +12,7 @@ import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
 import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
 
 void maybeInitEruda()
@@ -58,6 +59,7 @@ registerSW({
   onNeedRefresh() {
     /** 選圖／上傳回前景時常觸發 SW 檢查；勿在相簿流程中強制 reload（會中斷上傳）。 */
     if (isWithinMediaPickerGracePeriod()) return
+    markSkipInstantMatchLeaveOnNextFullUnload()
     window.location.reload()
   },
   onOfflineReady() {},

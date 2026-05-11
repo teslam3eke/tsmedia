@@ -63,6 +63,10 @@ import {
   TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
 } from '@/lib/appDeepLinkEvents'
 import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
+import {
+  markSkipInstantMatchLeaveOnNextFullUnload,
+  peekSkipInstantMatchLeaveOnFullUnload,
+} from '@/lib/instantMatchUnloadGuard'
 
 // ─── Hardcore-answer heuristic ───────────────────────────────────────────────
 // "機車題挑戰" cards show a tiny diamond icon after particularly assertive
@@ -435,6 +439,7 @@ function tryDiscoverFailAutoReload(): boolean {
     if (isWithinMediaPickerGracePeriod()) return false
     if (sessionStorage.getItem(DISCOVER_FAIL_AUTO_RELOAD_KEY) === '1') return false
     sessionStorage.setItem(DISCOVER_FAIL_AUTO_RELOAD_KEY, '1')
+    markSkipInstantMatchLeaveOnNextFullUnload()
     window.location.reload()
     return true
   } catch {
@@ -2210,6 +2215,7 @@ function DiscoverTab({
                 onClick={() => {
                   setDeckRecoverBusy('整頁重新載入')
                   clearDiscoverFailAutoReloadFlag()
+                  markSkipInstantMatchLeaveOnNextFullUnload()
                   window.location.reload()
                 }}
                 className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-left text-[13px] font-semibold text-amber-950 shadow-sm active:bg-amber-100/80 disabled:opacity-50"
@@ -6324,6 +6330,8 @@ export default function MainScreen({
       if (!instantQueueWaitingRef.current) return
       /* BFCache：`pagehide` + `persisted === true` 僅凍結頁面，使用者會回來——不可離隊（與 InstantMatchTab 一致）。 */
       if ((ev as PageTransitionEvent).persisted) return
+      /* 程式觸發整頁 reload 前會設旗標，勿對等候列送 keepalive。 */
+      if (peekSkipInstantMatchLeaveOnFullUnload()) return
       instantMatchLeaveQueueKeepalive()
     }
     window.addEventListener('pagehide', fire)

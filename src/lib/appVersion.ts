@@ -7,6 +7,7 @@
  */
 
 import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
+import { markSkipInstantMatchLeaveOnNextFullUnload } from './instantMatchUnloadGuard'
 
 const MIN_PROBE_INTERVAL_MS = 20_000
 let buildIdProbeInFlight = false
@@ -64,6 +65,7 @@ export async function checkRemoteBuildIdAndReload(): Promise<void> {
     if (!remote || remote === embedded) return
     await unregisterSwAndClearSiteCaches()
     if (isWithinMediaPickerGracePeriod()) return
+    markSkipInstantMatchLeaveOnNextFullUnload()
     window.location.reload()
   } catch {
     /* 離線或請求失敗：不中斷操作 */

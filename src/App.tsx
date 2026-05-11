@@ -25,6 +25,7 @@ import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionn
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
+import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 // profileSetupData is collected but used for future profile enrichment
 
 
@@ -318,6 +319,7 @@ export default function App() {
       }
       log('reload()')
       reloading = true
+      markSkipInstantMatchLeaveOnNextFullUnload()
       requestAnimationFrame(() => {
         window.location.reload()
       })
