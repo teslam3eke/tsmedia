@@ -30,9 +30,16 @@ import {
   subscribeToInstantSessionMessages,
   subscribeToInstantSessionSignals,
   getProfile,
+  resolvePhotoUrls,
   type InstantMatchPollResult,
   type InstantSessionMessageRow,
 } from '@/lib/db'
+import {
+  PuzzlePhotoUnlock,
+  type PuzzleChatMessage,
+  type PuzzleConversation,
+} from '@/components/PuzzlePhotoUnlock'
+import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import {
   peekSkipInstantMatchLeaveOnFullUnload,
   clearSkipInstantMatchLeaveOnFullUnload,
@@ -86,6 +93,15 @@ function loadDismissedFromStorage(userId: string): Set<string> {
     /* private mode */
   }
   return merged
+}
+
+function peerGradientFromUserId(uid: string): { from: string; to: string } {
+  let h = 0
+  for (let i = 0; i < uid.length; i += 1) h = (h + uid.charCodeAt(i) * 31) >>> 0
+  const hues = [210, 280, 160, 25, 330, 190]
+  const h1 = hues[h % hues.length]
+  const h2 = hues[(h >> 3) % hues.length]
+  return { from: `hsl(${h1} 42% 44%)`, to: `hsl(${h2} 38% 58%)` }
 }
 
 function persistDismissedToStorage(userId: string, ids: ReadonlySet<string>) {
@@ -302,6 +318,8 @@ export default function InstantMatchTab({
   const [pollError, setPollError] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<InstantMatchPollResult | null>(null)
   const [peer, setPeer] = useState<ProfileRow | null>(null)
+  const [resolvedPeerPhotoUrls, setResolvedPeerPhotoUrls] = useState<string[]>([])
+  const [instantPuzzleKeyboardOpen, setInstantPuzzleKeyboardOpen] = useState(false)
   const [messages, setMessages] = useState<UiMsg[]>([])
   const [input, setInput] = useState('')
   const [nowTick, setNowTick] = useState(() => Date.now())
@@ -424,6 +442,47 @@ export default function InstantMatchTab({
       cancelled = true
     }
   }, [inSession?.peer_user_id])
+
+  useEffect(() => {
+    if (!inSession?.peer_user_id || !peer?.photo_urls?.length) {
+      setResolvedPeerPhotoUrls([])
+      return
+    }
+    let cancelled = false
+    void resolvePhotoUrls(peer.photo_urls.filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)).then((urls) => {
+      if (!cancelled) setResolvedPeerPhotoUrls(urls.filter(Boolean))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [inSession?.peer_user_id, peer?.photo_urls])
+
+  const puzzleConversation: PuzzleConversation | null = useMemo(() => {
+    if (!inSession || !peer || !sessionId) return null
+    const name = peer.nickname?.trim() || peer.name?.trim() || '神秘對象'
+    const initials = (name.slice(0, 2) || '?').toUpperCase()
+    const { from, to } = peerGradientFromUserId(peer.id)
+    return {
+      id: `instant:${sessionId}`,
+      name,
+      initials,
+      from,
+      to,
+      photoUrls: resolvedPeerPhotoUrls,
+      matchedAt: new Date(inSession.created_at).getTime(),
+    }
+  }, [inSession, peer, sessionId, resolvedPeerPhotoUrls])
+
+  const puzzleChatMessages: PuzzleChatMessage[] = useMemo(
+    () =>
+      messages.map((m) => ({
+        id: m.id,
+        text: m.text,
+        from: m.fromMe ? ('me' as const) : ('them' as const),
+        createdAt: new Date(m.ts).toISOString(),
+      })),
+    [messages],
+  )
 
   const loadMsgs = useCallback(
     async (sid: string) => {
@@ -704,7 +763,7 @@ export default function InstantMatchTab({
               </div>
               <p className="mt-1 truncate text-base font-bold text-slate-900">{peerDisplay}</p>
               <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                七分鐘匿名文字聊天；時間到後可加好友，之後在「配對」繼續聊與完整拼圖。
+                七分鐘匿名文字聊天；上方拼圖會隨互傳訊息解鎖對方生活照（與「配對」聊天相同規則）。時間到後可加好友到「配對」繼續聊。
               </p>
             </div>
             <button
@@ -718,6 +777,21 @@ export default function InstantMatchTab({
             </button>
           </div>
         </div>
+
+        {liveChat && puzzleConversation ? (
+          <PuzzlePhotoUnlock
+            conversation={puzzleConversation}
+            messages={puzzleChatMessages}
+            manualUnlockedTiles={[]}
+            isKeyboardOpen={instantPuzzleKeyboardOpen}
+            liveUseDbTilesOnly={false}
+            onSpendUnlock={() => {
+              setPollError(
+                '即時匿名僅能用「互傳訊息」解鎖拼圖；道具「隨機解 1 片」請在雙方加好友後，於「配對」聊天使用。',
+              )
+            }}
+          />
+        ) : null}
 
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
@@ -754,6 +828,8 @@ export default function InstantMatchTab({
               value={input}
               disabled={sess.phase !== 'chat'}
               onChange={(e) => setInput(e.target.value)}
+              onFocus={() => setInstantPuzzleKeyboardOpen(true)}
+              onBlur={() => setInstantPuzzleKeyboardOpen(false)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
