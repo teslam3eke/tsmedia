@@ -574,6 +574,7 @@ export default function InstantMatchTab({
       return
     }
     setBusy(true)
+    pollEnqueueWhileWaitingRef.current = false
     instantSessionAbandonKeepalive(sid)
     const ab = await instantSessionAbandon(sid)
     if (!ab.ok) setPollError(ab.error ?? '離開失敗')

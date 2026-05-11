@@ -72,7 +72,7 @@ export async function getProfile(userId: string): Promise<ProfileRow | null> {
   if (visible) await ensureConnectionWithBudget()
 
   const query = () =>
-    supabase.from('profiles').select('*').eq('id', userId).single()
+    supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
 
   let { data, error } = await query()
 

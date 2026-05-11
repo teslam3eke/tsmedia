@@ -39,6 +39,13 @@ const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
 
 const PUZZLE_UNLOCK_ORDER = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15]
 
+/** 無對方照片 URL 時仍渲染 16 格（解鎖與右側計數一致）；勿用大號首字遮住拼圖 */
+const PUZZLE_TILE_FALLBACK_HREF =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#475569"/><stop offset="1" stop-color="#0f172a"/></linearGradient></defs><rect width="400" height="600" fill="url(#g)"/></svg>',
+  )
+
 function pickOneSpreadPuzzleTileInSlot(occupied: Set<number>, slot: number, rng: () => number): number | null {
   const base = slot * 16
   const occupiedLocal = new Set<number>()
@@ -267,6 +274,8 @@ export function PuzzlePhotoUnlock({
   const recentlyUnlocked = new Set(recentlyUnlockedTiles)
   const puzzleUrls = collectConversationPhotoUrls(conversation)
   const photoUrl = puzzleUrls[progress.activePhotoIndex] ?? puzzleUrls[0] ?? conversation.photoUrl
+  /** 無照時仍畫滿格拼圖；有照後自動換成真圖 */
+  const tileImageHref = photoUrl ?? PUZZLE_TILE_FALLBACK_HREF
   const puzzleSvgId = `chat-puzzle-${conversation.id}`
   const puzzleTiles = Array.from({ length: 16 }, (_, tile) => tile)
   const orderedPuzzleTiles = [...puzzleTiles].sort((a, b) => Number(unlocked.has(a)) - Number(unlocked.has(b)))
@@ -484,17 +493,22 @@ export function PuzzlePhotoUnlock({
           </button>
         </div>
         <div className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]">
-        {photoUrl ? (
           <>
-            <img
-              src={photoUrl}
-              alt={conversation.name}
-              className="absolute inset-0 h-full w-full object-contain object-center blur-2xl opacity-45"
-            />
-            <div className="absolute inset-0 bg-slate-950/20" />
+            {photoUrl ? (
+              <>
+                <img
+                  src={photoUrl}
+                  alt={conversation.name}
+                  className="absolute inset-0 h-full w-full object-contain object-center blur-2xl opacity-45"
+                />
+                <div className="absolute inset-0 bg-slate-950/20" />
+              </>
+            ) : (
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-600 to-slate-950" aria-hidden />
+            )}
             {isPuzzleComplete ? (
               <motion.img
-                src={photoUrl}
+                src={tileImageHref}
                 alt=""
                 aria-hidden
                 className="absolute inset-0 h-full w-full object-contain object-center"
@@ -521,7 +535,7 @@ export function PuzzlePhotoUnlock({
                     <g key={tile}>
                       <g clipPath={`url(#${puzzleSvgId}-clip-${tile})`}>
                         <image
-                          href={photoUrl}
+                          href={tileImageHref}
                           x="0"
                           y="0"
                           width="400"
@@ -590,14 +604,6 @@ export function PuzzlePhotoUnlock({
               )}
             </AnimatePresence>
           </>
-        ) : (
-          <div
-            className="absolute inset-0 flex items-center justify-center text-white"
-            style={{ background: `linear-gradient(135deg, ${conversation.from}, ${conversation.to})` }}
-          >
-            <span className="text-4xl font-black">{conversation.initials}</span>
-          </div>
-        )}
         </div>
         <div className="flex min-w-0 flex-1 basis-0 max-w-[118px] flex-col justify-center gap-2.5 pl-0.5 sm:max-w-[124px]">
           <div className="space-y-1">
