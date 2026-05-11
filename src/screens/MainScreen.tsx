@@ -1553,7 +1553,8 @@ function DiscoverTab({
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
   const skipDiscoverIndexScrollResetRef = useRef(true)
   /** 前景 nonce 往往在數百毫秒內連跳 2〜4（mount ensure + invalidate + visibility debounce）；每次 bump deck 會拆掉上一輪探索 async → 只看到「略過 stale」。合併成單次 bump */
-  const discoverDeckBumpTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  /** DOM timer；勿用 `ReturnType<typeof setTimeout>`（與 @types/node 會衝突為 NodeJS.Timeout） */
+  const discoverDeckBumpTimerRef = useRef<number | null>(null)
   /** 回前景／視窗時若仍卡在載入上一輪可能已被 Abort，補 bump（節流避免連打） */
   const deckWakeBumpStatusRef = useRef(liveDeckStatus)
   deckWakeBumpStatusRef.current = liveDeckStatus
@@ -1727,7 +1728,7 @@ function DiscoverTab({
                 return
               }
 
-              let postEnsureTimeoutId: ReturnType<typeof setTimeout> | null = null
+              let postEnsureTimeoutId: number | null = null
               const deckTimeoutErr = Object.assign(new Error('探索載入逾時'), { name: 'TimeoutError' })
               try {
                 await Promise.race([
@@ -5828,7 +5829,7 @@ export default function MainScreen({
   }, [user?.id])
 
   useEffect(() => {
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    let debounceTimer: number | null = null
 
     const schedule = () => {
       if (document.visibilityState !== 'visible') return
@@ -5838,8 +5839,8 @@ export default function MainScreen({
       void repairAuthAfterResume()
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
+      if (debounceTimer != null) window.clearTimeout(debounceTimer)
+      debounceTimer = window.setTimeout(() => {
         debounceTimer = null
         void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
@@ -5859,7 +5860,7 @@ export default function MainScreen({
       document.removeEventListener('visibilitychange', schedule)
       window.removeEventListener('pageshow', schedule)
       window.removeEventListener('focus', schedule)
-      if (debounceTimer) clearTimeout(debounceTimer)
+      if (debounceTimer != null) window.clearTimeout(debounceTimer)
     }
   }, [])
 
@@ -6062,8 +6063,8 @@ export default function MainScreen({
   }, [user?.id])
 
   useEffect(() => {
-    let timeoutId: ReturnType<typeof window.setTimeout> | undefined
-    let intervalId: ReturnType<typeof window.setInterval> | undefined
+    let timeoutId: number | undefined
+    let intervalId: number | undefined
 
     const applyRollover = () => {
       const k = getAppDayKey()

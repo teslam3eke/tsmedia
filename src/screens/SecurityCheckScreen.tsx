@@ -109,7 +109,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
   }, [allDone])
 
   useEffect(() => {
-    const timeouts: ReturnType<typeof setTimeout>[] = []
+    const timeouts: number[] = []
     const mountedAt = Date.now()
 
     /** 強制對齊最終狀態（回前景／watchdog）；不自動開 PWA 浮層，避免 resume 後卡在全螢幕。 */
