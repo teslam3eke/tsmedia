@@ -1078,7 +1078,7 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
   return (data ?? []) as MatchRow[]
 }
 
-type RealtimeSubscribeLabel = 'matches' | 'messages' | 'instant_session_messages'
+type RealtimeSubscribeLabel = 'matches' | 'messages' | 'instant_session_messages' | 'instant_sessions'
 
 /** 任一頻道本地重建與時間錯開，降低與全域 wake 同一幀 teardown 競態（Console 會噴連線在半開又被關）。 */
 let lastRealtimeChannelLocalRecycleTs = 0
@@ -1370,8 +1370,9 @@ export type InstantMatchPollResult =
   | {
       status: 'done'
       session_id: string
-      promoted_match_id: string
+      promoted_match_id?: string
       mutual_friend: boolean
+      instant_end_reason?: 'peer_left' | 'self_left'
     }
 
 export type InstantMatchPollResponse =
@@ -1458,6 +1459,85 @@ export async function instantMatchLeaveQueue(): Promise<{ ok: boolean; error?: s
   return { ok: true }
 }
 
+const supabaseRpcOrigin = ((import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '').replace(/\/$/, '')
+const supabaseAnonKeyForRpc = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? ''
+
+/** 供 unload／pagehide：`fetch`+`keepalive` 無法走 `supabase-js` 的超時包裝，需在關閉前帶上最新 JWT。 */
+let instantMatchUnloadAccessToken: string | null = null
+
+function syncInstantMatchUnloadAccessTokenFromSession(session: { access_token?: string } | null) {
+  instantMatchUnloadAccessToken = session?.access_token ?? null
+}
+
+if (typeof window !== 'undefined') {
+  void supabase.auth.getSession().then(({ data }) => {
+    syncInstantMatchUnloadAccessTokenFromSession(data.session)
+  })
+  supabase.auth.onAuthStateChange((_event, session) => {
+    syncInstantMatchUnloadAccessTokenFromSession(session)
+  })
+}
+
+/**
+ * 關閉分頁／強制結束 App：`rpc().then` 常被中斷。`keepalive: true` 讓瀏覽器盡力在卸載前送出離隊。
+ * 僅清除 `session_id is null` 的佇列列，不影響已開房。
+ */
+export function instantMatchLeaveQueueKeepalive(): void {
+  if (typeof window === 'undefined') return
+  const origin = supabaseRpcOrigin
+  const key = supabaseAnonKeyForRpc
+  const token = instantMatchUnloadAccessToken
+  if (!origin || !key || !token) return
+  const url = `${origin}/rest/v1/rpc/instant_match_leave_queue`
+  try {
+    void fetch(url, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: '{}',
+      keepalive: true,
+    }).catch(() => {
+      /* offline / tab already dead */
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function instantSessionAbandon(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await (supabase as any).rpc('instant_session_abandon', { p_session_id: sessionId })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export function instantSessionAbandonKeepalive(sessionId: string): void {
+  if (typeof window === 'undefined') return
+  const origin = supabaseRpcOrigin
+  const key = supabaseAnonKeyForRpc
+  const token = instantMatchUnloadAccessToken
+  if (!origin || !key || !token || !sessionId) return
+  const url = `${origin}/rest/v1/rpc/instant_session_abandon`
+  try {
+    void fetch(url, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ p_session_id: sessionId }),
+      keepalive: true,
+    }).catch(() => {})
+  } catch {
+    /* ignore */
+  }
+}
+
 export type InstantSessionMessageRow = {
   id: string
   session_id: string
@@ -1513,6 +1593,24 @@ export function subscribeToInstantSessionMessages(sessionId: string, onInsert: (
       },
       (payload) => {
         onInsert(payload.new as InstantSessionMessageRow)
+      },
+    ),
+  )
+}
+
+/** 對方離開场次時 `instant_sessions` 會 UPDATE，拉一次 poll 以盡快顯示「對方已離開」。 */
+export function subscribeToInstantSessionSignals(sessionId: string, onSessionSignal: () => void): () => void {
+  return subscribePostgresChannelWithBackoff('instant_sessions', () =>
+    supabase.channel(`instant-sess-row:${sessionId}`).on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'instant_sessions',
+        filter: `id=eq.${sessionId}`,
+      },
+      () => {
+        onSessionSignal()
       },
     ),
   )

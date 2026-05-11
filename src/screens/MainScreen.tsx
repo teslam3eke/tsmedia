@@ -38,6 +38,7 @@ import {
   formatChatMessageFromRow, mergeUniqueChatMessages,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches,
   instantMatchLeaveQueue,
+  instantMatchLeaveQueueKeepalive,
 } from '@/lib/db'
 import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
@@ -6315,6 +6316,32 @@ export default function MainScreen({
       instantWaitingReportLockRef.current = false
     }
   }, [])
+
+  /** 殺掉 App 後重開：佇列列可能仍在 DB；進主殼清一次（leave 只刪 session_id is null，不影響已開房）。 */
+  useEffect(() => {
+    if (!user?.id) return
+    void (async () => {
+      await instantMatchLeaveQueue()
+      setInstantQueueWaiting(false)
+      instantQueueWaitingRef.current = false
+    })()
+  }, [user?.id])
+
+  /** 強制關閉時 `visibilitychange` 常漏；若仍標記為排隊中，`keepalive` RPC 盡力離隊。 */
+  useEffect(() => {
+    if (!user?.id) return
+    const fire = () => {
+      if (!instantQueueWaitingRef.current) return
+      instantMatchLeaveQueueKeepalive()
+    }
+    window.addEventListener('pagehide', fire)
+    window.addEventListener('beforeunload', fire)
+    return () => {
+      window.removeEventListener('pagehide', fire)
+      window.removeEventListener('beforeunload', fire)
+    }
+  }, [user?.id])
+
   /** 給桌機自動整頁重載／冷啟還原分頁（與 App `readPreferredMainShellTab` 同 key） */
   useEffect(() => {
     try {

@@ -9,23 +9,26 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type MutableRefObject,
   type ReactNode,
   type SetStateAction,
 } from 'react'
 import { motion } from 'framer-motion'
-import { Heart, Send, Timer, Users } from 'lucide-react'
+import { Heart, Send, Timer, Users, DoorOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ProfileRow } from '@/lib/types'
-import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import {
   instantMatchPoll,
   instantMatchLeaveQueue,
+  instantMatchLeaveQueueKeepalive,
+  instantSessionAbandon,
+  instantSessionAbandonKeepalive,
   getInstantSessionMessages,
   sendInstantSessionMessage,
   instantSessionDecide,
   subscribeToInstantSessionMessages,
+  subscribeToInstantSessionSignals,
   getProfile,
-  resolvePhotoUrls,
   type InstantMatchPollResult,
   type InstantSessionMessageRow,
 } from '@/lib/db'
@@ -118,10 +121,11 @@ function WaitingDots() {
   )
 }
 
-/** 離開本分頁：一律 leave_queue（僅清空 session_id 為 null 的列）。App 進入背景時若尚在排隊也退出。 */
-function useInstantQueueExitOnLeave(
+/** 離開本分頁、切 App 或強制關閉：waiting → leave_queue；in_session → abandon（對方顯示對方已離開）。 */
+function useInstantTabLifecycleExit(
   snapshot: InstantMatchPollResult | null,
   setSnapshot: Dispatch<SetStateAction<InstantMatchPollResult | null>>,
+  doneHoldRef: MutableRefObject<boolean>,
 ) {
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
@@ -129,20 +133,62 @@ function useInstantQueueExitOnLeave(
   useEffect(() => {
     const flushQueueIfWaiting = async () => {
       if (snapshotRef.current?.status !== 'waiting') return
+      instantMatchLeaveQueueKeepalive()
       await instantMatchLeaveQueue()
       const res = await instantMatchPoll({ enqueue: false })
       if (res.ok && res.data.status !== 'done') setSnapshot(res.data)
     }
 
-    const onHidden = () => {
-      if (document.visibilityState === 'hidden') void flushQueueIfWaiting()
+    const abandonSessionIfActive = async () => {
+      const s = snapshotRef.current
+      if (s?.status !== 'in_session') return
+      const sid = s.session_id
+      instantSessionAbandonKeepalive(sid)
+      await instantSessionAbandon(sid)
+      const res = await instantMatchPoll({ enqueue: false })
+      if (!res.ok) return
+      const r = res.data
+      setSnapshot((prev) => {
+        if (prev?.status === 'done') return prev
+        if (r.status === 'done') doneHoldRef.current = true
+        return r
+      })
     }
+
+    const onHidden = () => {
+      if (document.visibilityState !== 'hidden') return
+      void flushQueueIfWaiting()
+      void abandonSessionIfActive()
+    }
+
+    const onPageHide = () => {
+      void flushQueueIfWaiting()
+      void abandonSessionIfActive()
+    }
+
+    const onBeforeUnload = () => {
+      const st = snapshotRef.current
+      if (st?.status === 'waiting') instantMatchLeaveQueueKeepalive()
+      if (st?.status === 'in_session') instantSessionAbandonKeepalive(st.session_id)
+    }
+
     document.addEventListener('visibilitychange', onHidden)
+    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
       document.removeEventListener('visibilitychange', onHidden)
-      void instantMatchLeaveQueue()
+      window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      const st = snapshotRef.current
+      if (st?.status === 'waiting') {
+        instantMatchLeaveQueueKeepalive()
+        void instantMatchLeaveQueue()
+      } else if (st?.status === 'in_session') {
+        instantSessionAbandonKeepalive(st.session_id)
+        void instantSessionAbandon(st.session_id)
+      }
     }
-  }, [setSnapshot])
+  }, [doneHoldRef, setSnapshot])
 }
 
 export default function InstantMatchTab({
@@ -160,10 +206,20 @@ export default function InstantMatchTab({
   const [peer, setPeer] = useState<ProfileRow | null>(null)
   const [messages, setMessages] = useState<UiMsg[]>([])
   const [input, setInput] = useState('')
-  /** 試玩局部拼圖（本房內）：不寫進 photo_unlock_states */
-  const [teaserTiles, setTeaserTiles] = useState<number[]>([])
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [pollReady, setPollReady] = useState(false)
+
+  const doneHoldRef = useRef(false)
+
+  const ingestPollOk = useCallback((r: InstantMatchPollResult) => {
+    setPollError(null)
+    setSnapshot((prev) => {
+      if (prev?.status === 'done') return prev
+      if (r.status === 'done' && r.mutual_friend) onMutualFriendMatchCreatedRef.current?.()
+      if (r.status === 'done') doneHoldRef.current = true
+      return r
+    })
+  }, [])
 
   useEffect(() => {
     const waiting = !!(pollReady && snapshot?.status === 'waiting')
@@ -176,14 +232,12 @@ export default function InstantMatchTab({
     }
   }, [onWaitingStateChange])
 
-  useInstantQueueExitOnLeave(snapshot, setSnapshot)
+  useInstantTabLifecycleExit(snapshot, setSnapshot, doneHoldRef)
 
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 1000)
     return () => window.clearInterval(t)
   }, [])
-
-  const doneHoldRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -196,14 +250,7 @@ export default function InstantMatchTab({
         setPollError(res.error)
         return
       }
-      setPollError(null)
-      const r = res.data
-      setSnapshot((prev) => {
-        if (prev?.status === 'done') return prev
-        if (r.status === 'done' && r.mutual_friend) onMutualFriendMatchCreatedRef.current?.()
-        if (r.status === 'done') doneHoldRef.current = true
-        return r
-      })
+      ingestPollOk(res.data)
     }
     void poke()
     const id = window.setInterval(poke, 3200)
@@ -211,13 +258,23 @@ export default function InstantMatchTab({
       cancelled = true
       clearInterval(id)
     }
-  }, [userId, foregroundReloadNonce])
+  }, [userId, foregroundReloadNonce, ingestPollOk])
+
+  const pullInstantPoll = useCallback(async () => {
+    if (doneHoldRef.current) return
+    const res = await instantMatchPoll({ enqueue: false })
+    setPollReady(true)
+    if (!res.ok) {
+      setPollError(res.error)
+      return
+    }
+    ingestPollOk(res.data)
+  }, [ingestPollOk])
 
   useEffect(() => {
     setSnapshot(null)
     setPeer(null)
     setMessages([])
-    setTeaserTiles([])
     setPollError(null)
     setPollReady(false)
     doneHoldRef.current = false
@@ -278,6 +335,13 @@ export default function InstantMatchTab({
     })
   }, [sessionId, loadMsgs, userId])
 
+  useEffect(() => {
+    if (!sessionId || snapshot?.status !== 'in_session') return
+    return subscribeToInstantSessionSignals(sessionId, () => {
+      void pullInstantPoll()
+    })
+  }, [sessionId, snapshot?.status, pullInstantPoll])
+
   const chatEndsAtMs = useMemo(() => {
     if (!inSession) return null
     return new Date(inSession.chat_ends_at).getTime()
@@ -323,36 +387,29 @@ export default function InstantMatchTab({
       return
     }
     await loadMsgs(sessionId)
-    setTeaserTiles((prev) => {
-      const pool = Array.from({ length: 16 }, (_, i) => i).filter((i) => !prev.includes(i))
-      if (!pool.length) return prev
-      return [...prev, pool[Math.floor(Math.random() * pool.length)]!]
-    })
+  }
+
+  const confirmLeaveInstantChat = async () => {
+    const sid = sessionId
+    if (!sid || snapshot?.status !== 'in_session') return
+    if (
+      !window.confirm(
+        '確定離開聊天室？離開後此場會結束，對方將看到「對方已離開聊天室」。',
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    instantSessionAbandonKeepalive(sid)
+    const ab = await instantSessionAbandon(sid)
+    if (!ab.ok) setPollError(ab.error ?? '離開失敗')
+    const res = await instantMatchPoll({ enqueue: false })
+    if (res.ok) ingestPollOk(res.data)
+    else setPollError(res.error)
+    setBusy(false)
   }
 
   const peerDisplay = peer?.nickname?.trim() || peer?.name?.trim() || '神秘對象'
-
-  /** hooks 順序：`pollReady` 早期 return 前須宣告 */
-  const teaserPhotoUrls = useMemo(
-    () =>
-      peer?.photo_urls?.filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS) ?? [],
-    [peer?.photo_urls],
-  )
-  const [resolvedTeaserUrls, setResolvedTeaserUrls] = useState<string[]>([])
-  useEffect(() => {
-    if (!teaserPhotoUrls.length) {
-      setResolvedTeaserUrls([])
-      return
-    }
-    let cancelled = false
-    void resolvePhotoUrls(teaserPhotoUrls).then((u) => {
-      if (!cancelled) setResolvedTeaserUrls(u.filter(Boolean))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [teaserPhotoUrls])
-  const mainTeaserUrl = resolvedTeaserUrls[0]
 
   const pageShellClass = cn('flex min-h-0 flex-1 flex-col', snapshot?.status === 'waiting' && 'bg-slate-50')
 
@@ -398,7 +455,7 @@ export default function InstantMatchTab({
   if (snapshot.status === 'waiting') {
     return (
       <div className={pageShellClass}>
-        <InstantHeading subtitle="你已加入等候——離開本分頁或切到別的 App 會自動退出排隊（聊天進行中不受影响）。" />
+        <InstantHeading subtitle="你已加入等候；離開本分頁、切換 App 或關閉程式會自動退出排隊並取消等候。" />
         <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-6">
           <InstantCard className="overflow-hidden py-8">
             <MatchingPulseVisual />
@@ -429,23 +486,37 @@ export default function InstantMatchTab({
   }
 
   if (snapshot.status === 'done') {
+    const peerEnd = snapshot.instant_end_reason === 'peer_left'
+    const selfEnd = snapshot.instant_end_reason === 'self_left'
     return (
       <div className="flex min-h-0 flex-1 flex-col bg-white">
         <div className="flex flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
           <div
             className={cn(
               'mb-5 flex h-20 w-20 items-center justify-center rounded-2xl text-white shadow-md',
-              snapshot.mutual_friend ? 'bg-emerald-500' : 'bg-slate-600',
+              snapshot.mutual_friend ? 'bg-emerald-500' : peerEnd ? 'bg-amber-600' : 'bg-slate-600',
             )}
             aria-hidden
           >
             <Heart className={cn('h-10 w-10', snapshot.mutual_friend ? 'fill-current' : '')} />
           </div>
-          <h2 className="mb-2 text-xl font-black tracking-tight text-slate-900">配對回合結束</h2>
+          <h2 className="mb-2 text-xl font-black tracking-tight text-slate-900">
+            {snapshot.mutual_friend
+              ? '配對成功'
+              : peerEnd
+                ? '對方已離開聊天室'
+                : selfEnd
+                  ? '你已離開聊天室'
+                  : '配對回合結束'}
+          </h2>
           <p className="mb-8 max-w-[18rem] text-sm leading-relaxed text-slate-600">
             {snapshot.mutual_friend
               ? '對方也想當好友——已為你們建立正式配對，快到「配對」分頁開始聊天吧。'
-              : '此一回合已結束。仍可隨時再次加入即時等候。'}
+              : peerEnd
+                ? '對方已關閉或離開聊天。此場即時對話已結束，你仍可隨時再次加入等候。'
+                : selfEnd
+                  ? '你已離開此場對話。仍可隨時再次加入即時配對等候。'
+                  : '此一回合已結束。仍可隨時再次加入即時等候。'}
           </p>
           <button
             type="button"
@@ -475,65 +546,52 @@ export default function InstantMatchTab({
   const liveChat = sess.phase === 'chat'
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-white">
+    <div className="flex min-h-0 flex-1 flex-col bg-slate-50">
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex-shrink-0 border-b border-gray-200 bg-white px-3 pb-3 pt-2">
-          <div className="mb-2 flex justify-center">
-            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-700 ring-1 ring-slate-200/80">
-              即時聊天
-            </span>
-          </div>
-          <div className="mb-3">
-            <p className="truncate text-base font-bold text-slate-900">{peerDisplay}</p>
-            <motion.div
-              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 ring-1 ring-amber-100"
-              animate={liveChat ? { opacity: [1, 0.72, 1] } : {}}
-              transition={{ duration: 1.2, repeat: liveChat ? Infinity : 0 }}
-            >
-              <Timer className="h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden />
-              {sess.phase === 'chat'
-                ? `剩餘 ${mm}:${ss}（伺服器對時）`
-                : sess.phase === 'decide'
-                  ? '時間到——是否加為好友？'
-                  : '本場已告一段落'}
-            </motion.div>
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-slate-100 ring-1 ring-black/[0.04]">
-            <div className="relative aspect-[16/10] w-full bg-slate-200">
-              {mainTeaserUrl ? (
-                <div
-                  className="absolute inset-0 bg-cover bg-center transition-all duration-500"
-                  style={{
-                    backgroundImage: `url(${mainTeaserUrl})`,
-                    filter: `blur(${Math.max(4, 20 - teaserTiles.length * 1.1)}px)`,
-                  }}
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center bg-slate-200 px-6 text-center text-[11px] font-medium leading-relaxed text-slate-600">
-                  對方若尚未公開生活照，就以文字破冰；互相加好友後可到「配對」玩完整拼圖。
-                </div>
-              )}
-              <div className="pointer-events-none absolute inset-4 grid grid-cols-4 grid-rows-4 gap-0.5 opacity-85">
-                {Array.from({ length: 16 }, (_, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      'rounded-sm border border-white/30',
-                      teaserTiles.includes(i) ? 'bg-transparent' : 'bg-black/48',
-                    )}
-                  />
-                ))}
+        <div className="flex-shrink-0 border-b border-gray-200 bg-white px-3 pb-2.5 pt-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200/80">
+                  即時聊天
+                </span>
+                <motion.div
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-100"
+                  animate={liveChat ? { opacity: [1, 0.75, 1] } : {}}
+                  transition={{ duration: 1.2, repeat: liveChat ? Infinity : 0 }}
+                >
+                  <Timer className="h-3 w-3 shrink-0 text-amber-700" aria-hidden />
+                  {sess.phase === 'chat'
+                    ? `剩餘 ${mm}:${ss}`
+                    : sess.phase === 'decide'
+                      ? '選擇是否加好友'
+                      : '已結束'}
+                </motion.div>
               </div>
+              <p className="mt-1 truncate text-base font-bold text-slate-900">{peerDisplay}</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                七分鐘匿名文字聊天；時間到後可加好友，之後在「配對」繼續聊與完整拼圖。
+              </p>
             </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void confirmLeaveInstantChat()}
+              className="flex shrink-0 items-center gap-1 rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-800 shadow-sm disabled:opacity-50"
+            >
+              <DoorOpen className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden />
+              離開
+            </button>
           </div>
-          <p className="mt-2 px-1 text-[10px] leading-snug text-slate-500">
-            試玩拼圖：每傳一則揭一格；正式進度在一般配對聊天使用。
-          </p>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-2 border-t border-gray-100">
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50/90 px-3 py-3">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
+            {messages.length === 0 && liveChat && (
+              <p className="rounded-2xl border border-dashed border-gray-200 bg-white/80 px-4 py-6 text-center text-xs leading-relaxed text-slate-500">
+                還沒有訊息，打個招呼吧。雙方若以文字聊得來，時間到後可按「加為好友」到配對裡繼續。
+              </p>
+            )}
             {messages.map((m) => (
               <motion.div
                 key={m.id}
@@ -543,8 +601,8 @@ export default function InstantMatchTab({
               >
                 <div
                   className={cn(
-                    'max-w-[80%] rounded-2xl px-3 py-2 text-[14px] leading-snug',
-                    m.fromMe ? 'bg-emerald-500 text-white' : 'border border-gray-200 bg-white text-slate-900',
+                    'max-w-[82%] rounded-2xl px-3.5 py-2 text-[15px] leading-snug',
+                    m.fromMe ? 'bg-emerald-500 text-white' : 'border border-gray-200 bg-white text-slate-900 shadow-sm',
                   )}
                 >
                   {m.text}
@@ -557,7 +615,7 @@ export default function InstantMatchTab({
             <p className="shrink-0 px-3 pb-1 text-center text-[11px] font-medium text-red-600">{pollError}</p>
           )}
 
-          <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 bg-white px-2 py-2">
+          <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 bg-white px-2 py-2 pb-safe">
             <input
               value={input}
               disabled={sess.phase !== 'chat'}
@@ -568,9 +626,9 @@ export default function InstantMatchTab({
                   void handleSend()
                 }
               }}
-              placeholder={sess.phase === 'chat' ? '說點什麼…' : '聊天視窗已關閉'}
+              placeholder={sess.phase === 'chat' ? '說點什麼…' : '聊天已關閉'}
               style={{ fontSize: '16px' }}
-              className="min-h-[40px] flex-1 rounded-full border border-gray-200 bg-slate-100 px-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-45"
+              className="min-h-[40px] flex-1 rounded-full border border-gray-200 bg-slate-50 px-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-45"
             />
             <button
               type="button"
@@ -603,9 +661,8 @@ export default function InstantMatchTab({
                     void (async () => {
                       const res = await instantSessionDecide(sessionId, 'friend')
                       if (!res.ok) setPollError(res.error ?? '')
-                      else onMutualFriendMatchCreatedRef.current?.()
                       const resPoll = await instantMatchPoll({ enqueue: false })
-                      if (resPoll.ok) setSnapshot(resPoll.data)
+                      if (resPoll.ok) ingestPollOk(resPoll.data)
                       else setPollError(resPoll.error)
                     })()
                   }
@@ -620,7 +677,7 @@ export default function InstantMatchTab({
                       const res = await instantSessionDecide(sessionId, 'pass')
                       if (!res.ok) setPollError(res.error ?? '')
                       const resPoll = await instantMatchPoll({ enqueue: false })
-                      if (resPoll.ok) setSnapshot(resPoll.data)
+                      if (resPoll.ok) ingestPollOk(resPoll.data)
                       else setPollError(resPoll.error)
                     })()
                   }

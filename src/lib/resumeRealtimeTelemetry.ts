@@ -39,7 +39,7 @@ type RealtimeEnginePhase =
   | 'reconnect_realtime_only_disconnect'
   | 'reconnect_realtime_only_connect'
 
-type ChannelFamily = 'matches' | 'messages' | 'instant_session_messages'
+type ChannelFamily = 'matches' | 'messages' | 'instant_session_messages' | 'instant_sessions'
 
 type ConnectionRepairBrief =
   | { phase: 'start'; attempt: number; message: string }
