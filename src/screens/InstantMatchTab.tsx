@@ -59,11 +59,9 @@ function applyDismissedSessionFilter(
 
 const INSTANT_DISMISS_STORAGE_PREFIX = 'tm_instant_dismiss_done_v1'
 
-function loadDismissedFromStorage(userId: string): Set<string> {
-  if (typeof window === 'undefined') return new Set()
+function parseDismissJson(raw: string | null): Set<string> {
+  if (!raw) return new Set()
   try {
-    const raw = sessionStorage.getItem(`${INSTANT_DISMISS_STORAGE_PREFIX}:${userId}`)
-    if (!raw) return new Set()
     const arr = JSON.parse(raw) as unknown
     if (!Array.isArray(arr)) return new Set()
     return new Set(arr.filter((x): x is string => typeof x === 'string' && x.length > 0))
@@ -72,11 +70,31 @@ function loadDismissedFromStorage(userId: string): Set<string> {
   }
 }
 
+/** session + localStorage：App 完全關閉後 sessionStorage 常流失，localStorage 才還能濾掉舊 done */
+function loadDismissedFromStorage(userId: string): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  const k = `${INSTANT_DISMISS_STORAGE_PREFIX}:${userId}`
+  const merged = new Set<string>()
+  try {
+    for (const id of parseDismissJson(sessionStorage.getItem(k))) merged.add(id)
+    for (const id of parseDismissJson(localStorage.getItem(k))) merged.add(id)
+  } catch {
+    /* private mode */
+  }
+  return merged
+}
+
 function persistDismissedToStorage(userId: string, ids: ReadonlySet<string>) {
   if (typeof window === 'undefined') return
+  const k = `${INSTANT_DISMISS_STORAGE_PREFIX}:${userId}`
+  const payload = JSON.stringify([...ids].slice(-40))
   try {
-    const list = [...ids].slice(-40)
-    sessionStorage.setItem(`${INSTANT_DISMISS_STORAGE_PREFIX}:${userId}`, JSON.stringify(list))
+    sessionStorage.setItem(k, payload)
+  } catch {
+    /* quota / private mode */
+  }
+  try {
+    localStorage.setItem(k, payload)
   } catch {
     /* quota / private mode */
   }
@@ -194,15 +212,39 @@ function useInstantTabLifecycleExit(
       })
     }
 
-    const onHidden = () => {
-      if (document.visibilityState !== 'hidden') return
-      void flushQueueIfWaiting()
-      void abandonSessionIfActive()
+    /** iOS／PWA 常短暫 `hidden`；太短易誤清佇列。真正卸載仍靠 `pagehide`（!persisted）。 */
+    const HIDDEN_FLUSH_MS = 4500
+    let hiddenFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+    const clearHiddenFlushTimer = () => {
+      if (hiddenFlushTimer) {
+        clearTimeout(hiddenFlushTimer)
+        hiddenFlushTimer = null
+      }
+    }
+
+    const scheduleFlushAfterHidden = () => {
+      clearHiddenFlushTimer()
+      hiddenFlushTimer = setTimeout(() => {
+        hiddenFlushTimer = null
+        if (document.visibilityState !== 'hidden') return
+        void flushQueueIfWaiting()
+        void abandonSessionIfActive()
+      }, HIDDEN_FLUSH_MS)
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        clearHiddenFlushTimer()
+        return
+      }
+      scheduleFlushAfterHidden()
     }
 
     const onPageHide = (e: Event) => {
       const ev = e as PageTransitionEvent
-      if (ev.persisted) return // 進入 BFCache／預載存留，不把排隊視為離開頁面
+      if (ev.persisted) return
+      clearHiddenFlushTimer()
       void flushQueueIfWaiting()
       void abandonSessionIfActive()
     }
@@ -213,17 +255,18 @@ function useInstantTabLifecycleExit(
       if (st?.status === 'in_session') instantSessionAbandonKeepalive(st.session_id)
     }
 
-    document.addEventListener('visibilitychange', onHidden)
+    document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pagehide', onPageHide as EventListener)
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
-      document.removeEventListener('visibilitychange', onHidden)
+      clearHiddenFlushTimer()
+      document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pagehide', onPageHide as EventListener)
       window.removeEventListener('beforeunload', onBeforeUnload)
       /*
        * 勿在此呼叫 leave_queue／abandon：
        * React 18 StrictMode 會在開發環境對「幻象卸載」執行 cleanup，若離隊會幾秒內把使用者踢出等候列。
-       * 實際離開改依 visibility/pagehide／MainScreen 離開確認與確認離開後的 RPC。
+       * 實際離開改依 visibility（延遲）／pagehide／MainScreen 離開確認與確認離開後的 RPC。
        */
     }
   }, [doneHoldRef, setSnapshot])

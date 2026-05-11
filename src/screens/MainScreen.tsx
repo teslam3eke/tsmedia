@@ -6317,21 +6317,13 @@ export default function MainScreen({
     }
   }, [])
 
-  /** 殺掉 App 後重開：佇列列可能仍在 DB；進主殼清一次（leave 只刪 session_id is null，不影響已開房）。 */
-  useEffect(() => {
-    if (!user?.id) return
-    void (async () => {
-      await instantMatchLeaveQueue()
-      setInstantQueueWaiting(false)
-      instantQueueWaitingRef.current = false
-    })()
-  }, [user?.id])
-
   /** 強制關閉時 `visibilitychange` 常漏；若仍標記為排隊中，`keepalive` RPC 盡力離隊。 */
   useEffect(() => {
     if (!user?.id) return
-    const fire = () => {
+    const fire = (ev: Event) => {
       if (!instantQueueWaitingRef.current) return
+      /* BFCache：`pagehide` + `persisted === true` 僅凍結頁面，使用者會回來——不可離隊（與 InstantMatchTab 一致）。 */
+      if ((ev as PageTransitionEvent).persisted) return
       instantMatchLeaveQueueKeepalive()
     }
     window.addEventListener('pagehide', fire)
