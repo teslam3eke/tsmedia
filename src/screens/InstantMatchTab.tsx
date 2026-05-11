@@ -57,6 +57,31 @@ function applyDismissedSessionFilter(
   }
 }
 
+const INSTANT_DISMISS_STORAGE_PREFIX = 'tm_instant_dismiss_done_v1'
+
+function loadDismissedFromStorage(userId: string): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = sessionStorage.getItem(`${INSTANT_DISMISS_STORAGE_PREFIX}:${userId}`)
+    if (!raw) return new Set()
+    const arr = JSON.parse(raw) as unknown
+    if (!Array.isArray(arr)) return new Set()
+    return new Set(arr.filter((x): x is string => typeof x === 'string' && x.length > 0))
+  } catch {
+    return new Set()
+  }
+}
+
+function persistDismissedToStorage(userId: string, ids: ReadonlySet<string>) {
+  if (typeof window === 'undefined') return
+  try {
+    const list = [...ids].slice(-40)
+    sessionStorage.setItem(`${INSTANT_DISMISS_STORAGE_PREFIX}:${userId}`, JSON.stringify(list))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /** 與探索／配對列表一致：白底、灰框、輕陰影 */
 function InstantCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -295,6 +320,7 @@ export default function InstantMatchTab({
     ingestPollOk(res.data)
   }, [ingestPollOk])
 
+  /** userId 變更或重新掛載（例如切回本 tab）時，從 sessionStorage 還原已按下「我知道了」的場次。 */
   useEffect(() => {
     setSnapshot(null)
     setPeer(null)
@@ -302,7 +328,7 @@ export default function InstantMatchTab({
     setPollError(null)
     setPollReady(false)
     doneHoldRef.current = false
-    dismissedInstantSessionIdsRef.current.clear()
+    dismissedInstantSessionIdsRef.current = loadDismissedFromStorage(userId)
   }, [userId])
 
   const inSession = snapshot?.status === 'in_session' ? snapshot : null
@@ -549,6 +575,7 @@ export default function InstantMatchTab({
             className="rounded-2xl bg-slate-900 px-10 py-3.5 text-sm font-bold text-white"
             onClick={() => {
               dismissedInstantSessionIdsRef.current.add(snapshot.session_id)
+              persistDismissedToStorage(userId, dismissedInstantSessionIdsRef.current)
               doneHoldRef.current = false
               setSnapshot(null)
               void instantMatchPoll({ enqueue: false }).then((res) => {
