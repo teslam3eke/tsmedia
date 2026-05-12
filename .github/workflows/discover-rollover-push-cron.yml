@@ -1,0 +1,33 @@
+# 選用：當 Vercel「Cron Jobs」在 Runtime Logs 裡長期看不到自動請求時，可用此 workflow 每天在 UTC 固定時間打 production API。
+# 設定 Repository secrets：
+#   DISCOVER_ROLLOVER_PUSH_URL  = https://<你的-production 網域>/api/cron-discover-rollover-push
+#   DISCOVER_ROLLOVER_PUSH_AUTH = （選填）與 Vercel Production「CRON_SECRET」相同時，填入同一字串以便帶 Bearer
+# 若同時保留 vercel.json 的 crons 且兩邊都在跑，可能同一天對同一裝置送兩次（推播 tag 同日相同，多數裝置會合併／覆寫）；穩定後可從 vercel.json 移除 crons 只留其中一邊。
+name: discover-rollover-push (daily)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天 14:10 UTC ≈ 台北 22:10（與排程 0 14 * * * 同一小時內，作為 Vercel Hobby 未觸發時的備援）
+    - cron: '10 14 * * *'
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger /api/cron-discover-rollover-push
+        env:
+          URL: ${{ secrets.DISCOVER_ROLLOVER_PUSH_URL }}
+          AUTH: ${{ secrets.DISCOVER_ROLLOVER_PUSH_AUTH }}
+        run: |
+          if [ -z "$URL" ]; then
+            echo "Skip: secret DISCOVER_ROLLOVER_PUSH_URL 未設定（不需要備援時可忽略此 job）。"
+            exit 0
+          fi
+          set -e
+          if [ -n "$AUTH" ]; then
+            curl -fsS -H "Authorization: Bearer $AUTH" "$URL"
+          else
+            curl -fsS "$URL"
+          fi

@@ -23,6 +23,8 @@ function adminSupabase() {
 }
 
 const PUSH_PAYLOAD_OPTIONS = { TTL: 86_400 } as const
+/** 換日廣播專用：Web Push RFC 對 `urgency` 的語意有助於部分推播網（含 APNs）較不慢排／晚送。聊天推播維持預設即可。 */
+const PUSH_OPTIONS_BROADCAST = { TTL: 86_400, urgency: 'high' as const }
 
 /** 與探索「每晚 10 點」同一曆日（Asia/Taipei）；tag 加分日避免被推播 SDK 過度去重 */
 function discoverRolloverTagSuffix(): string {
@@ -49,13 +51,14 @@ async function sendToSubscription(
   supabase: ReturnType<typeof adminSupabase>,
   row: { endpoint: string; p256dh: string; auth: string },
   payloadText: string,
+  options: typeof PUSH_PAYLOAD_OPTIONS | typeof PUSH_OPTIONS_BROADCAST = PUSH_PAYLOAD_OPTIONS,
 ): Promise<'ok' | 'fail' | 'gone'> {
   const sub = {
     endpoint: row.endpoint,
     keys: { p256dh: row.p256dh, auth: row.auth },
   }
   try {
-    await webpush.sendNotification(sub, payloadText, PUSH_PAYLOAD_OPTIONS)
+    await webpush.sendNotification(sub, payloadText, options)
     return 'ok'
   } catch (e: unknown) {
     const status =
@@ -103,7 +106,12 @@ export async function sendWebPushToUser(
 }
 
 /** 每晚換日廣播：依 endpoint 逐筆送出（同一使用者多裝置各自一則）。 */
-export async function broadcastDiscoverDeckRolloverPush(): Promise<{ sent: number; failed: number }> {
+export async function broadcastDiscoverDeckRolloverPush(): Promise<{
+  sent: number
+  failed: number
+  gone: number
+  scanned: number
+}> {
   configureWebPush()
   const supabase = adminSupabase()
 
@@ -124,6 +132,8 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{ sent: numbe
   let offset = 0
   let sent = 0
   let failed = 0
+  let gone = 0
+  let scanned = 0
 
   for (;;) {
     const { data: rows, error } = await supabase
@@ -136,13 +146,15 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{ sent: numbe
     if (!rows?.length) break
 
     await parallelMapChunks(rows, concurrency, async (r) => {
-      const out = await sendToSubscription(supabase, r, payloadText)
+      scanned++
+      const out = await sendToSubscription(supabase, r, payloadText, PUSH_OPTIONS_BROADCAST)
       if (out === 'ok') sent++
+      else if (out === 'gone') gone++
       else failed++
     })
     offset += rows.length
     if (rows.length < pageSize) break
   }
 
-  return { sent, failed }
+  return { sent, failed, gone, scanned }
 }

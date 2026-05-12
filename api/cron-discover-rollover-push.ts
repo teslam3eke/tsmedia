@@ -22,6 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   try {
     const result = await broadcastDiscoverDeckRolloverPush()
+    console.info('[cron-discover-rollover-push]', result)
     res.status(200).json({ ok: true, ...result })
   } catch (e) {
     console.error('[cron-discover-rollover-push]', e)

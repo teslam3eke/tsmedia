@@ -5881,7 +5881,13 @@ export default function MainScreen({
     }
     run()
     document.addEventListener('visibilitychange', run)
-    return () => document.removeEventListener('visibilitychange', run)
+    window.addEventListener('pageshow', run)
+    window.addEventListener('focus', run)
+    return () => {
+      document.removeEventListener('visibilitychange', run)
+      window.removeEventListener('pageshow', run)
+      window.removeEventListener('focus', run)
+    }
   }, [user?.id])
 
   /** 後台 app_notifications：全分頁彈窗；同一 id 會話內只會排入佇列一次，按「知道了」後標已讀再顯示下一則。 */
