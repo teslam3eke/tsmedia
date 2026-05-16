@@ -1318,29 +1318,67 @@ export function subscribeToMatchMessages(
 }
 
 /**
- * 訂閱本人「可見」的 `messages` INSERT（RLS 僅限參與之配對）。
- * 用於 App 內音效：對方傳訊時響鈴，不依賴是否已開啟某聊天室。
- * 不重複訂閱單一房：每則新訊息僅此頻道一筆事件（與各房 `subscribeToMatchMessages` 分流）。
+ * Subscribe to INSERT on `messages` limited to matches the viewer participates in,
+ * scoped by explicit `match_id` filters (narrower fan-out than an unscoped table subscription).
+ *
+ * Used for in-app message sounds across threads while the lobby chat is closed.
+ *
+ * Requires `messages` in publication `supabase_realtime` (see migration 012).
  */
-export function subscribeToMyMatchMessageInserts(
+export function subscribeToMyIncomingMatchMessages(
   userId: string,
+  matchIds: readonly string[],
   onInsert: (row: MessageRow) => void,
 ): () => void {
+  /** Supabase realtime filter UUIDs — reject unknown shapes to avoid broken channels. */
+  const uuidRx =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  const unique: string[] = []
+  const seen = new Set<string>()
+  for (const raw of matchIds) {
+    const id = typeof raw === 'string' ? raw.trim() : ''
+    if (!id || seen.has(id)) continue
+    if (!uuidRx.test(id)) continue
+    seen.add(id)
+    unique.push(id.toLowerCase())
+    if (unique.length >= 64) break
+  }
+  if (unique.length === 0) {
+    return () => {}
+  }
+
+  unique.sort()
+  const filter =
+    unique.length === 1
+      ? `match_id=eq.${unique[0]}`
+      : `match_id=in.(${unique.join(',')})`
+
+  let h = 2166136261 >>> 0
+  const keySrc = unique.join('|')
+  for (let i = 0; i < keySrc.length; i += 1) {
+    h ^= keySrc.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+  const batchKey = `${unique.length}-${h}`
+
   return subscribePostgresChannelWithBackoff('messages_incoming_sound', () =>
-    supabase.channel(`realtime-my-match-messages:${userId}`).on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-      },
-      (payload) => {
-        const row = payload.new as MessageRow | null
-        if (row && row.sender_id && row.sender_id !== userId) {
-          onInsert(row)
-        }
-      },
-    )
+    supabase
+      .channel(`realtime-my-match-msgs:${userId}:${batchKey}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter,
+        },
+        (payload) => {
+          const row = payload.new as MessageRow | null
+          if (row?.sender_id && row.sender_id !== userId) {
+            onInsert(row)
+          }
+        },
+      ),
   )
 }
 

@@ -36,7 +36,7 @@ import {
   getPhotoUnlockState,
   getMyMatches, getMatchMessages, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages,
-  claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyMatchMessageInserts,
+  claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
   instantMatchLeaveQueueKeepalive,
 } from '@/lib/db'
@@ -5726,6 +5726,15 @@ export default function MainScreen({
   useEffect(() => {
     liveMatchThreadsRef.current = liveMatchThreads
   }, [liveMatchThreads])
+  /** App 內「新訊息」音效：僅對已載入之配對 id 建立 Realtime 過濾訂閱（避免無 filter 監聽整表影響連線／其他功能）。 */
+  const matchIdsForIncomingSoundKey = useMemo(() => {
+    const ids = new Set<string>()
+    for (const c of liveMatchThreads) {
+      const m = typeof c.matchId === 'string' ? c.matchId.trim() : ''
+      if (m) ids.add(m.toLowerCase())
+    }
+    return [...ids].sort().join('|')
+  }, [liveMatchThreads])
   const [demoPuzzleClearedByProfile, setDemoPuzzleClearedByProfile] = useState<Record<number, number[]>>(() => loadDemoPuzzleClearedSlots())
   const discoverDeckDayRef = useRef(getAppDayKey())
   const [discoverDeckDayKey, setDiscoverDeckDayKey] = useState(() => getAppDayKey())
@@ -6243,7 +6252,11 @@ export default function MainScreen({
     if (!user?.id) return
     return subscribeToNewMatches(user.id, (row) => {
       const peerId = row.user_a === user.id ? row.user_b : row.user_a
-      playInAppSound('match')
+      try {
+        playInAppSound('match')
+      } catch {
+        /* 同上 */
+      }
       setMatchSplash({ matchId: row.id, peerUserId: peerId })
       void loadLiveMatchThreads('soft')
     })
@@ -6257,20 +6270,26 @@ export default function MainScreen({
   /** 對方傳入任意配對聊天：App 內提示音（已開著該聊天室且前景時略過）。 */
   useEffect(() => {
     if (!user?.id) return
-    return subscribeToMyMatchMessageInserts(user.id, (row) => {
+    const ids = matchIdsForIncomingSoundKey ? matchIdsForIncomingSoundKey.split('|').filter(Boolean) : []
+    return subscribeToMyIncomingMatchMessages(user.id, ids, (row) => {
       const mid = row.match_id
+      const openId = openChatMatchIdRef.current
       if (
         mid &&
-        openChatMatchIdRef.current != null &&
-        mid === openChatMatchIdRef.current &&
+        openId &&
+        mid.toLowerCase() === openId.toLowerCase() &&
         typeof document !== 'undefined' &&
         document.visibilityState === 'visible'
       ) {
         return
       }
-      playInAppSound('message')
+      try {
+        playInAppSound('message')
+      } catch {
+        /* Web Audio 極少數環境可能丟錯，勿中斷主殼 */
+      }
     })
-  }, [user?.id, foregroundReloadNonce, physicalChannelResubscribeNonce])
+  }, [user?.id, matchIdsForIncomingSoundKey, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     if (pendingChatId == null) return
@@ -6411,6 +6430,7 @@ export default function MainScreen({
       <InstantMatchTab
         userId={user.id}
         foregroundReloadNonce={foregroundReloadNonce}
+        physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
         onWaitingStateChange={handleInstantWaitingStateChange}
       />

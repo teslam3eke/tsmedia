@@ -49,6 +49,8 @@ import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
 type Props = {
   userId: string
   foregroundReloadNonce: number
+  /** MainScreen：`removeAllChannels` 後遞增，與 ChatRoom／訊息音效同輪刷新 Realtime postgres_changes */
+  physicalChannelResubscribeNonce: number
   onMutualFriendMatchCreated?: () => void
   /** 通知主殼是否在「排隊中」，以便切 tab 時跳出離開確認 */
   onWaitingStateChange?: (waiting: boolean) => void
@@ -296,6 +298,7 @@ function useInstantTabLifecycleExit(
 export default function InstantMatchTab({
   userId,
   foregroundReloadNonce,
+  physicalChannelResubscribeNonce,
   onMutualFriendMatchCreated,
   onWaitingStateChange,
 }: Props) {
@@ -393,7 +396,7 @@ export default function InstantMatchTab({
       cancelled = true
       clearInterval(id)
     }
-  }, [userId, foregroundReloadNonce, ingestPollOk])
+  }, [userId, foregroundReloadNonce, physicalChannelResubscribeNonce, ingestPollOk])
 
   const pullInstantPoll = useCallback(async () => {
     if (doneHoldRef.current) return
@@ -517,7 +520,7 @@ export default function InstantMatchTab({
         return next
       })
     })
-  }, [sessionId, loadMsgs, userId])
+  }, [sessionId, loadMsgs, userId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -588,7 +591,7 @@ export default function InstantMatchTab({
     return subscribeToInstantSessionSignals(sessionId, () => {
       void pullInstantPoll()
     })
-  }, [sessionId, snapshot?.status, pullInstantPoll])
+  }, [sessionId, snapshot?.status, pullInstantPoll, physicalChannelResubscribeNonce])
 
   const chatEndsAtMs = useMemo(() => {
     if (!inSession) return null
