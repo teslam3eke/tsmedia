@@ -34,7 +34,7 @@ import {
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   getPhotoUnlockState,
-  getMyMatches, getMatchMessages, fetchMatchThreadUnreadCounts, sendMatchMessage, subscribeToMatchMessages,
+  getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
@@ -44,7 +44,7 @@ import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotif
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
-import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
+import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
@@ -2687,12 +2687,14 @@ function MatchesTab({
   currentUserId,
   liveConversations,
   liveConversationsLoading,
+  matchUnreadByMatchId,
   onOpenPerson,
   onStartChat,
 }: {
   currentUserId?: string | null
   liveConversations: Conversation[]
   liveConversationsLoading: boolean
+  matchUnreadByMatchId?: Record<string, number>
   onOpenPerson: (p: PersonSummary) => void
   onStartChat: (id: number | string) => void
 }) {
@@ -2729,8 +2731,17 @@ function MatchesTab({
               const idSlot = peerId ? (Math.abs(hashFromUuid(peerId)) % 1_000_000) + 10_000 : 0
               const company = conv.subtitle.split(' · ')[0] || '—'
               const role = conv.subtitle.split(' · ')[1] ?? conv.subtitle
-              const t = conv.matchedAt != null ? formatMatchListTime(conv.matchedAt) : ''
               const chatId = conv.matchId ?? String(conv.id)
+              const midKey = typeof chatId === 'string' ? chatId.trim().toLowerCase() : ''
+              const unreadN = midKey ? (matchUnreadByMatchId?.[midKey] ?? 0) : 0
+              const previewRaw = conv.lastMessagePreview?.trim()
+              const previewLine = previewRaw
+                ? conv.lastMessageFromPeer
+                  ? previewRaw
+                  : `你：${previewRaw}`
+                : '尚無對話'
+              const listTs = conv.lastMessageAtMs ?? conv.matchedAt
+              const t = listTs != null ? formatMatchListTime(listTs) : ''
               const openPerson = () =>
                 onOpenPerson({
                   id: idSlot,
@@ -2762,18 +2773,18 @@ function MatchesTab({
                       {conv.initials}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="font-semibold text-slate-900 text-sm">{conv.name}</span>
-                        <span className={cn(
-                          'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
-                          company === 'TSMC' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600',
-                        )}>
-                          {company}
-                        </span>
+                      <div className="flex items-center gap-2 mb-0.5 min-w-0">
+                        <span className="font-semibold text-slate-900 text-sm truncate">{conv.name}</span>
+                        {unreadN > 0 && (
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full bg-rose-500 shadow-sm shadow-rose-500/40"
+                            aria-label={`${unreadN} 則未讀`}
+                          />
+                        )}
                       </div>
-                      <p className="text-[11px] text-slate-400 truncate">{role}</p>
+                      <p className="text-[11px] text-slate-500 truncate leading-snug">{previewLine}</p>
                     </div>
-                    <span className="text-[10px] text-slate-400 flex-shrink-0">{t}</span>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap">{t}</span>
                   </div>
                   <div className="mt-3 flex gap-2">
                     <button
@@ -3144,6 +3155,10 @@ interface Conversation {
   /** Supabase match id — when set, ChatRoomView loads DB messages + Realtime */
   matchId?: string
   peerUserId?: string
+  /** 配對列表：最後一則訊息摘要（公司／職位改由個人檔案 overlay 顯示） */
+  lastMessagePreview?: string
+  lastMessageAtMs?: number
+  lastMessageFromPeer?: boolean
 }
 
 const LIVE_CONV_CACHE_PREFIX = 'tsmedia:live-conversations:v1:'
@@ -3175,6 +3190,38 @@ function clearLiveConvSessionCache(userId: string) {
   }
 }
 
+function truncateMatchListPreview(body: string, maxLen = 72): string {
+  const t = body.replace(/\s+/g, ' ').trim()
+  if (!t) return ''
+  if (t.length <= maxLen) return t
+  return `${t.slice(0, maxLen - 1)}…`
+}
+
+function applyMatchSidebarMerge(convs: Conversation[], sidebar: Map<string, MatchThreadSidebarRow>): Conversation[] {
+  return convs.map((c) => {
+    const mid = typeof c.matchId === 'string' ? c.matchId.trim().toLowerCase() : ''
+    const s = mid ? sidebar.get(mid) : undefined
+    if (!s) return c
+    const raw = typeof s.last_body === 'string' ? s.last_body : ''
+    const preview = raw.trim() ? truncateMatchListPreview(raw) : undefined
+    const atMs = s.last_created_at ? new Date(s.last_created_at).getTime() : NaN
+    const lastMessageAtMs = Number.isFinite(atMs) ? atMs : undefined
+    return {
+      ...c,
+      lastMessagePreview: preview,
+      lastMessageAtMs,
+      lastMessageFromPeer: preview != null ? s.last_sender_is_peer : undefined,
+    }
+  })
+}
+
+function sortMatchThreadsByActivity(rows: Conversation[]): Conversation[] {
+  return [...rows].sort(
+    (a, b) =>
+      (b.lastMessageAtMs ?? b.matchedAt ?? 0) - (a.lastMessageAtMs ?? a.matchedAt ?? 0),
+  )
+}
+
 function compareChatMessageTime(a: ChatMessage, b: ChatMessage): number {
   if (a.createdAt && b.createdAt) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -3202,6 +3249,7 @@ function ChatRoomView({
   foregroundReloadNonce,
   physicalChannelResubscribeNonce,
   onLiveMatchOutboundMessage,
+  onMatchIncomingMarkedRead,
 }: {
   conversation: Conversation
   currentUserId: string | null
@@ -3220,6 +3268,8 @@ function ChatRoomView({
   physicalChannelResubscribeNonce: number
   /** 正式配對聊天送出成功後（刷新底欄未讀徽章）。 */
   onLiveMatchOutboundMessage?: () => void
+  /** 開啟聊天後將對方訊息標已讀並刷新側欄徽章／預覽。 */
+  onMatchIncomingMarkedRead?: () => void
 }) {
   const isLive = Boolean(conversation.matchId && currentUserId)
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -3279,6 +3329,9 @@ function ChatRoomView({
         .map((r) => formatChatMessageFromRow(r, currentUserId))
         .sort(compareChatMessageTime)
       setMessages(mapped)
+      await markMatchIncomingMessagesRead(conversation.matchId!)
+      if (cancelled) return
+      onMatchIncomingMarkedRead?.()
     })()
     return () => {
       cancelled = true
@@ -3290,8 +3343,22 @@ function ChatRoomView({
     return subscribeToMatchMessages(conversation.matchId, (row) => {
       const msg = formatChatMessageFromRow(row, currentUserId)
       setMessages((prev) => mergeUniqueChatMessages(prev, msg))
+      const mid = conversation.matchId
+      if (!mid || !currentUserId) return
+      if (row.sender_id !== currentUserId) {
+        void markMatchIncomingMessagesRead(mid).then(() => {
+          onMatchIncomingMarkedRead?.()
+        })
+      }
     })
-  }, [isLive, conversation.matchId, currentUserId, foregroundReloadNonce, physicalChannelResubscribeNonce])
+  }, [
+    isLive,
+    conversation.matchId,
+    currentUserId,
+    foregroundReloadNonce,
+    physicalChannelResubscribeNonce,
+    onMatchIncomingMarkedRead,
+  ])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
@@ -5738,7 +5805,7 @@ export default function MainScreen({
 
   const matchTabUnreadRefreshTimerRef = useRef<number | null>(null)
 
-  const refreshMatchTabUnreadCounts = useCallback(async () => {
+  const refreshMatchTabSidebar = useCallback(async () => {
     const uid = user?.id
     if (!uid) return
     const ids = liveMatchThreadsRef.current
@@ -5748,19 +5815,20 @@ export default function MainScreen({
       setMatchTabUnreadByMatchId({})
       return
     }
-    const map = await fetchMatchThreadUnreadCounts(ids)
+    const map = await fetchMatchThreadsSidebarState(ids)
     const rec: Record<string, number> = {}
-    for (const [mid, n] of map) rec[mid.toLowerCase()] = n
+    for (const [mid, row] of map) rec[mid.toLowerCase()] = row.unread
     setMatchTabUnreadByMatchId(rec)
+    setLiveMatchThreads((prev) => sortMatchThreadsByActivity(applyMatchSidebarMerge(prev, map)))
   }, [user?.id])
 
   const scheduleMatchTabUnreadRefresh = useCallback(() => {
     if (matchTabUnreadRefreshTimerRef.current != null) window.clearTimeout(matchTabUnreadRefreshTimerRef.current)
     matchTabUnreadRefreshTimerRef.current = window.setTimeout(() => {
       matchTabUnreadRefreshTimerRef.current = null
-      void refreshMatchTabUnreadCounts()
+      void refreshMatchTabSidebar()
     }, 320)
-  }, [refreshMatchTabUnreadCounts])
+  }, [refreshMatchTabSidebar])
 
   useEffect(() => {
     return () => {
@@ -6267,15 +6335,18 @@ export default function MainScreen({
       const matchIdsForUnread = rows
         .map((r) => (typeof r.matchId === 'string' ? r.matchId.trim().toLowerCase() : ''))
         .filter(Boolean)
-      let unreadRec: Record<string, number> = {}
-      if (matchIdsForUnread.length > 0) {
-        const unreadMap = await fetchMatchThreadUnreadCounts(matchIdsForUnread)
-        for (const [mid, n] of unreadMap) unreadRec[mid.toLowerCase()] = n
-      }
+      const sidebar =
+        matchIdsForUnread.length > 0
+          ? await fetchMatchThreadsSidebarState(matchIdsForUnread)
+          : new Map<string, MatchThreadSidebarRow>()
       if (liveMatchThreadsLoadGenRef.current !== gen) return
+      const unreadRec: Record<string, number> = {}
+      for (const [mid, row] of sidebar) unreadRec[mid.toLowerCase()] = row.unread
+      let merged = applyMatchSidebarMerge(rows, sidebar)
+      merged = sortMatchThreadsByActivity(merged)
       setMatchTabUnreadByMatchId(unreadRec)
-      setLiveMatchThreads(rows)
-      writeLiveConvSessionCache(user.id, rows)
+      setLiveMatchThreads(merged)
+      writeLiveConvSessionCache(user.id, merged)
     } finally {
       window.clearTimeout(safetyTimer)
       if (liveMatchThreadsLoadGenRef.current === gen) setLiveMatchThreadsLoading(false)
@@ -6479,12 +6550,14 @@ export default function MainScreen({
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         onLiveMatchOutboundMessage={scheduleMatchTabUnreadRefresh}
+        onMatchIncomingMarkedRead={scheduleMatchTabUnreadRefresh}
       />
     ) : (
       <MatchesTab
         currentUserId={user?.id}
         liveConversations={liveMatchThreads}
         liveConversationsLoading={liveMatchThreadsLoading}
+        matchUnreadByMatchId={matchTabUnreadByMatchId}
         onOpenPerson={setViewingPerson}
         onStartChat={startChatWith}
       />

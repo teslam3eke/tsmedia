@@ -1201,31 +1201,27 @@ export function subscribeToNewMatches(
 
 const MATCH_THREAD_UNREAD_CHUNK = 36
 
-/** Tab badge／列表：對方在最後一則「我發出的訊息」之後傳入的訊息數（回覆後歸零）。 */
-export async function fetchMatchThreadUnreadCounts(matchIds: readonly string[]): Promise<Map<string, number>> {
-  const uuidRx =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-  const normalized: string[] = []
-  const seen = new Set<string>()
-  for (const raw of matchIds) {
-    const id = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
-    if (!id || seen.has(id)) continue
-    if (!uuidRx.test(id)) continue
-    seen.add(id)
-    normalized.push(id)
-  }
-  const out = new Map<string, number>()
-  if (normalized.length === 0) return out
+export type MatchThreadSidebarRow = {
+  unread: number
+  /** 無訊息時為 null */
+  last_body: string | null
+  last_created_at: string | null
+  /** 無訊息時 false（列表不顯示「你：」前綴） */
+  last_sender_is_peer: boolean
+}
 
+async function rpcRecoverableChunks<T>(
+  normalizedIds: readonly string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  invoke: (chunk: string[]) => Promise<{ data: any; error: any }>,
+  label: string,
+): Promise<T[]> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
   if (visible) await ensureConnectionWithBudget()
-
-  for (let i = 0; i < normalized.length; i += MATCH_THREAD_UNREAD_CHUNK) {
-    const chunk = normalized.slice(i, i + MATCH_THREAD_UNREAD_CHUNK)
-    const query = () =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any).rpc('match_thread_unread_counts', { p_match_ids: chunk })
-
+  const flat: T[] = []
+  for (let i = 0; i < normalizedIds.length; i += MATCH_THREAD_UNREAD_CHUNK) {
+    const chunk = normalizedIds.slice(i, i + MATCH_THREAD_UNREAD_CHUNK)
+    const query = () => invoke(chunk)
     let { data, error } = await query()
     if (error && visible && isRecoverableResumeAuthError(error)) {
       await repairAuthAfterResume()
@@ -1241,20 +1237,87 @@ export async function fetchMatchThreadUnreadCounts(matchIds: readonly string[]):
       ;({ data, error } = await query())
     }
     if (error) {
-      console.error('[db] fetchMatchThreadUnreadCounts error:', error.message)
+      console.error(`[db] ${label}:`, error.message)
       continue
     }
-    const rows = (data ?? []) as { match_id: string; unread: number }[]
-    for (const row of rows) {
-      const mid = typeof row.match_id === 'string' ? row.match_id.trim().toLowerCase() : ''
-      if (!mid) continue
-      const rawU = row.unread
-      const u = typeof rawU === 'number' ? rawU : Number(rawU)
-      out.set(mid, Number.isFinite(u) ? Math.max(0, Math.floor(u)) : 0)
-    }
+    if (Array.isArray(data)) flat.push(...(data as T[]))
   }
+  return flat
+}
 
+function normalizeUuidMatchIds(matchIds: readonly string[]): string[] {
+  const uuidRx =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const raw of matchIds) {
+    const id = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+    if (!id || seen.has(id)) continue
+    if (!uuidRx.test(id)) continue
+    seen.add(id)
+    normalized.push(id)
+  }
+  return normalized
+}
+
+/** 底欄徽章 + 配對列表：未讀數與最後訊息預覽（read_at：開啟對話標已讀）。 */
+export async function fetchMatchThreadsSidebarState(
+  matchIds: readonly string[],
+): Promise<Map<string, MatchThreadSidebarRow>> {
+  const normalized = normalizeUuidMatchIds(matchIds)
+  const out = new Map<string, MatchThreadSidebarRow>()
+  if (normalized.length === 0) return out
+
+  const rows = await rpcRecoverableChunks<{
+    match_id: string
+    unread: number
+    last_body: string | null
+    last_created_at: string | null
+    last_sender_is_peer: boolean
+  }>(normalized, (chunk) => (supabase as any).rpc('match_threads_sidebar_state', { p_match_ids: chunk }), 'fetchMatchThreadsSidebarState')
+
+  for (const row of rows) {
+    const mid = typeof row.match_id === 'string' ? row.match_id.trim().toLowerCase() : ''
+    if (!mid) continue
+    const rawU = row.unread
+    const u = typeof rawU === 'number' ? rawU : Number(rawU)
+    out.set(mid, {
+      unread: Number.isFinite(u) ? Math.max(0, Math.floor(u)) : 0,
+      last_body: row.last_body ?? null,
+      last_created_at: row.last_created_at ?? null,
+      last_sender_is_peer: Boolean(row.last_sender_is_peer),
+    })
+  }
   return out
+}
+
+/** 將對方傳入且尚未讀取的訊息標為已讀（僅配對參與者可執行）。 */
+export async function markMatchIncomingMessagesRead(matchId: string): Promise<{ ok: boolean; error?: string }> {
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await ensureConnectionWithBudget()
+  const query = () =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).rpc('mark_match_incoming_messages_read', { p_match_id: matchId })
+
+  let { error } = await query()
+  if (error && visible && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(12_000)
+    ;({ error } = await query())
+  }
+  if (error && visible && isRecoverableResumeAuthError(error)) {
+    await repairAuthAfterResume()
+    ;({ error } = await query())
+  }
+  if (error && visible) {
+    await ensureConnectionWithBudget()
+    ;({ error } = await query())
+  }
+  if (error) {
+    console.error('[db] markMatchIncomingMessagesRead error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
 }
 
 /** 成功為陣列（可能為空）；失敗為 null — 前景重載時勿清空聊天（避免誤以為訊息遺失）。 */

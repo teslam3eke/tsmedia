@@ -1,6 +1,5 @@
--- Per-match unread count for tab badge: peer messages after viewer's last outbound message.
--- Aligns with MainScreen ChatMessage unread (reply clears), without hydrating full threads.
-
+-- Per-match unread via read_at (對方傳入且 read_at 為 NULL)。
+-- 語意與「標已讀」完整版請併跑 066（mark_match_incoming_messages_read + match_threads_sidebar_state）。
 create or replace function public.match_thread_unread_counts(p_match_ids uuid[])
 returns table(match_id uuid, unread integer)
 language sql
@@ -14,15 +13,7 @@ as $$
       from public.messages msg
       where msg.match_id = p.match_id
         and msg.sender_id <> auth.uid()
-        and msg.created_at > coalesce(
-          (
-            select max(m2.created_at)
-            from public.messages m2
-            where m2.match_id = p.match_id
-              and m2.sender_id = auth.uid()
-          ),
-          '-infinity'::timestamptz
-        )
+        and msg.read_at is null
     ) as unread
   from (
     select distinct m.id as match_id
