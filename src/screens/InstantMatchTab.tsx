@@ -31,6 +31,7 @@ import {
   subscribeToInstantSessionSignals,
   getProfile,
   resolvePhotoUrls,
+  type InstantMatchPollResponse,
   type InstantMatchPollResult,
   type InstantSessionMessageRow,
 } from '@/lib/db'
@@ -197,6 +198,7 @@ function useInstantTabLifecycleExit(
   snapshot: InstantMatchPollResult | null,
   setSnapshot: Dispatch<SetStateAction<InstantMatchPollResult | null>>,
   doneHoldRef: MutableRefObject<boolean>,
+  runInstantPoll: (enqueue: boolean) => Promise<InstantMatchPollResponse>,
 ) {
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
@@ -206,7 +208,7 @@ function useInstantTabLifecycleExit(
       if (snapshotRef.current?.status !== 'waiting') return
       instantMatchLeaveQueueKeepalive()
       await instantMatchLeaveQueue()
-      const res = await instantMatchPoll({ enqueue: false })
+      const res = await runInstantPoll(false)
       if (res.ok && res.data.status !== 'done') setSnapshot(res.data)
     }
 
@@ -216,8 +218,8 @@ function useInstantTabLifecycleExit(
       const sid = s.session_id
       instantSessionAbandonKeepalive(sid)
       await instantSessionAbandon(sid)
-      const res = await instantMatchPoll({ enqueue: false })
-      if (!res.ok) return
+      const res = await runInstantPoll(false)
+      if (res.ok === false) return
       const r = res.data
       setSnapshot((prev) => {
         if (prev?.status === 'done') return prev
@@ -292,7 +294,7 @@ function useInstantTabLifecycleExit(
        * 實際離開改依 visibility（延遲）／pagehide／MainScreen 離開確認與確認離開後的 RPC。
        */
     }
-  }, [doneHoldRef, setSnapshot])
+  }, [doneHoldRef, setSnapshot, runInstantPoll])
 }
 
 export default function InstantMatchTab({
@@ -330,6 +332,15 @@ export default function InstantMatchTab({
   /** 僅在「等候中」輪詢送 p_enqueue=true，避免僅開分頁之 enqueue:false 清列／刷新誤撮合（見 migration 053）。 */
   const pollEnqueueWhileWaitingRef = useRef(false)
   const busyRef = useRef(false)
+  /** Migration 053：enqueue:false 會刪無 session_id 之列；並行 poll 可能「先入列再秒刪」，必須序向化 RPC。 */
+  const pollChainTailRef = useRef<Promise<InstantMatchPollResponse>>(
+    Promise.resolve({ ok: true, data: { status: 'idle' as const } }),
+  )
+  const chainInstantMatchPoll = useCallback((enqueue: boolean): Promise<InstantMatchPollResponse> => {
+    const next = pollChainTailRef.current.then(() => instantMatchPoll({ enqueue }))
+    pollChainTailRef.current = next
+    return next
+  }, [])
 
   const ingestPollOk = useCallback((raw: InstantMatchPollResult) => {
     const data = applyDismissedSessionFilter(raw, dismissedInstantSessionIdsRef.current)
@@ -368,7 +379,7 @@ export default function InstantMatchTab({
     }
   }, [onWaitingStateChange])
 
-  useInstantTabLifecycleExit(snapshot, setSnapshot, doneHoldRef)
+  useInstantTabLifecycleExit(snapshot, setSnapshot, doneHoldRef, chainInstantMatchPoll)
 
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 1000)
@@ -381,10 +392,10 @@ export default function InstantMatchTab({
       if (doneHoldRef.current) return
       if (busyRef.current) return
       const enqueue = pollEnqueueWhileWaitingRef.current
-      const res = await instantMatchPoll({ enqueue })
+      const res = await chainInstantMatchPoll(enqueue)
       if (cancelled) return
       setPollReady(true)
-      if (!res.ok) {
+      if (res.ok === false) {
         setPollError(res.error)
         return
       }
@@ -396,20 +407,20 @@ export default function InstantMatchTab({
       cancelled = true
       clearInterval(id)
     }
-  }, [userId, foregroundReloadNonce, physicalChannelResubscribeNonce, ingestPollOk])
+  }, [userId, foregroundReloadNonce, physicalChannelResubscribeNonce, ingestPollOk, chainInstantMatchPoll])
 
   const pullInstantPoll = useCallback(async () => {
     if (doneHoldRef.current) return
     if (busyRef.current) return
     const enqueue = pollEnqueueWhileWaitingRef.current
-    const res = await instantMatchPoll({ enqueue })
+    const res = await chainInstantMatchPoll(enqueue)
     setPollReady(true)
-    if (!res.ok) {
+    if (res.ok === false) {
       setPollError(res.error)
       return
     }
     ingestPollOk(res.data)
-  }, [ingestPollOk])
+  }, [ingestPollOk, chainInstantMatchPoll])
 
   /** userId 變更或重新掛載（例如切回本 tab）時，從 sessionStorage 還原已按下「我知道了」的場次。 */
   useEffect(() => {
@@ -421,6 +432,7 @@ export default function InstantMatchTab({
     doneHoldRef.current = false
     pollEnqueueWhileWaitingRef.current = false
     dismissedInstantSessionIdsRef.current = loadDismissedFromStorage(userId)
+    pollChainTailRef.current = Promise.resolve({ ok: true, data: { status: 'idle' as const } })
   }, [userId])
 
   const inSession = snapshot?.status === 'in_session' ? snapshot : null
@@ -620,26 +632,35 @@ export default function InstantMatchTab({
   }, [inSession, userId])
 
   const startQueue = async () => {
+    busyRef.current = true
     setBusy(true)
     setPollError(null)
     try {
-      const res = await instantMatchPoll({ enqueue: true })
-      if (res.ok) {
+      const res = await chainInstantMatchPoll(true)
+      if (res.ok === true) {
         pollEnqueueWhileWaitingRef.current = res.data.status === 'waiting'
         ingestPollOk(res.data)
-      } else setPollError(res.error)
+      } else if (res.ok === false) {
+        setPollError(res.error)
+      }
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
 
   const leaveQueueClick = async () => {
+    busyRef.current = true
     setBusy(true)
-    await instantMatchLeaveQueue()
-    const res = await instantMatchPoll({ enqueue: false })
-    if (res.ok) ingestPollOk(res.data)
-    else setPollError(res.error)
-    setBusy(false)
+    try {
+      await instantMatchLeaveQueue()
+      const res = await chainInstantMatchPoll(false)
+      if (res.ok === true) ingestPollOk(res.data)
+      else if (res.ok === false) setPollError(res.error)
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
   }
 
   const handleSend = async () => {
@@ -664,15 +685,20 @@ export default function InstantMatchTab({
     ) {
       return
     }
+    busyRef.current = true
     setBusy(true)
     pollEnqueueWhileWaitingRef.current = false
     instantSessionAbandonKeepalive(sid)
     const ab = await instantSessionAbandon(sid)
     if (!ab.ok) setPollError(ab.error ?? '離開失敗')
-    const res = await instantMatchPoll({ enqueue: false })
-    if (res.ok) ingestPollOk(res.data)
-    else setPollError(res.error)
-    setBusy(false)
+    try {
+      const res = await chainInstantMatchPoll(false)
+      if (res.ok === true) ingestPollOk(res.data)
+      else if (res.ok === false) setPollError(res.error)
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
   }
 
   const peerDisplay = peer?.nickname?.trim() || peer?.name?.trim() || '神秘對象'
@@ -700,7 +726,7 @@ export default function InstantMatchTab({
               <Users className="h-8 w-8" strokeWidth={2} aria-hidden />
             </div>
             <p className="text-sm font-semibold leading-relaxed text-slate-800">
-              {snapshot?.hint ??
+              {(snapshot?.status === 'idle' ? snapshot.hint : undefined) ??
                 '請按下方「開始配對」加入等候（不會自動幫你排隊）；需另一位使用者同時在等待才會進房。'}
             </p>
           </InstantCard>
@@ -797,9 +823,9 @@ export default function InstantMatchTab({
               persistDismissedToStorage(userId, dismissedInstantSessionIdsRef.current)
               // 結束頁按「我知道了」仍未表達排隊；須立刻關閉「等候中輪詢送 enqueue:true」以免與 056 前 SQL 行為疊加誤撮合
               pollEnqueueWhileWaitingRef.current = false
-              void instantMatchPoll({ enqueue: false }).then((res) => {
-                if (res.ok) ingestPollOk(res.data)
-                else setPollError(res.error)
+              void chainInstantMatchPoll(false).then((res) => {
+                if (res.ok === true) ingestPollOk(res.data)
+                else if (res.ok === false) setPollError(res.error)
               })
             }}
           >
@@ -985,10 +1011,10 @@ export default function InstantMatchTab({
                           setDecideBusy(true)
                           try {
                             const res = await instantSessionDecide(sessionId, 'friend')
-                            if (!res.ok) setPollError(res.error ?? '')
-                            const resPoll = await instantMatchPoll({ enqueue: false })
-                            if (resPoll.ok) ingestPollOk(resPoll.data)
-                            else setPollError(resPoll.error)
+                            if (res.ok === false) setPollError(res.error ?? '')
+                            const resPoll = await chainInstantMatchPoll(false)
+                            if (resPoll.ok === true) ingestPollOk(resPoll.data)
+                            else if (resPoll.ok === false) setPollError(resPoll.error)
                           } finally {
                             setDecideBusy(false)
                           }
@@ -1006,10 +1032,10 @@ export default function InstantMatchTab({
                           setDecideBusy(true)
                           try {
                             const res = await instantSessionDecide(sessionId, 'pass')
-                            if (!res.ok) setPollError(res.error ?? '')
-                            const resPoll = await instantMatchPoll({ enqueue: false })
-                            if (resPoll.ok) ingestPollOk(resPoll.data)
-                            else setPollError(resPoll.error)
+                            if (res.ok === false) setPollError(res.error ?? '')
+                            const resPoll = await chainInstantMatchPoll(false)
+                            if (resPoll.ok === true) ingestPollOk(resPoll.data)
+                            else if (resPoll.ok === false) setPollError(resPoll.error)
                           } finally {
                             setDecideBusy(false)
                           }
