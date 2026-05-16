@@ -1,29 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { MessageCircle, Sparkles, X } from 'lucide-react'
+import { MessageCircle, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
+const AUTO_CLOSE_MS = 3000
 const PUZZLE_TILES = Array.from({ length: 16 }, (_, i) => i)
 
 type Props = {
   open: boolean
-  onGotIt: () => void
+  /** 約 3 秒後呼叫；不可手動略過 */
+  onComplete: () => void
 }
 
 /**
  * 首次進入探索：拼圖解鎖教學。
- * 使用與聊天室相同的拼圖切割與版型，搭配循環動畫示範解鎖過程。
+ * 全螢幕層級、約 3 秒後自動關閉；不提供略過。
  */
-export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
+export default function DiscoverPuzzleIntroModal({ open, onComplete }: Props) {
   const svgId = 'discover-puzzle-intro'
   const [demoUnlocked, setDemoUnlocked] = useState(() => new Set<number>([2, 5, 8]))
   const [pulseTile, setPulseTile] = useState<number | null>(null)
   const [hintIndex, setHintIndex] = useState(0)
   const unlockSeqRef = useRef([11, 14, 1, 13, 6, 10])
   const seqPosRef = useRef(0)
-  const resumeDismissRef = useRef(false)
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
 
   const orderedTiles = useMemo(
     () => [...PUZZLE_TILES].sort((a, b) => Number(demoUnlocked.has(a)) - Number(demoUnlocked.has(b))),
@@ -31,28 +34,10 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
   )
 
   useEffect(() => {
-    if (!open) {
-      resumeDismissRef.current = false
-      return
-    }
-    const onVis = () => {
-      const v = document.visibilityState
-      if (v === 'hidden') resumeDismissRef.current = true
-      if (v === 'visible' && resumeDismissRef.current) {
-        resumeDismissRef.current = false
-        onGotIt()
-      }
-    }
-    const onShow = (ev: Event) => {
-      if ((ev as PageTransitionEvent).persisted) onGotIt()
-    }
-    document.addEventListener('visibilitychange', onVis)
-    window.addEventListener('pageshow', onShow)
-    return () => {
-      document.removeEventListener('visibilitychange', onVis)
-      window.removeEventListener('pageshow', onShow)
-    }
-  }, [open, onGotIt])
+    if (!open) return
+    const id = window.setTimeout(() => onCompleteRef.current(), AUTO_CLOSE_MS)
+    return () => window.clearTimeout(id)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -105,7 +90,7 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
       {open ? (
         <motion.div
           key="discover-puzzle-intro-backdrop"
-          className="fixed inset-0 z-[360] flex items-end justify-center bg-slate-950/60 px-4 pb-safe pt-10 sm:items-center sm:p-5"
+          className="fixed inset-0 z-[380] flex min-h-[100dvh] flex-col items-center justify-center bg-slate-950/70 px-4 pt-safe pb-safe sm:p-5"
           role="dialog"
           aria-modal="true"
           aria-labelledby="discover-puzzle-intro-title"
@@ -113,25 +98,14 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.25 }}
-          onClick={onGotIt}
         >
           <motion.div
-            className="relative w-full max-w-[min(100%,380px)] overflow-hidden rounded-[1.75rem] bg-white shadow-2xl shadow-slate-900/25 ring-1 ring-slate-200/90"
-            onClick={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: 28, scale: 0.96 }}
+            className="flex max-h-[min(100dvh-2rem,calc(100dvh-env(safe-area-inset-bottom)-2rem))] w-full max-w-[min(100%,380px)] flex-col overflow-hidden rounded-[1.75rem] bg-white shadow-2xl shadow-slate-900/25 ring-1 ring-slate-200/90"
+            initial={{ opacity: 0, y: 20, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
           >
-            <button
-              type="button"
-              onClick={onGotIt}
-              className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-700"
-              aria-label="關閉"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
             <div className="border-b border-slate-100 bg-gradient-to-br from-sky-50 via-white to-violet-50 px-5 pb-4 pt-6">
               <div className="flex items-center justify-center gap-2">
                 <motion.div
@@ -153,8 +127,7 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
               </p>
             </div>
 
-            {/* —— 模擬聊天室拼圖區塊（版型對齊 PuzzlePhotoUnlock）—— */}
-            <div className="bg-white px-4 py-4 shadow-inner shadow-slate-100/80">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 py-4 shadow-inner shadow-slate-100/80">
               <div className="flex h-[220px] w-full items-stretch justify-center gap-1.5 sm:h-[238px]">
                 <div className="flex w-[72px] shrink-0 flex-col justify-center sm:w-[76px]">
                   <motion.div
@@ -260,8 +233,7 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
               </div>
             </div>
 
-            {/* 輪播提示 */}
-            <div className="relative h-[4.25rem] overflow-hidden border-t border-slate-100 bg-slate-50/90 px-5 py-3">
+            <div className="relative h-[4.25rem] shrink-0 overflow-hidden border-t border-slate-100 bg-slate-50/90 px-5 py-3">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={hintIndex}
@@ -325,15 +297,9 @@ export default function DiscoverPuzzleIntroModal({ open, onGotIt }: Props) {
               </div>
             </div>
 
-            <div className="px-5 pb-5 pt-1">
-              <button
-                type="button"
-                className="w-full rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/20 transition active:scale-[0.99] active:opacity-95"
-                onClick={onGotIt}
-              >
-                開始探索
-              </button>
-            </div>
+            <p className="shrink-0 border-t border-slate-100 px-5 pb-5 pt-2 text-center text-[11px] font-semibold text-slate-400">
+              約 {AUTO_CLOSE_MS / 1000} 秒後自動繼續
+            </p>
           </motion.div>
         </motion.div>
       ) : null}

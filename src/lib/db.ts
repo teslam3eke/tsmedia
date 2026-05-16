@@ -1362,6 +1362,9 @@ export type InstantMatchPollResult =
       phase: 'chat' | 'decide' | 'mutual_friend' | 'closed'
       session_id: string
       peer_user_id: string
+      /** 供前端對應 decision_a / decision_b 哪一側為本人 */
+      user_a: string
+      user_b: string
       created_at: string
       chat_ends_at: string
       decision_a: string
@@ -1372,7 +1375,7 @@ export type InstantMatchPollResult =
       session_id: string
       promoted_match_id?: string
       mutual_friend: boolean
-      instant_end_reason?: 'peer_left' | 'self_left'
+      instant_end_reason?: 'peer_left' | 'self_left' | 'decision_closed'
     }
 
 export type InstantMatchPollResponse =

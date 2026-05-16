@@ -1434,6 +1434,7 @@ function DiscoverTab({
   refreshCredits,
   onCreditAction,
   onDiscoverMatch,
+  onOpenNotificationSettings,
 }: {
   userId?: string
   /** 與主畫面同步的 app 日（每晚 10 點換日），換日時會重抓探索名單 */
@@ -1452,6 +1453,8 @@ function DiscoverTab({
   onCreditAction?: (kind: 'like' | 'super_like') => void
   /** 伺服器回傳已配對時刷新配對／聊天列表（Realtime 亦會更新） */
   onDiscoverMatch?: () => void
+  /** 開啟通知設定全螢幕（由主殼統一渲染 {@link NotificationModal}） */
+  onOpenNotificationSettings: () => void
 }) {
   // Men see female profiles, women see male profiles (demo 另以 preferredRegion 篩選；已登入者由伺服器每日 6 人＋區域邏輯）
   const [blockedKeys, setBlockedKeys] = useState<string[]>([])
@@ -1545,8 +1548,6 @@ function DiscoverTab({
   const [direction, setDirection] = useState<'next' | 'prev'>('next')
   const [done, setDone] = useState(() => discoverUiSnap?.done ?? false)
   const [scrolled, setScrolled] = useState(() => discoverUiSnap?.scrolled ?? false)
-  const [showNotifModal, setShowNotifModal] = useState(false)
-  const [showNotifPrompt, setShowNotifPrompt] = useState(false)
   const [confirmIntent, setConfirmIntent] = useState<null | 'like' | 'super_like'>(null)
   const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
@@ -1598,18 +1599,6 @@ function DiscoverTab({
     setIndex((i) => Math.min(i, visibleProfiles.length - 1))
   }, [visibleProfiles.length])
 
-  // On first visit to Discover each session, prompt user to enable notifications
-  // until they actually grant permission.
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return
-    if (Notification.permission === 'granted') return
-    const dismissed = sessionStorage.getItem('notif_prompt_dismissed') === '1'
-    if (dismissed) return
-    // Small delay so the card animation settles first
-    const t = setTimeout(() => setShowNotifPrompt(true), 600)
-    return () => clearTimeout(t)
-  }, [])
-
   useEffect(() => {
     getMyBlockedProfileKeys().then(setBlockedKeys)
   }, [userId])
@@ -1618,8 +1607,6 @@ function DiscoverTab({
   useEffect(() => {
     if (foregroundReloadNonce === 0) return
     setConfirmIntent(null)
-    setShowNotifModal(false)
-    setShowNotifPrompt(false)
     setReportTarget(null)
     setBlockTarget(null)
     requestAnimationFrame(() => {
@@ -2281,7 +2268,7 @@ function DiscoverTab({
           </p>
         </div>
         <button
-          onClick={() => setShowNotifModal(true)}
+          onClick={() => onOpenNotificationSettings()}
           className="w-9 h-9 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
         >
           <Bell className="w-4 h-4 text-slate-500" />
@@ -2489,13 +2476,6 @@ function DiscoverTab({
 
       </div>
 
-      {/* Notification modal */}
-      <AnimatePresence>
-        {showNotifModal && (
-          <NotificationModal onClose={() => setShowNotifModal(false)} userId={userId} />
-        )}
-      </AnimatePresence>
-
       <AnimatePresence>
         {confirmIntent && (
           <motion.div
@@ -2562,22 +2542,6 @@ function DiscoverTab({
               </div>
             </motion.div>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* First-login notification prompt — shown until user actually grants permission */}
-      <AnimatePresence>
-        {showNotifPrompt && (
-          <NotifEnablePrompt
-            onDismiss={() => {
-              sessionStorage.setItem('notif_prompt_dismissed', '1')
-              setShowNotifPrompt(false)
-            }}
-            onOpenSettings={() => {
-              setShowNotifPrompt(false)
-              setShowNotifModal(true)
-            }}
-          />
         )}
       </AnimatePresence>
 
@@ -2662,7 +2626,7 @@ function NotifEnablePrompt({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.2 }}
-      className="fixed inset-0 z-[210] flex items-center justify-center px-6"
+      className="fixed inset-0 z-[370] flex items-center justify-center px-6"
       style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(6px)' }}
       onClick={onDismiss}
     >
@@ -5773,6 +5737,8 @@ export default function MainScreen({
   /** 已登入者是否已有規定張數生活照（探索門檻） */
   const [selfPhotoOk, setSelfPhotoOk] = useState(true)
   const [showDiscoverPuzzleIntro, setShowDiscoverPuzzleIntro] = useState(false)
+  const [notifSettingsModalOpen, setNotifSettingsModalOpen] = useState(false)
+  const [showNotifPermissionNudge, setShowNotifPermissionNudge] = useState(false)
   const [photoGateToast, setPhotoGateToast] = useState(false)
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
@@ -5780,6 +5746,23 @@ export default function MainScreen({
   const [physicalChannelResubscribeNonce, setPhysicalChannelResubscribeNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
+
+  /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒。 */
+  useEffect(() => {
+    if (!user?.id) return
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission === 'granted') {
+      setShowNotifPermissionNudge(false)
+      return
+    }
+    const t = window.setTimeout(() => setShowNotifPermissionNudge(true), 520)
+    return () => window.clearTimeout(t)
+  }, [activeTab, user?.id])
+
+  useEffect(() => {
+    if (foregroundReloadNonce === 0) return
+    setNotifSettingsModalOpen(false)
+  }, [foregroundReloadNonce])
 
   /** `supabase` 回前景運輸踢：profiles REST + Realtime 硬斷線後事件；探索等不必等 WS onOpen */
   useEffect(() => {
@@ -6354,6 +6337,7 @@ export default function MainScreen({
             subtitle: '繼續探索下一位',
           })
         }}
+        onOpenNotificationSettings={() => setNotifSettingsModalOpen(true)}
       />
     ),
     matches: matchesChatConversation ? (
@@ -6650,6 +6634,27 @@ export default function MainScreen({
         onDismiss={clearRewardFlash}
       />
 
+      <AnimatePresence>
+        {notifSettingsModalOpen && user?.id && (
+          <NotificationModal onClose={() => setNotifSettingsModalOpen(false)} userId={user.id} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showNotifPermissionNudge &&
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission !== 'granted' && (
+            <NotifEnablePrompt
+              onDismiss={() => setShowNotifPermissionNudge(false)}
+              onOpenSettings={() => {
+                setShowNotifPermissionNudge(false)
+                setNotifSettingsModalOpen(true)
+              }}
+            />
+          )}
+      </AnimatePresence>
+
       <MatchSuccessSplash
         open={matchSplash != null}
         matchId={matchSplash?.matchId ?? null}
@@ -6672,7 +6677,7 @@ export default function MainScreen({
       {user?.id && (
         <DiscoverPuzzleIntroModal
           open={showDiscoverPuzzleIntro}
-          onGotIt={() => {
+          onComplete={() => {
             setShowDiscoverPuzzleIntro(false)
             markDiscoverChatPuzzleIntroSeen(user.id)
           }}

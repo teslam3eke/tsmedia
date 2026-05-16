@@ -312,6 +312,14 @@ export default function InstantMatchTab({
   const [input, setInput] = useState('')
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [pollReady, setPollReady] = useState(false)
+  const [decideBusy, setDecideBusy] = useState(false)
+
+  const instantInputRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  /** 即時房聊天區：鍵盤頂起（範圍僅本分頁，與 MainScreen ChatRoomView 一致） */
+  const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
+  const lastInsetCommitRef = useRef<number | null>(null)
+  const lastKbOpenCommitRef = useRef<boolean | null>(null)
 
   const doneHoldRef = useRef(false)
   /** 使用者已對該场次按「我知道了」——後續 poll 仍會帶舊 done，過濾成 idle */
@@ -512,6 +520,70 @@ export default function InstantMatchTab({
   }, [sessionId, loadMsgs, userId])
 
   useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages, keyboardInsetBottom])
+
+  useEffect(() => {
+    const vv = window.visualViewport
+    let raf = 0
+    const scrollBottomOnceSoon = () => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      window.setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+        200,
+      )
+    }
+    const updateKeyboardState = () => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const layoutH = window.innerHeight
+        const vvH = vv?.height ?? layoutH
+        const vvTop = vv?.offsetTop ?? 0
+        const rawInset = vv ? Math.max(0, layoutH - vvH - vvTop) : 0
+        const roundedInset = Math.max(0, Math.round(rawInset))
+        const inputFocused = document.activeElement === instantInputRef.current
+        const viewportShrunk = vv ? vvH < layoutH - 110 : false
+        const ghostInset =
+          roundedInset <= 36 && roundedInset > 0 && !inputFocused && !viewportShrunk
+
+        const nextInset = ghostInset ? 0 : roundedInset
+        const nextOpen = inputFocused || viewportShrunk
+
+        const prevI = lastInsetCommitRef.current
+        const prevO = lastKbOpenCommitRef.current
+        const insetChanged =
+          prevI === null ||
+          (nextInset !== prevI &&
+            (Math.abs(nextInset - prevI) >= 12 || nextInset === 0 || prevI === 0))
+        const openChanged = prevO === null || prevO !== nextOpen
+
+        if (insetChanged) {
+          lastInsetCommitRef.current = nextInset
+          setKeyboardInsetBottom(nextInset)
+        }
+        if (openChanged) {
+          lastKbOpenCommitRef.current = nextOpen
+          setInstantPuzzleKeyboardOpen(nextOpen)
+        }
+        if (insetChanged || openChanged) scrollBottomOnceSoon()
+      })
+    }
+    updateKeyboardState()
+    vv?.addEventListener('resize', updateKeyboardState)
+    window.addEventListener('resize', updateKeyboardState)
+    document.addEventListener('focusin', updateKeyboardState)
+    document.addEventListener('focusout', updateKeyboardState)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      vv?.removeEventListener('resize', updateKeyboardState)
+      window.removeEventListener('resize', updateKeyboardState)
+      document.removeEventListener('focusin', updateKeyboardState)
+      document.removeEventListener('focusout', updateKeyboardState)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!sessionId || snapshot?.status !== 'in_session') return
     return subscribeToInstantSessionSignals(sessionId, () => {
       void pullInstantPoll()
@@ -527,6 +599,22 @@ export default function InstantMatchTab({
     chatEndsAtMs == null ? 0 : Math.max(0, Math.floor((chatEndsAtMs - nowTick) / 1000))
   const mm = String(Math.floor(secsLeftChat / 60)).padStart(2, '0')
   const ss = String(secsLeftChat % 60).padStart(2, '0')
+
+  const decisionDeadlineMs = useMemo(() => {
+    if (!inSession || inSession.phase !== 'decide') return null
+    return new Date(inSession.chat_ends_at).getTime() + 120_000
+  }, [inSession])
+
+  const secsLeftDecide =
+    decisionDeadlineMs == null ? 0 : Math.max(0, Math.floor((decisionDeadlineMs - nowTick) / 1000))
+  const decMm = String(Math.floor(secsLeftDecide / 60)).padStart(2, '0')
+  const decSs = String(secsLeftDecide % 60).padStart(2, '0')
+
+  const myDecision: 'pending' | 'friend' | 'pass' | null = useMemo(() => {
+    if (!inSession || inSession.phase !== 'decide') return null
+    const raw = userId === inSession.user_a ? inSession.decision_a : inSession.decision_b
+    return raw as 'pending' | 'friend' | 'pass'
+  }, [inSession, userId])
 
   const startQueue = async () => {
     setBusy(true)
@@ -663,13 +751,14 @@ export default function InstantMatchTab({
   if (snapshot.status === 'done') {
     const peerEnd = snapshot.instant_end_reason === 'peer_left'
     const selfEnd = snapshot.instant_end_reason === 'self_left'
+    const decisionClosed = snapshot.instant_end_reason === 'decision_closed'
     return (
       <div className="flex min-h-0 flex-1 flex-col bg-white">
         <div className="flex flex-1 flex-col items-center justify-center px-6 pb-10 text-center">
           <div
             className={cn(
               'mb-5 flex h-20 w-20 items-center justify-center rounded-2xl text-white shadow-md',
-              snapshot.mutual_friend ? 'bg-emerald-500' : peerEnd ? 'bg-amber-600' : 'bg-slate-600',
+              snapshot.mutual_friend ? 'bg-emerald-500' : peerEnd ? 'bg-amber-600' : decisionClosed ? 'bg-slate-500' : 'bg-slate-600',
             )}
             aria-hidden
           >
@@ -678,20 +767,24 @@ export default function InstantMatchTab({
           <h2 className="mb-2 text-xl font-black tracking-tight text-slate-900">
             {snapshot.mutual_friend
               ? '配對成功'
-              : peerEnd
-                ? '對方已離開聊天室'
-                : selfEnd
-                  ? '你已離開聊天室'
-                  : '配對回合結束'}
+              : decisionClosed
+                ? '未互加好友'
+                : peerEnd
+                  ? '對方已離開聊天室'
+                  : selfEnd
+                    ? '你已離開聊天室'
+                    : '配對回合結束'}
           </h2>
           <p className="mb-8 max-w-[18rem] text-sm leading-relaxed text-slate-600">
             {snapshot.mutual_friend
               ? '對方也想當好友——已為你們建立正式配對，快到「配對」分頁開始聊天吧。'
-              : peerEnd
-                ? '對方已關閉或離開聊天。此場即時對話已結束，你仍可隨時再次加入等候。'
-                : selfEnd
-                  ? '你已離開此場對話。仍可隨時再次加入即時配對等候。'
-                  : '此一回合已結束。仍可隨時再次加入即時等候。'}
+              : decisionClosed
+                ? '聊天結束後須在 2 分鐘內雙方都按「加為好友」才能繼續；已逾時或未達成。'
+                : peerEnd
+                  ? '對方已關閉或離開聊天。此場即時對話已結束，你仍可隨時再次加入等候。'
+                  : selfEnd
+                    ? '你已離開此場對話。仍可隨時再次加入即時配對等候。'
+                    : '此一回合已結束。仍可隨時再次加入即時等候。'}
           </p>
           <button
             type="button"
@@ -719,7 +812,10 @@ export default function InstantMatchTab({
   const liveChat = sess.phase === 'chat'
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-slate-50">
+    <div
+      className="flex min-h-0 flex-1 flex-col bg-slate-50"
+      style={keyboardInsetBottom > 0 ? { paddingBottom: keyboardInsetBottom } : undefined}
+    >
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div className="flex-shrink-0 border-b border-gray-200 bg-white px-3 pb-2.5 pt-2">
           <div className="flex items-start justify-between gap-2">
@@ -737,7 +833,7 @@ export default function InstantMatchTab({
                   {sess.phase === 'chat'
                     ? `剩餘 ${mm}:${ss}`
                     : sess.phase === 'decide'
-                      ? '選擇是否加好友'
+                      ? `加好友剩餘 ${decMm}:${decSs}`
                       : '已結束'}
                 </motion.div>
               </div>
@@ -774,7 +870,10 @@ export default function InstantMatchTab({
         ) : null}
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
+          <div
+            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3"
+            style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
+          >
             {messages.length === 0 && liveChat && (
               <p className="rounded-2xl border border-dashed border-gray-200 bg-white/80 px-4 py-6 text-center text-xs leading-relaxed text-slate-500">
                 還沒有訊息，打個招呼吧。雙方若以文字聊得來，時間到後可按「加為好友」到配對裡繼續。
@@ -797,6 +896,7 @@ export default function InstantMatchTab({
                 </div>
               </motion.div>
             ))}
+            <div ref={messagesEndRef} className="h-px w-full shrink-0" aria-hidden />
           </div>
 
           {pollError && (
@@ -805,11 +905,10 @@ export default function InstantMatchTab({
 
           <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 bg-white px-2 py-2 pb-safe">
             <input
+              ref={instantInputRef}
               value={input}
               disabled={sess.phase !== 'chat'}
               onChange={(e) => setInput(e.target.value)}
-              onFocus={() => setInstantPuzzleKeyboardOpen(true)}
-              onBlur={() => setInstantPuzzleKeyboardOpen(false)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
@@ -855,41 +954,69 @@ export default function InstantMatchTab({
                 <p id="instant-decide-title" className="mb-1 text-center text-base font-black text-slate-900">
                   時間結束，下一步？
                 </p>
+                <p className="mb-3 text-center text-[11px] font-semibold tabular-nums text-amber-800">
+                  決定時間剩餘 {decMm}:{decSs}（逾時視同未互加）
+                </p>
                 <p className="mb-5 text-center text-xs leading-relaxed text-slate-500">
                   只有雙方都選「加為好友」，才會出現在彼此的配對名單裡繼續聊天。
                 </p>
-                <div className="flex flex-col gap-2.5">
-                  <button
-                    type="button"
-                    className="w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white"
-                    onClick={() =>
-                      void (async () => {
-                        const res = await instantSessionDecide(sessionId, 'friend')
-                        if (!res.ok) setPollError(res.error ?? '')
-                        const resPoll = await instantMatchPoll({ enqueue: false })
-                        if (resPoll.ok) ingestPollOk(resPoll.data)
-                        else setPollError(resPoll.error)
-                      })()
-                    }
-                  >
-                    加為好友
-                  </button>
-                  <button
-                    type="button"
-                    className="w-full rounded-2xl border border-gray-200 bg-white py-3.5 text-sm font-bold text-slate-800"
-                    onClick={() =>
-                      void (async () => {
-                        const res = await instantSessionDecide(sessionId, 'pass')
-                        if (!res.ok) setPollError(res.error ?? '')
-                        const resPoll = await instantMatchPoll({ enqueue: false })
-                        if (resPoll.ok) ingestPollOk(resPoll.data)
-                        else setPollError(resPoll.error)
-                      })()
-                    }
-                  >
-                    不加好友
-                  </button>
-                </div>
+                {myDecision !== 'pending' ? (
+                  <div className="space-y-3 py-2 text-center">
+                    <div
+                      className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700"
+                      aria-hidden
+                    />
+                    <p className="text-sm font-bold text-slate-800">等待對方決定中</p>
+                    <p className="text-xs leading-relaxed text-slate-500">
+                      已送出你的選擇。對方選完或倒數結束後會自動更新，請稍候。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    <button
+                      type="button"
+                      disabled={decideBusy}
+                      className="w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white disabled:opacity-60"
+                      onClick={() =>
+                        void (async () => {
+                          setDecideBusy(true)
+                          try {
+                            const res = await instantSessionDecide(sessionId, 'friend')
+                            if (!res.ok) setPollError(res.error ?? '')
+                            const resPoll = await instantMatchPoll({ enqueue: false })
+                            if (resPoll.ok) ingestPollOk(resPoll.data)
+                            else setPollError(resPoll.error)
+                          } finally {
+                            setDecideBusy(false)
+                          }
+                        })()
+                      }
+                    >
+                      {decideBusy ? '送出中…' : '加為好友'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={decideBusy}
+                      className="w-full rounded-2xl border border-gray-200 bg-white py-3.5 text-sm font-bold text-slate-800 disabled:opacity-60"
+                      onClick={() =>
+                        void (async () => {
+                          setDecideBusy(true)
+                          try {
+                            const res = await instantSessionDecide(sessionId, 'pass')
+                            if (!res.ok) setPollError(res.error ?? '')
+                            const resPoll = await instantMatchPoll({ enqueue: false })
+                            if (resPoll.ok) ingestPollOk(resPoll.data)
+                            else setPollError(resPoll.error)
+                          } finally {
+                            setDecideBusy(false)
+                          }
+                        })()
+                      }
+                    >
+                      不加好友
+                    </button>
+                  </div>
+                )}
               </motion.div>
             </div>,
             document.body,
