@@ -1078,7 +1078,12 @@ export async function getMyMatches(userId: string): Promise<MatchRow[] | null> {
   return (data ?? []) as MatchRow[]
 }
 
-type RealtimeSubscribeLabel = 'matches' | 'messages' | 'instant_session_messages' | 'instant_sessions'
+type RealtimeSubscribeLabel =
+  | 'matches'
+  | 'messages'
+  | 'messages_incoming_sound'
+  | 'instant_session_messages'
+  | 'instant_sessions'
 
 /** 任一頻道本地重建與時間錯開，降低與全域 wake 同一幀 teardown 競態（Console 會噴連線在半開又被關）。 */
 let lastRealtimeChannelLocalRecycleTs = 0
@@ -1307,6 +1312,33 @@ export function subscribeToMatchMessages(
       },
       (payload) => {
         onInsert(payload.new as MessageRow)
+      },
+    )
+  )
+}
+
+/**
+ * 訂閱本人「可見」的 `messages` INSERT（RLS 僅限參與之配對）。
+ * 用於 App 內音效：對方傳訊時響鈴，不依賴是否已開啟某聊天室。
+ * 不重複訂閱單一房：每則新訊息僅此頻道一筆事件（與各房 `subscribeToMatchMessages` 分流）。
+ */
+export function subscribeToMyMatchMessageInserts(
+  userId: string,
+  onInsert: (row: MessageRow) => void,
+): () => void {
+  return subscribePostgresChannelWithBackoff('messages_incoming_sound', () =>
+    supabase.channel(`realtime-my-match-messages:${userId}`).on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      },
+      (payload) => {
+        const row = payload.new as MessageRow | null
+        if (row && row.sender_id && row.sender_id !== userId) {
+          onInsert(row)
+        }
       },
     )
   )

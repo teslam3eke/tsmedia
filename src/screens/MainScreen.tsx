@@ -36,11 +36,12 @@ import {
   getPhotoUnlockState,
   getMyMatches, getMatchMessages, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages,
-  claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches,
+  claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyMatchMessageInserts,
   instantMatchLeaveQueue,
   instantMatchLeaveQueueKeepalive,
 } from '@/lib/db'
 import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
+import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats } from '@/lib/db'
@@ -641,8 +642,8 @@ function NotificationModal({
   const allOff = !Object.values(settings).some(Boolean)
 
   const items: { key: NotifKey; icon: React.ElementType; label: string; desc: string }[] = [
-    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '配對成功時通知你' },
-    { key: 'messages',      icon: MessageCircle, label: '新訊息通知', desc: '收到新訊息時通知你' },
+    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '配對成功時通知你（含 App 內音效）' },
+    { key: 'messages',      icon: MessageCircle, label: '新訊息通知', desc: '收到新訊息時通知你（含 App 內音效）' },
     { key: 'newProfile',    icon: Users,    label: '新推薦通知',   desc: '有新的高契合度對象時通知你' },
     { key: 'weeklyDigest',  icon: Star,     label: '每週精選摘要', desc: '每週一匯總你的配對概況' },
   ]
@@ -6237,10 +6238,34 @@ export default function MainScreen({
     if (!user?.id) return
     return subscribeToNewMatches(user.id, (row) => {
       const peerId = row.user_a === user.id ? row.user_b : row.user_a
+      playInAppSound('match')
       setMatchSplash({ matchId: row.id, peerUserId: peerId })
       void loadLiveMatchThreads('soft')
     })
   }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce, physicalChannelResubscribeNonce])
+
+  useEffect(() => {
+    if (!user?.id) return
+    return armAudioContextOnUserGesture()
+  }, [user?.id])
+
+  /** 對方傳入任意配對聊天：App 內提示音（已開著該聊天室且前景時略過）。 */
+  useEffect(() => {
+    if (!user?.id) return
+    return subscribeToMyMatchMessageInserts(user.id, (row) => {
+      const mid = row.match_id
+      if (
+        mid &&
+        openChatMatchIdRef.current != null &&
+        mid === openChatMatchIdRef.current &&
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'visible'
+      ) {
+        return
+      }
+      playInAppSound('message')
+    })
+  }, [user?.id, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     if (pendingChatId == null) return
