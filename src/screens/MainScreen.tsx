@@ -5714,6 +5714,11 @@ export default function MainScreen({
   const [pendingChatId, setPendingChatId] = useState<number | string | null>(null)
   /** 配對分頁內嵌一般聊天（取代獨立「訊息」分頁） */
   const [matchesChatConversation, setMatchesChatConversation] = useState<Conversation | null>(null)
+  /** 當前開啟的配對聊天 match_id — 訊息音效略過「正前景看該房」的情境 */
+  const openChatMatchIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    openChatMatchIdRef.current = matchesChatConversation?.matchId ?? null
+  }, [matchesChatConversation?.matchId])
   const [liveMatchThreads, setLiveMatchThreads] = useState<Conversation[]>([])
   const [liveMatchThreadsLoading, setLiveMatchThreadsLoading] = useState(false)
   /** 給 {@link loadLiveMatchThreads} 判定是否已有 UI／session 快取——前景靜默刷新不致開全屏轉圈 */
