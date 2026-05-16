@@ -6431,6 +6431,7 @@ export default function MainScreen({
         userId={user.id}
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
+        assumeEnqueuePollIntent={instantQueueWaiting}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
         onWaitingStateChange={handleInstantWaitingStateChange}
       />

@@ -52,6 +52,11 @@ type Props = {
   foregroundReloadNonce: number
   /** MainScreen：`removeAllChannels` 後遞增，與 ChatRoom／訊息音效同輪刷新 Realtime postgres_changes */
   physicalChannelResubscribeNonce: number
+  /**
+   * MainScreen：`tabContent` 換頁會卸載本分頁；remount 時第一輪若送 enqueue:false，`instant_match_poll` 會刪除本人在等候之列（migration 053）。
+   * 主殼已知的「尚在排隊」狀態用於首輪補 enqueue 意圖，避免一秒回開始按鈕。
+   */
+  assumeEnqueuePollIntent?: boolean
   onMutualFriendMatchCreated?: () => void
   /** 通知主殼是否在「排隊中」，以便切 tab 時跳出離開確認 */
   onWaitingStateChange?: (waiting: boolean) => void
@@ -301,6 +306,7 @@ export default function InstantMatchTab({
   userId,
   foregroundReloadNonce,
   physicalChannelResubscribeNonce,
+  assumeEnqueuePollIntent = false,
   onMutualFriendMatchCreated,
   onWaitingStateChange,
 }: Props) {
@@ -336,6 +342,9 @@ export default function InstantMatchTab({
   const pollChainTailRef = useRef<Promise<InstantMatchPollResponse>>(
     Promise.resolve({ ok: true, data: { status: 'idle' as const } }),
   )
+  /** 主殼 `instantQueueWaiting`：僅用於掛載時帶入，避免依 props 觸發整段 state 重置。 */
+  const assumeEnqueuePollIntentRef = useRef(assumeEnqueuePollIntent)
+  assumeEnqueuePollIntentRef.current = assumeEnqueuePollIntent
   const chainInstantMatchPoll = useCallback((enqueue: boolean): Promise<InstantMatchPollResponse> => {
     const next = pollChainTailRef.current.then(() => instantMatchPoll({ enqueue }))
     pollChainTailRef.current = next
@@ -373,13 +382,20 @@ export default function InstantMatchTab({
     onWaitingStateChange?.(waiting)
   }, [pollReady, snapshot, onWaitingStateChange])
 
-  useEffect(() => {
-    return () => {
-      onWaitingStateChange?.(false)
-    }
-  }, [onWaitingStateChange])
-
   useInstantTabLifecycleExit(snapshot, setSnapshot, doneHoldRef, chainInstantMatchPoll)
+
+  /** userId 變更時重置；須優先於輪詢 effect，否則 remount 首輪若以 enqueue:false，053 會刪除本人在等候之列。 */
+  useEffect(() => {
+    setSnapshot(null)
+    setPeer(null)
+    setMessages([])
+    setPollError(null)
+    setPollReady(false)
+    doneHoldRef.current = false
+    pollEnqueueWhileWaitingRef.current = assumeEnqueuePollIntentRef.current
+    dismissedInstantSessionIdsRef.current = loadDismissedFromStorage(userId)
+    pollChainTailRef.current = Promise.resolve({ ok: true, data: { status: 'idle' as const } })
+  }, [userId])
 
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 1000)
@@ -421,19 +437,6 @@ export default function InstantMatchTab({
     }
     ingestPollOk(res.data)
   }, [ingestPollOk, chainInstantMatchPoll])
-
-  /** userId 變更或重新掛載（例如切回本 tab）時，從 sessionStorage 還原已按下「我知道了」的場次。 */
-  useEffect(() => {
-    setSnapshot(null)
-    setPeer(null)
-    setMessages([])
-    setPollError(null)
-    setPollReady(false)
-    doneHoldRef.current = false
-    pollEnqueueWhileWaitingRef.current = false
-    dismissedInstantSessionIdsRef.current = loadDismissedFromStorage(userId)
-    pollChainTailRef.current = Promise.resolve({ ok: true, data: { status: 'idle' as const } })
-  }, [userId])
 
   const inSession = snapshot?.status === 'in_session' ? snapshot : null
   const sessionId = inSession?.session_id
