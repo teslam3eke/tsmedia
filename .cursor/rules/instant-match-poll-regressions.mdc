@@ -1,0 +1,50 @@
+---
+description: Instant match RPC, queue SQL, and UI regressions — skip stale sessions, enqueue semantics, diagnostics
+alwaysApply: true
+---
+
+# Instant Match (`instant_match_poll`) Regression Guard
+
+## Mental model
+
+- **`p_enqueue:false`**：`instant_match_poll` **會刪除**本人 `instant_match_queue` 裡 **`session_id is null`** 的列（migration **053**：僅瀏覽／輪詢不表達排隊意圖）。前端輪詢必須在「等候中」送 **`enqueue:true`**，且避免並行請求錯誤順序清空剛插入的列（客戶端已 **`chainInstantMatchPoll`**）。
+- **`p_enqueue:true`**：表達「要排隊／維持佇列」；撮合僅在想定路徑執行（如 **056**）。
+
+## SQL: 首段 `instant_sessions` 選場（最易再犯）
+
+第一段 `SELECT` 若在 **`p_enqueue:true`** 時仍鎖定 **已終結／僅餘紀念** 場次，RPC 會在 **enqueue／佇列邏輯之前** early-return，使用者再也進不了 **`waiting`**；前端若對該 `session_id` 按過「我知道了」還會被 **`applyDismissedSessionFilter`** 濾成 **`idle`**，出現「Network 是 `done`、畫面卻卡在開始」的假像。
+
+已定案修補方向（請改 SQL 時一併自檢，勿只修單一案）：
+
+- **`decision_closed`（雙方已決策但未互加）**：`enqueue:true` 勿把此種列當「當前場」（**061**）。
+- **`promoted_match_id IS NOT NULL`（已升格正式配對）**：`enqueue:true` 視為歷史，**勿選入首段**，否則永遠回 `done(mutual_friend)`（**063**）。
+- **`aborted`**：**061**／既有邏輯：`enqueue:true` 可視需求略過 aborted 以供重新排隊（與舊 `done`/`peer_left` 行為對齊）。
+
+新增任何「第一段 OR 條件」時都要問：**在 `enqueue:true` 下，這條會不會誤把「過去已完成」場次當成仍在進行的場？**
+
+## SQL: `instant_match_queue` 與 `ON CONFLICT`
+
+- **`INSERT ... ON CONFLICT DO UPDATE ... WHERE instant_match_queue.session_id IS NULL`**：若 PK 列上 **`session_id` 仍為非 null（幽靈／舊狀態）**，**整個 `UPDATE` 可完全不執行**，導致永遠 **`idle`**（**062**：`enqueue` 路徑衝突時務必 **`SET queued_at` + `session_id = excluded`**，與 INSERT 意向一致）。
+- 調整 **`DELETE ... queued_at < now() - interval '…'`** 心跳時要小心：時間窗過窄會把人秒踢出隊；改動務必註解與對照前端輪詢間隔。
+
+## 前端：`InstantMatchTab` / 主殼
+
+- **`MainScreen` `tabContent[activeTab]`** 換頁會 **unmount** 即時分頁：`remount` 首輪若 **`enqueue:false`** 會觸發 053 清列。**主殼 `instantQueueWaiting` → `assumeEnqueuePollIntent`**（見 `InstantMatchTab` Props 與相關 commit）＋重置 effect **須在輪詢 effect 之前**，避免首輪誤傷。
+- **`useEffect` unmount** 對 `onWaitingStateChange(false)` 勿在「技術性卸載／StrictMode」時誤清主殼排隊旗標。
+- **`applyDismissedSessionFilter`**： dismissed 後 **`done`** 會變 **`idle`** 文案 —— Debug 時必看 **過濾前** RPC body，勿被畫面誤導。
+
+## 診斷紀律（請提醒未來的自己／Reviewer）
+
+1. **`instant_match_poll` 問題先看 Network Response 的 `status`**（`idle` / `waiting` / `in_session` / `done`）；**Realtime WebSocket Console 報錯**常與此無關（物理 `removeAllChannels` 競態）。
+2. 使用者貼 **`done` + `promoted_match_id`** 時，優先檢查 **063 類首段過濾** 與 **dismiss storage**。
+3. 套用替換過的 RPC 後若 REST 仍是舊行為：**`NOTIFY pgrst, 'reload schema'`** 與快取問題（見 `supabase-postgrest-workbox` rule）。
+
+## When editing
+
+- **`supabase/migrations/*instant*`**：`instant_match_poll`／佇列表／撮合函式任一變更 —— 用本節對照 **`p_enqueue`** 分支與首段／佇列／`ON CONFLICT` 順序。
+- **`src/screens/InstantMatchTab.tsx`、`MainScreen.tsx`**：輪詢 **`enqueue`**、tab 生命周期、dismiss／`ingestPollOk`。
+- **`src/lib/instantMatchPollUtils.ts`、`db.ts`**（`instantMatchPoll`）。
+
+## Reference migrations (conceptual anchors)
+
+053（enqueue intent 與 ghost queue）、056（撮合與 enqueue）、058–061（離場／時限／skip stale）、062（enqueue conflict）、063（enqueue skip promoted）。
