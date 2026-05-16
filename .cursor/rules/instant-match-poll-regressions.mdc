@@ -45,6 +45,10 @@ alwaysApply: true
 - **`src/screens/InstantMatchTab.tsx`、`MainScreen.tsx`**：輪詢 **`enqueue`**、tab 生命周期、dismiss／`ingestPollOk`。
 - **`src/lib/instantMatchPollUtils.ts`、`db.ts`**（`instantMatchPoll`）。
 
+## 拼圖接續（即時七分鐘 → 升格「配對」聊天）
+
+即時房 **`liveUseDbTilesOnly=false`** 由訊息推導格位；升格後若 **`sync_photo_unlock_state` 對 `matches.messages` 做線性 0..n 合併** 並 **`liveUseDbTilesOnly=true` 僅信任 DB**，解鎖格會對不起來。**064**：複製 **`instant_session_messages` → messages**、`matches.instant_carry_*` 標記、升格配對的 **`sync` 略過線性聊天合併**；前端對 **`instantCarrySessionId`** 繼續 **`instant:${id}` seed + matchedAt**。改 `instant_session_decide`／`sync_photo_unlock_state`／配對列表欄位時對照此一鏈。
+
 ## Reference migrations (conceptual anchors)
 
-053（enqueue intent 與 ghost queue）、056（撮合與 enqueue）、058–061（離場／時限／skip stale）、062（enqueue conflict）、063（enqueue skip promoted）。
+053（enqueue intent 與 ghost queue）、056（撮合與 enqueue）、058–061（離場／時限／skip stale）、062（enqueue conflict）、063（enqueue skip promoted）、064（instant→match 訊息與拼圖接續）。

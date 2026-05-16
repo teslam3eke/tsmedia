@@ -24,6 +24,10 @@ export type PuzzleConversation = {
   photoUrl?: string
   photoUrls?: string[]
   matchedAt?: number
+  /** 即時升格配對：`instant:${uuid}` 與即時七分鐘房一致（migration 064） */
+  instantCarrySessionId?: string | null
+  /** 與 instant_sessions.created_at（epoch ms）一致；優先於 matchedAt 用於拼圖 boost／seed */
+  instantPuzzleMatchedAtMs?: number
 }
 
 
@@ -255,12 +259,17 @@ export function PuzzlePhotoUnlock({
     PUZZLE_MAX_PHOTO_SLOTS,
     Math.max(1, collectConversationPhotoUrls(conversation).length),
   )
+  const puzzleSeedKey = conversation.instantCarrySessionId
+    ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
+    : String(conversation.id)
+  const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
+
   const progress = getPuzzleProgress(
     messages,
     manualUnlockedTiles,
-    conversation.matchedAt,
+    matchedAtForPuzzle,
     now,
-    String(conversation.id),
+    puzzleSeedKey,
     photoSlotCount,
     liveUseDbTilesOnly,
   )

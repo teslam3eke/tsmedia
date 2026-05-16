@@ -3136,6 +3136,10 @@ interface Conversation {
   /** Demo / live: puzzle cycles these URLs (max 3). */
   photoUrls?: string[]
   matchedAt?: number
+  /** 即時房升格：`instant_sessions.id`，拼圖 seed 對齊 `instant:${id}`（064） */
+  instantCarrySessionId?: string | null
+  /** 即時場 `created_at`（epoch ms），拼圖 matchedAt／30 分 boost 對齊即時房 */
+  instantPuzzleMatchedAtMs?: number
   messages: ChatMessage[]
   /** Supabase match id — when set, ChatRoomView loads DB messages + Realtime */
   matchId?: string
@@ -3451,11 +3455,13 @@ function ChatRoomView({
     const progress = getPuzzleProgress(
       messages,
       manualUnlockedTiles,
-      conversation.matchedAt,
+      conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt,
       Date.now(),
-      String(conversation.id),
+      conversation.instantCarrySessionId
+        ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
+        : String(conversation.id),
       photoSlots,
-      isLive,
+      isLive && !conversation.instantCarrySessionId,
     )
     if (progress.allPhotosComplete) return
     if (blurUnlockBalance <= 0) {
@@ -3559,7 +3565,7 @@ function ChatRoomView({
           manualUnlockedTiles={manualUnlockedTiles}
           isKeyboardOpen={isKeyboardOpen}
           onSpendUnlock={spendDemoUnlock}
-          liveUseDbTilesOnly={isLive}
+          liveUseDbTilesOnly={isLive && !conversation.instantCarrySessionId}
           onPuzzleSlotComplete={
             !isLive && typeof conversation.id === 'number'
               ? (slot: number) => onDemoPuzzleSlotCleared?.(conversation.id as number, slot)
@@ -6210,6 +6216,14 @@ export default function MainScreen({
           photoUrl,
           photoUrls,
           matchedAt: new Date(m.created_at).getTime(),
+          instantCarrySessionId:
+            typeof m.instant_carry_session_id === 'string'
+              ? m.instant_carry_session_id.trim().toLowerCase()
+              : null,
+          instantPuzzleMatchedAtMs:
+            typeof m.instant_carry_matched_at === 'string' && m.instant_carry_matched_at
+              ? new Date(m.instant_carry_matched_at).getTime()
+              : undefined,
           messages: [],
         })
       }
