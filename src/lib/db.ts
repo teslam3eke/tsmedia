@@ -1199,6 +1199,64 @@ export function subscribeToNewMatches(
   )
 }
 
+const MATCH_THREAD_UNREAD_CHUNK = 36
+
+/** Tab badge／列表：對方在最後一則「我發出的訊息」之後傳入的訊息數（回覆後歸零）。 */
+export async function fetchMatchThreadUnreadCounts(matchIds: readonly string[]): Promise<Map<string, number>> {
+  const uuidRx =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const raw of matchIds) {
+    const id = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+    if (!id || seen.has(id)) continue
+    if (!uuidRx.test(id)) continue
+    seen.add(id)
+    normalized.push(id)
+  }
+  const out = new Map<string, number>()
+  if (normalized.length === 0) return out
+
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await ensureConnectionWithBudget()
+
+  for (let i = 0; i < normalized.length; i += MATCH_THREAD_UNREAD_CHUNK) {
+    const chunk = normalized.slice(i, i + MATCH_THREAD_UNREAD_CHUNK)
+    const query = () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).rpc('match_thread_unread_counts', { p_match_ids: chunk })
+
+    let { data, error } = await query()
+    if (error && visible && isRecoverableResumeAuthError(error)) {
+      await repairAuthAfterResume()
+      await ensureConnectionWithBudget(12_000)
+      ;({ data, error } = await query())
+    }
+    if (error && visible && isRecoverableResumeAuthError(error)) {
+      await repairAuthAfterResume()
+      ;({ data, error } = await query())
+    }
+    if (error && visible) {
+      await ensureConnectionWithBudget()
+      ;({ data, error } = await query())
+    }
+    if (error) {
+      console.error('[db] fetchMatchThreadUnreadCounts error:', error.message)
+      continue
+    }
+    const rows = (data ?? []) as { match_id: string; unread: number }[]
+    for (const row of rows) {
+      const mid = typeof row.match_id === 'string' ? row.match_id.trim().toLowerCase() : ''
+      if (!mid) continue
+      const rawU = row.unread
+      const u = typeof rawU === 'number' ? rawU : Number(rawU)
+      out.set(mid, Number.isFinite(u) ? Math.max(0, Math.floor(u)) : 0)
+    }
+  }
+
+  return out
+}
+
 /** 成功為陣列（可能為空）；失敗為 null — 前景重載時勿清空聊天（避免誤以為訊息遺失）。 */
 export async function getMatchMessages(matchId: string): Promise<MessageRow[] | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'

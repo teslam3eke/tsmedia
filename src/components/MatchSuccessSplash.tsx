@@ -119,7 +119,11 @@ export default function MatchSuccessSplash({
             >
               <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-full bg-slate-900 ring-2 ring-white/20">
                 {photoUrl ? (
-                  <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={photoUrl}
+                    alt=""
+                    className="h-full w-full scale-[1.15] object-cover blur-xl"
+                  />
                 ) : (
                   <Sparkles className="h-12 w-12 text-amber-200/90" />
                 )}

@@ -34,7 +34,7 @@ import {
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   getPhotoUnlockState,
-  getMyMatches, getMatchMessages, sendMatchMessage, subscribeToMatchMessages,
+  getMyMatches, getMatchMessages, fetchMatchThreadUnreadCounts, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
@@ -3182,13 +3182,6 @@ function compareChatMessageTime(a: ChatMessage, b: ChatMessage): number {
   return String(a.id).localeCompare(String(b.id))
 }
 
-function hasMyReplyAfter(themMsg: ChatMessage, all: ChatMessage[]): boolean {
-  return all.some((mm) => {
-    if (mm.from !== 'me' || !themMsg.createdAt || !mm.createdAt) return false
-    return new Date(mm.createdAt) > new Date(themMsg.createdAt)
-  })
-}
-
 // ─── Chat Room View (LINE-style) ─────────────────────────────────────────────
 // 版本 0430：聊天室鍵盤遮擋僅在此元件處理（visualViewport + paddingBottom）。
 // 之後要比對／還原：git show 0430 或 git checkout 0430 -- src/screens/MainScreen.tsx
@@ -3208,6 +3201,7 @@ function ChatRoomView({
   onBlurUnlockSpent,
   foregroundReloadNonce,
   physicalChannelResubscribeNonce,
+  onLiveMatchOutboundMessage,
 }: {
   conversation: Conversation
   currentUserId: string | null
@@ -3224,6 +3218,8 @@ function ChatRoomView({
   /** 前景 wake 後遞增：重綁 Realtime、重抓訊息（避免 WS 僵死後聊天／列表不出貨）。 */
   foregroundReloadNonce: number
   physicalChannelResubscribeNonce: number
+  /** 正式配對聊天送出成功後（刷新底欄未讀徽章）。 */
+  onLiveMatchOutboundMessage?: () => void
 }) {
   const isLive = Boolean(conversation.matchId && currentUserId)
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -3399,6 +3395,7 @@ function ChatRoomView({
       setRecentSendTimes([...recent, nowMs])
       setSendWarning('')
       setInput('')
+      onLiveMatchOutboundMessage?.()
       return
     }
 
@@ -5727,11 +5724,49 @@ export default function MainScreen({
   }, [matchesChatConversation?.matchId])
   const [liveMatchThreads, setLiveMatchThreads] = useState<Conversation[]>([])
   const [liveMatchThreadsLoading, setLiveMatchThreadsLoading] = useState(false)
+  /** 底欄「配對」紅點：依 RPC，語意與聊天室「回覆後才算已讀」一致 */
+  const [matchTabUnreadByMatchId, setMatchTabUnreadByMatchId] = useState<Record<string, number>>({})
   /** 給 {@link loadLiveMatchThreads} 判定是否已有 UI／session 快取——前景靜默刷新不致開全屏轉圈 */
   const liveMatchThreadsRef = useRef<Conversation[]>([])
   useEffect(() => {
     liveMatchThreadsRef.current = liveMatchThreads
   }, [liveMatchThreads])
+
+  useEffect(() => {
+    if (!user?.id) setMatchTabUnreadByMatchId({})
+  }, [user?.id])
+
+  const matchTabUnreadRefreshTimerRef = useRef<number | null>(null)
+
+  const refreshMatchTabUnreadCounts = useCallback(async () => {
+    const uid = user?.id
+    if (!uid) return
+    const ids = liveMatchThreadsRef.current
+      .map((c) => (typeof c.matchId === 'string' ? c.matchId.trim().toLowerCase() : ''))
+      .filter(Boolean)
+    if (ids.length === 0) {
+      setMatchTabUnreadByMatchId({})
+      return
+    }
+    const map = await fetchMatchThreadUnreadCounts(ids)
+    const rec: Record<string, number> = {}
+    for (const [mid, n] of map) rec[mid.toLowerCase()] = n
+    setMatchTabUnreadByMatchId(rec)
+  }, [user?.id])
+
+  const scheduleMatchTabUnreadRefresh = useCallback(() => {
+    if (matchTabUnreadRefreshTimerRef.current != null) window.clearTimeout(matchTabUnreadRefreshTimerRef.current)
+    matchTabUnreadRefreshTimerRef.current = window.setTimeout(() => {
+      matchTabUnreadRefreshTimerRef.current = null
+      void refreshMatchTabUnreadCounts()
+    }, 320)
+  }, [refreshMatchTabUnreadCounts])
+
+  useEffect(() => {
+    return () => {
+      if (matchTabUnreadRefreshTimerRef.current != null) window.clearTimeout(matchTabUnreadRefreshTimerRef.current)
+    }
+  }, [])
   /** App 內「新訊息」音效：僅對已載入之配對 id 建立 Realtime 過濾訂閱（避免無 filter 監聽整表影響連線／其他功能）。 */
   const matchIdsForIncomingSoundKey = useMemo(() => {
     const ids = new Set<string>()
@@ -6155,6 +6190,7 @@ export default function MainScreen({
   const loadLiveMatchThreads = useCallback(async (mode: 'full' | 'soft' = 'full') => {
     if (!user?.id) {
       setLiveMatchThreads([])
+      setMatchTabUnreadByMatchId({})
       setLiveMatchThreadsLoading(false)
       return
     }
@@ -6228,6 +6264,16 @@ export default function MainScreen({
         })
       }
       if (liveMatchThreadsLoadGenRef.current !== gen) return
+      const matchIdsForUnread = rows
+        .map((r) => (typeof r.matchId === 'string' ? r.matchId.trim().toLowerCase() : ''))
+        .filter(Boolean)
+      let unreadRec: Record<string, number> = {}
+      if (matchIdsForUnread.length > 0) {
+        const unreadMap = await fetchMatchThreadUnreadCounts(matchIdsForUnread)
+        for (const [mid, n] of unreadMap) unreadRec[mid.toLowerCase()] = n
+      }
+      if (liveMatchThreadsLoadGenRef.current !== gen) return
+      setMatchTabUnreadByMatchId(unreadRec)
       setLiveMatchThreads(rows)
       writeLiveConvSessionCache(user.id, rows)
     } finally {
@@ -6288,22 +6334,24 @@ export default function MainScreen({
     return subscribeToMyIncomingMatchMessages(user.id, ids, (row) => {
       const mid = row.match_id
       const openId = openChatMatchIdRef.current
-      if (
-        mid &&
-        openId &&
-        mid.toLowerCase() === openId.toLowerCase() &&
-        typeof document !== 'undefined' &&
-        document.visibilityState === 'visible'
-      ) {
-        return
+      const inThisChatForeground =
+        Boolean(
+          mid &&
+            openId &&
+            mid.toLowerCase() === openId.toLowerCase() &&
+            typeof document !== 'undefined' &&
+            document.visibilityState === 'visible',
+        )
+      if (!inThisChatForeground) {
+        try {
+          playInAppSound('message')
+        } catch {
+          /* Web Audio 極少數環境可能丟錯，勿中斷主殼 */
+        }
       }
-      try {
-        playInAppSound('message')
-      } catch {
-        /* Web Audio 極少數環境可能丟錯，勿中斷主殼 */
-      }
+      scheduleMatchTabUnreadRefresh()
     })
-  }, [user?.id, matchIdsForIncomingSoundKey, foregroundReloadNonce, physicalChannelResubscribeNonce])
+  }, [user?.id, matchIdsForIncomingSoundKey, foregroundReloadNonce, physicalChannelResubscribeNonce, scheduleMatchTabUnreadRefresh])
 
   useEffect(() => {
     if (pendingChatId == null) return
@@ -6430,6 +6478,7 @@ export default function MainScreen({
         onBack={() => setMatchesChatConversation(null)}
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
+        onLiveMatchOutboundMessage={scheduleMatchTabUnreadRefresh}
       />
     ) : (
       <MatchesTab
@@ -6467,13 +6516,10 @@ export default function MainScreen({
   }
 
   const matchesTabUnreadCount = useMemo(() => {
-    return liveMatchThreads.reduce((sum, conv) => {
-      const n = conv.messages.filter(
-        (m) => m.from === 'them' && !hasMyReplyAfter(m, conv.messages),
-      ).length
-      return sum + n
-    }, 0)
-  }, [liveMatchThreads])
+    let sum = 0
+    for (const n of Object.values(matchTabUnreadByMatchId)) sum += n
+    return sum
+  }, [matchTabUnreadByMatchId])
 
   const showTabBar = !(activeTab === 'matches' && matchesChatConversation && hideTabBarForChatKeyboard)
 
