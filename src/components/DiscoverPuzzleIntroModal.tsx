@@ -165,7 +165,8 @@ export default function DiscoverPuzzleIntroModal({
     setDemoMessages([])
 
     let cancelled = false
-    const timers: ReturnType<typeof window.setTimeout>[] = []
+    /** DOM `setTimeout` 為數字 handle；標成 `Timeout[]` 會在 `tsc -b` 與實際回傳不符。 */
+    const timers: number[] = []
     let msgSerial = 0
 
     function pickNextTiles(prev: Set<number>, need: number): number[] {
