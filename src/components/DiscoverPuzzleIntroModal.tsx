@@ -9,16 +9,18 @@ import {
 } from '@/lib/discoverDemoPhotoUrls'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
-/** 固定總長 10 s：關閉與對話／解鎖事件對齊（含最後留白看完整照片） */
-const TOTAL_INTRO_MS = 10_000
+/** 對話／解鎖腳本總長（前半段）；完成後另停頓 {@link POST_COMPLETE_PAUSE_MS} 再接確認鈕 */
+const SCRIPT_TOTAL_MS = 6_850
+/** 拼圖全開後留白，再放行 CTA */
+const POST_COMPLETE_PAUSE_MS = 2_000
 /** 五輪「對方一句 → 你一句」；對應每一輪解鎖：3 + 3 + 3 + 3 + 4 = 16 */
 const ROUND_COUNT = 5 as const
 const UNLOCK_AFTER_ROUND = [3, 3, 3, 3, 4] as const
-const ROUND_SLOT_MS = Math.floor(TOTAL_INTRO_MS / ROUND_COUNT)
-/** 輪內節奏（整段對齊 10 s）：對方冒泡 → 你回覆 → 解鎖 */
-const ROUND_LEAD_MS = 40
-const PEER_TO_ME_MS = 500
-const ME_TO_UNLOCK_MS = 440
+const ROUND_SLOT_MS = Math.floor(SCRIPT_TOTAL_MS / ROUND_COUNT)
+/** 輪內節奏（整段對齊 {@link SCRIPT_TOTAL_MS}）：對方冒泡 → 你回覆 → 解鎖 */
+const ROUND_LEAD_MS = 32
+const PEER_TO_ME_MS = 400
+const ME_TO_UNLOCK_MS = 330
 
 /** 對齊 {@link PuzzlePhotoUnlock}：單張圖格子拆片順序 */
 const TILE_UNLOCK_SEQUENCE = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15] as const
@@ -98,7 +100,7 @@ const PEER_PREVIEW_BY_VIEWER_GENDER = {
 type Props = {
   open: boolean
   viewerGender: 'male' | 'female'
-  /** 固定 10 秒播畢後自動關閉；無手動略過 */
+  /** 使用者按下底部確認後結束示意 */
   onComplete: () => void
 }
 
@@ -123,8 +125,8 @@ function buildTimeline(
 }
 
 /**
- * 首次進入探索：版型同配對聊天室；對方一句、你一句輪流出現後拼圖才進度；
- * 示範為前四輪各 +3、最後一輪 +4（合 16），整段 **剛好 10 秒**。
+ * 首次進入探索：版型同配對聊天室；對方一句、你一句後拼圖進度；
+ * 全開後短暫慶祝動畫＋確認鈕再進入主流程。
  */
 export default function DiscoverPuzzleIntroModal({
   open,
@@ -141,13 +143,9 @@ export default function DiscoverPuzzleIntroModal({
 
   const [demoUnlocked, setDemoUnlocked] = useState<Set<number>>(() => new Set())
   const [pulseTile, setPulseTile] = useState<number | null>(null)
-  const [unlockBurstLabel, setUnlockBurstLabel] = useState<number | null>(null)
   const [puzzleComplete, setPuzzleComplete] = useState(false)
+  const [showProceedCta, setShowProceedCta] = useState(false)
   const [demoMessages, setDemoMessages] = useState<DemoUiMsg[]>([])
-
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const onCompleteRef = useRef(onComplete)
-  onCompleteRef.current = onComplete
 
   const orderedTiles = useMemo(
     () => [...PUZZLE_TILES].sort((a, b) => Number(demoUnlocked.has(a)) - Number(demoUnlocked.has(b))),
@@ -164,7 +162,7 @@ export default function DiscoverPuzzleIntroModal({
     if (!open) return
     setDemoUnlocked(new Set())
     setPulseTile(null)
-    setUnlockBurstLabel(null)
+    setShowProceedCta(false)
     setPuzzleComplete(false)
     setDemoMessages([])
 
@@ -213,21 +211,11 @@ export default function DiscoverPuzzleIntroModal({
                 if (!cancelled) setPulseTile(null)
               }, 460)
             }
-            setUnlockBurstLabel(pick.length)
-            window.setTimeout(() => {
-              if (!cancelled) setUnlockBurstLabel(null)
-            }, 680)
             return new Set([...prev, ...pick])
           })
         }, ev.at),
       )
     }
-
-    timers.push(
-      window.setTimeout(() => {
-        if (!cancelled) onCompleteRef.current()
-      }, TOTAL_INTRO_MS),
-    )
 
     return () => {
       cancelled = true
@@ -240,6 +228,18 @@ export default function DiscoverPuzzleIntroModal({
     if (unlockedCount < 16) return
     setPuzzleComplete(true)
   }, [open, unlockedCount, puzzleComplete])
+
+  useEffect(() => {
+    if (!open || !puzzleComplete) {
+      setShowProceedCta(false)
+      return
+    }
+    setShowProceedCta(false)
+    const id = window.setTimeout(() => {
+      setShowProceedCta(true)
+    }, POST_COMPLETE_PAUSE_MS)
+    return () => window.clearTimeout(id)
+  }, [open, puzzleComplete])
 
   if (typeof document === 'undefined') return null
 
@@ -279,7 +279,7 @@ export default function DiscoverPuzzleIntroModal({
                   >
                     {peerCfg.name}
                   </p>
-                  <p className="truncate text-[10px] font-semibold text-slate-400">配對後聊天示意（訊息驅動解鎖）</p>
+                  <p className="truncate text-[10px] font-semibold text-slate-400">配對聊天室</p>
                 </div>
                 <div className="h-8 rounded-full bg-slate-50 px-2.5 text-[11px] font-bold leading-8 text-slate-400">
                   封鎖
@@ -303,7 +303,22 @@ export default function DiscoverPuzzleIntroModal({
                     </button>
                   </div>
 
-                  <div className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]">
+                  <motion.div
+                    className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]"
+                    initial={false}
+                    animate={
+                      puzzleComplete
+                        ? {
+                            boxShadow: [
+                              '0 20px 50px rgb(15 23 42 / 0.12)',
+                              '0 12px 40px rgb(14 165 233 / 0.35)',
+                              '0 20px 45px rgb(15 23 42 / 0.14)',
+                            ],
+                          }
+                        : { boxShadow: '0 20px 50px rgb(15 23 42 / 0.12)' }
+                    }
+                    transition={{ duration: 1.05, ease: 'easeOut' }}
+                  >
                     <>
                       {!puzzleComplete ? (
                         <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
@@ -355,35 +370,24 @@ export default function DiscoverPuzzleIntroModal({
                           alt=""
                           aria-hidden
                           className="absolute inset-0 h-full w-full object-contain object-center"
-                          initial={{ opacity: 0, scale: 1.06 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ duration: 0.55, ease: 'easeOut' }}
+                          initial={{ opacity: 0, scale: 1.09 }}
+                          animate={{
+                            opacity: 1,
+                            scale: [1.09, 1, 1.026, 1],
+                          }}
+                          transition={{ duration: 1.22, ease: 'easeOut' }}
                         />
                       )}
                       <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/20" />
                       <AnimatePresence>
-                        {!puzzleComplete && unlockBurstLabel !== null && (
+                        {puzzleComplete && !showProceedCta && (
                           <motion.div
-                            key={unlockBurstLabel + unlockedCount}
-                            className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[12px] font-black text-sky-600 shadow-lg shadow-sky-900/20"
-                            initial={{ opacity: 0, scale: 0.72, y: 8 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.92, y: -10 }}
-                            transition={{ duration: 0.28, ease: 'easeOut' }}
-                          >
-                            <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                            解鎖 +{unlockBurstLabel}
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                      <AnimatePresence>
-                        {puzzleComplete && (
-                          <motion.div
-                            key="completion"
+                            key="completion-chip"
                             className="pointer-events-none absolute inset-0 flex items-center justify-center"
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
+                            exit={{ opacity: 0, scale: 0.92 }}
+                            transition={{ duration: 0.25 }}
                           >
                             <motion.div
                               className="relative flex items-center gap-1.5 rounded-full bg-white/95 px-4 py-2 text-[13px] font-black text-amber-500 shadow-xl shadow-amber-900/20"
@@ -398,7 +402,7 @@ export default function DiscoverPuzzleIntroModal({
                         )}
                       </AnimatePresence>
                     </>
-                  </div>
+                  </motion.div>
 
                   <div className="flex min-w-0 max-w-[118px] flex-1 basis-0 flex-col justify-center gap-2.5 pl-0.5 sm:max-w-[124px]">
                     <div className="space-y-1">
@@ -416,11 +420,6 @@ export default function DiscoverPuzzleIntroModal({
                         <span className="text-[13px] font-bold text-slate-400">/16</span>
                       </motion.p>
                     </div>
-                    <p className="border-l-2 border-sky-200/90 pl-2 text-[10px] font-medium leading-relaxed text-slate-500">
-                      {puzzleComplete
-                        ? '真人門檻以聊天室標示為準（例：再互相幾則）'
-                        : '對方一句、你一句輪到你後才會進度（示範壓縮秒數）'}
-                    </p>
                   </div>
                 </div>
               </div>
@@ -479,17 +478,27 @@ export default function DiscoverPuzzleIntroModal({
               </div>
             </div>
 
-            <div className="shrink-0 space-y-1 border-t border-slate-100 bg-slate-50/90 px-3 py-2 pb-[max(0.75rem,calc(env(safe-area-inset-bottom)+4px))]">
-              <p className="text-center text-[11px] font-bold leading-snug text-slate-700">
-                下方<strong className="text-slate-900">對方一句、你一句輪流出現</strong>後上面才會解鎖；
-                示範為效率：前四輪各解 <strong className="text-slate-900">3</strong>{' '}
-                格、最後一輪解 <strong className="text-slate-900">4</strong>{' '}
-                格。整段示範固定 <strong className="text-slate-900">{TOTAL_INTRO_MS / 1000}</strong>{' '}
-                秒。
-              </p>
-              <p className="text-center text-[11px] font-semibold tabular-nums text-slate-400">
-                {TOTAL_INTRO_MS / 1000} 秒後自動進入探索
-              </p>
+            <div className="shrink-0 border-t border-slate-100 bg-white pb-[max(0.625rem,calc(env(safe-area-inset-bottom)+8px))] pt-2">
+              <AnimatePresence>
+                {showProceedCta ? (
+                  <motion.div
+                    key="intro-cta"
+                    className="px-4 pb-0.5"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    transition={{ duration: 0.26, ease: 'easeOut' }}
+                  >
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl bg-sky-600 py-3.5 text-[15px] font-black tracking-wide text-white shadow-lg shadow-sky-900/20 transition-transform active:scale-[0.98]"
+                      onClick={() => onComplete()}
+                    >
+                      開始探索
+                    </button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </div>
           </motion.div>
         </motion.div>

@@ -1159,7 +1159,7 @@ const DEMO_PUZZLE_CLEARED_KEY = 'tsm-demo-puzzle-cleared-slots'
 
 function discoverChatPuzzleIntroStorageKey(userId: string) {
   /** 版次昇級視為全域「未看過」一次（僅前端；無伺服器側旗標）。 */
-  return `tsm-discover-chat-puzzle-intro:v4:${userId}`
+  return `tsm-discover-chat-puzzle-intro:v5:${userId}`
 }
 
 function hasSeenDiscoverChatPuzzleIntro(userId: string): boolean {
