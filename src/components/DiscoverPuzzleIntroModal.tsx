@@ -146,6 +146,7 @@ export default function DiscoverPuzzleIntroModal({
   const [puzzleComplete, setPuzzleComplete] = useState(false)
   const [showProceedCta, setShowProceedCta] = useState(false)
   const [demoMessages, setDemoMessages] = useState<DemoUiMsg[]>([])
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const orderedTiles = useMemo(
     () => [...PUZZLE_TILES].sort((a, b) => Number(demoUnlocked.has(a)) - Number(demoUnlocked.has(b))),
