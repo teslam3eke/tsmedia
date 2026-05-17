@@ -26,7 +26,7 @@ export type PuzzleConversation = {
   matchedAt?: number
   /** 即時升格配對：`instant:${uuid}` 與即時七分鐘房一致（migration 064） */
   instantCarrySessionId?: string | null
-  /** 與 instant_sessions.created_at（epoch ms）一致；優先於 matchedAt 用於拼圖 boost／seed */
+  /** 與 instant_sessions.created_at（epoch ms）一致；優先於 matchedAt 用於拼圖 seed */
   instantPuzzleMatchedAtMs?: number
 }
 
@@ -36,6 +36,15 @@ export function collectConversationPhotoUrls(c: Pick<PuzzleConversation, 'photoU
   if (list.length > 0) return list
   if (c.photoUrl) return [c.photoUrl]
   return []
+}
+
+/** 即時房／即時升格配對：不配對後 30 分鐘解鎖加倍（僅前端顯示與進度推演；matchedAt 仍用於 puzzle seed）。 */
+export function puzzleRecentMatchBoostEnabled(
+  c: Pick<PuzzleConversation, 'id' | 'instantCarrySessionId'>,
+): boolean {
+  if (c.instantCarrySessionId != null && String(c.instantCarrySessionId).trim() !== '') return false
+  if (String(c.id).toLowerCase().startsWith('instant:')) return false
+  return true
 }
 
 const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
@@ -149,13 +158,15 @@ export function getPuzzleProgress(
   puzzleSeedKey = '',
   photoSlotCount = PUZZLE_MAX_PHOTO_SLOTS,
   liveUseDbTilesOnly = false,
+  recentMatchBoostEnabled = true,
 ) {
   const slots = Math.max(1, Math.min(PUZZLE_MAX_PHOTO_SLOTS, photoSlotCount))
   const maxGlobal = slots * 16
 
   const meCount = messages.filter((message) => message.from === 'me').length
   const themCount = messages.filter((message) => message.from === 'them').length
-  const boostRemainingMs = matchedAt ? Math.max(0, RECENT_MATCH_BOOST_MS - (now - matchedAt)) : 0
+  const boostRemainingMs =
+    matchedAt && recentMatchBoostEnabled ? Math.max(0, RECENT_MATCH_BOOST_MS - (now - matchedAt)) : 0
   const boostActive = boostRemainingMs > 0
   const round = Math.floor(Math.min(meCount, themCount) / 3)
   const mult = boostActive ? 2 : 1
@@ -263,6 +274,7 @@ export function PuzzlePhotoUnlock({
     ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
     : String(conversation.id)
   const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
+  const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
 
   const progress = getPuzzleProgress(
     messages,
@@ -272,6 +284,7 @@ export function PuzzlePhotoUnlock({
     puzzleSeedKey,
     photoSlotCount,
     liveUseDbTilesOnly,
+    recentMatchBoostEnabled,
   )
   const globalSet = new Set(progress.globalUnlockedTiles)
   const unlocked = new Set(progress.unlockedTiles)

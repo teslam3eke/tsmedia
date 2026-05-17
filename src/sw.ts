@@ -128,7 +128,7 @@ self.addEventListener('push', (event: PushEvent) => {
             typeof x.url === 'string' &&
             x.url.startsWith(self.location.origin),
         )
-        /** 舊 payload 無 match：`focused` 時仍不強打橫幅（站内靠列表／角標） */
+        /** 舊 payload 無 match：`focused` 時仍不強打橫幅（站內靠列表／角標） */
         if (focusedHere && incomingMatchLc == null) {
           await pingClientsForegroundMessageQuiet()
           return

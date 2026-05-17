@@ -1792,7 +1792,7 @@ export function subscribeToInstantSessionMessages(sessionId: string, onInsert: (
   )
 }
 
-/** 對方離開场次時 `instant_sessions` 會 UPDATE，拉一次 poll 以盡快顯示「對方已離開」。 */
+/** 對方離開場次時 `instant_sessions` 會 UPDATE，拉一次 poll 以盡快顯示「對方已離開」。 */
 export function subscribeToInstantSessionSignals(sessionId: string, onSessionSignal: () => void): () => void {
   return subscribePostgresChannelWithBackoff('instant_sessions', () =>
     supabase.channel(`instant-sess-row:${sessionId}`).on(

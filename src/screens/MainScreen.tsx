@@ -53,7 +53,12 @@ import { CreditRewardFlash, type CreditRewardVariant } from '@/components/Credit
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import InstantMatchTab from '@/screens/InstantMatchTab'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
-import { PuzzlePhotoUnlock, collectConversationPhotoUrls, getPuzzleProgress } from '@/components/PuzzlePhotoUnlock'
+import {
+  PuzzlePhotoUnlock,
+  collectConversationPhotoUrls,
+  getPuzzleProgress,
+  puzzleRecentMatchBoostEnabled,
+} from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
@@ -1149,7 +1154,8 @@ function preloadDiscoverImageUrls(urls: readonly string[]): void {
 const DEMO_PUZZLE_CLEARED_KEY = 'tsm-demo-puzzle-cleared-slots'
 
 function discoverChatPuzzleIntroStorageKey(userId: string) {
-  return `tsm-discover-chat-puzzle-intro:v1:${userId}`
+  /** 版次昇級視為全域「未看過」一次（僅前端；無伺服器側旗標）。 */
+  return `tsm-discover-chat-puzzle-intro:v2:${userId}`
 }
 
 function hasSeenDiscoverChatPuzzleIntro(userId: string): boolean {
@@ -1502,7 +1508,7 @@ function DiscoverTab({
     [currentUserGender, preferredRegion],
   )
 
-  /** 換帳號／換日：從 localStorage 拉回上一輪成功的名單，避免進探索先看到全屏轉圈（與 RPC 並行 SWR）。 */
+  /** 換帳號／換日：從 localStorage 拉回上一輪成功的名單，避免進探索先看到全螢幕轉圈（與 RPC 並行 SWR）。 */
   useLayoutEffect(() => {
     if (!userId) {
       setLiveDeck([])
@@ -1642,7 +1648,7 @@ function DiscoverTab({
     const snap = { uid: userId, dk: discoverDeckDayKey }
     const prev = lastDeckFetchCtxRef.current
     const ctxChangedEarly = !prev || prev.uid !== snap.uid || prev.dk !== snap.dk
-    /** 換人／換日立即載入；僅 deckRefresh bump 須蓋過前景換發第二下（320ms）並留余量。 */
+    /** 換人／換日立即載入；僅 deckRefresh bump 須蓋過前景換發第二下（320ms）並留餘量。 */
     const debounceMs = ctxChangedEarly ? 0 : 580
 
     let cancelledOuter = false
@@ -1671,7 +1677,7 @@ function DiscoverTab({
         lastDeckFetchCtxRef.current = ctx
 
         if (keepStaleVisible) {
-          /** 前景靜默重抓時維持 ready，免得上一輪 loading 卡住全屏轉圈 */
+          /** 前景靜默重抓時維持 ready，免得上一輪 loading 卡住全螢幕轉圈 */
           setLiveDeckStatus('ready')
         }
 
@@ -3516,6 +3522,7 @@ function ChatRoomView({
       PUZZLE_MAX_PHOTO_SLOTS,
       Math.max(1, collectConversationPhotoUrls(conversation).length),
     )
+    const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
     const progress = getPuzzleProgress(
       messages,
       manualUnlockedTiles,
@@ -3526,6 +3533,7 @@ function ChatRoomView({
         : String(conversation.id),
       photoSlots,
       isLive && !conversation.instantCarrySessionId,
+      recentMatchBoostEnabled,
     )
     if (progress.allPhotosComplete) return
     if (blurUnlockBalance <= 0) {
@@ -5117,7 +5125,7 @@ function SectionHeading({ label, hint }: { label: string; hint?: string }) {
   )
 }
 
-// ─── App notifications：全屏彈窗（任意分頁皆顯示，非「我的」內嵌）─────────────────
+// ─── App notifications：全螢幕彈窗（任意分頁皆顯示，非「我的」內嵌）─────────────────
 
 function appNotificationModalMeta(kind: AppNotificationKind) {
   switch (kind) {
@@ -5780,6 +5788,8 @@ export default function MainScreen({
   const [currentUserGender, setCurrentUserGender] = useState<'male' | 'female'>(initialDiscoverGender)
   const [currentUserPreferredRegion, setCurrentUserPreferredRegion] = useState<import('@/lib/types').Region | null>(null)
   const [hideTabBarForChatKeyboard, setHideTabBarForChatKeyboard] = useState(false)
+  /** 即時房進行中：與開啟配對聊天室同層級，避免底欄佔位與 visualViewport 留白重疊。 */
+  const [instantSessionShellActive, setInstantSessionShellActive] = useState(false)
   const [viewingPerson, setViewingPerson] = useState<PersonSummary | null>(null)
   const [pendingChatId, setPendingChatId] = useState<number | string | null>(null)
   /** 配對分頁內嵌一般聊天（取代獨立「訊息」分頁） */
@@ -5793,7 +5803,7 @@ export default function MainScreen({
   const [liveMatchThreadsLoading, setLiveMatchThreadsLoading] = useState(false)
   /** 底欄「配對」紅點：依 RPC，語意與聊天室「回覆後才算已讀」一致 */
   const [matchTabUnreadByMatchId, setMatchTabUnreadByMatchId] = useState<Record<string, number>>({})
-  /** 給 {@link loadLiveMatchThreads} 判定是否已有 UI／session 快取——前景靜默刷新不致開全屏轉圈 */
+  /** 給 {@link loadLiveMatchThreads} 判定是否已有 UI／session 快取——前景靜默刷新不致開全螢幕轉圈 */
   const liveMatchThreadsRef = useRef<Conversation[]>([])
   useEffect(() => {
     liveMatchThreadsRef.current = liveMatchThreads
@@ -6570,6 +6580,8 @@ export default function MainScreen({
         assumeEnqueuePollIntent={instantQueueWaiting}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
         onWaitingStateChange={handleInstantWaitingStateChange}
+        onInstantSessionShellActiveChange={setInstantSessionShellActive}
+        onInstantComposerKeyboardOpenChange={setHideTabBarForChatKeyboard}
       />
     ) : (
       <div className="flex flex-col items-center justify-center h-full px-8 text-center text-sm text-slate-500">
@@ -6594,12 +6606,16 @@ export default function MainScreen({
     return sum
   }, [matchTabUnreadByMatchId])
 
-  const showTabBar = !(activeTab === 'matches' && matchesChatConversation && hideTabBarForChatKeyboard)
+  const immersiveChatChrome =
+    (activeTab === 'matches' && matchesChatConversation != null) ||
+    (activeTab === 'instant' && instantSessionShellActive)
 
-  const suppressTopChrome = activeTab === 'matches' && matchesChatConversation != null
+  const showTabBar = !(immersiveChatChrome && hideTabBarForChatKeyboard)
 
-  /** 配對內開聊天／即時頁自用頂區：外殼不重複長條 header */
-  const mainOverflowHidden = suppressTopChrome && activeTab === 'matches'
+  const suppressTopChrome = immersiveChatChrome
+
+  /** 配對內開聊天／即時進行中外殼：`main` 勿外層捲動，避免與內頁鍵盤／聊天區對打 */
+  const mainOverflowHidden = suppressTopChrome
 
   return (
     <div className="max-w-md mx-auto w-full flex-1 flex flex-col min-h-0 bg-white">
@@ -6861,6 +6877,7 @@ export default function MainScreen({
       {user?.id && (
         <DiscoverPuzzleIntroModal
           open={showDiscoverPuzzleIntro}
+          viewerGender={currentUserGender}
           onComplete={() => {
             setShowDiscoverPuzzleIntro(false)
             markDiscoverChatPuzzleIntroSeen(user.id)

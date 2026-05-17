@@ -1,30 +1,65 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { MessageCircle, Sparkles } from 'lucide-react'
+import { ChevronLeft, Plus, Send, Smile, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
-const AUTO_CLOSE_MS = 3000
+/** 總長 5 秒：末段留白展示完整對方照片 */
+const AUTO_CLOSE_MS = 5000
+const INTRO_TAIL_FOR_FULL_MS = 1100
+const INITIAL_UNLOCK_DELAY_MS = 280
+/** 對齊 {@link PuzzlePhotoUnlock}：解鎖格動線 */
+const TILE_UNLOCK_SEQUENCE = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15] as const
+
+const BETWEEN_UNLOCK_MS = Math.max(
+  155,
+  Math.floor((AUTO_CLOSE_MS - INTRO_TAIL_FOR_FULL_MS - INITIAL_UNLOCK_DELAY_MS) / TILE_UNLOCK_SEQUENCE.length),
+)
+
 const PUZZLE_TILES = Array.from({ length: 16 }, (_, i) => i)
+
+/** 與 MainScreen DEMO 同性別／異性對照的名片資料對齊 */
+const PEER_PREVIEW_BY_VIEWER_GENDER = {
+  male: {
+    name: '王雅婷',
+    initials: '王',
+    from: '#7c3aed',
+    to: '#6d28d9',
+    photoUrl: 'https://images.unsplash.com/photo-1773216282433-1d79669534c6?w=640&h=800&fit=crop&q=85',
+  },
+  female: {
+    name: '劉承恩',
+    initials: '劉',
+    from: '#0f766e',
+    to: '#0d9488',
+    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&h=900&fit=crop&q=80',
+  },
+} as const
 
 type Props = {
   open: boolean
-  /** 約 3 秒後呼叫；不可手動略過 */
+  viewerGender: 'male' | 'female'
+  /** 滿檔約 5 秒後自動關閉；無手動略過 */
   onComplete: () => void
 }
 
 /**
- * 首次進入探索：拼圖解鎖教學。
- * 全螢幕層級、約 3 秒後自動關閉；不提供略過。
+ * 首次進入探索：以「配對聊天室」同版型示範拼圖動畫，最後一秒呈現對方清晰生活照；
+ * 男性示意為女性對象／女性為男性對象。
  */
-export default function DiscoverPuzzleIntroModal({ open, onComplete }: Props) {
+export default function DiscoverPuzzleIntroModal({
+  open,
+  viewerGender,
+  onComplete,
+}: Props) {
   const svgId = 'discover-puzzle-intro'
-  const [demoUnlocked, setDemoUnlocked] = useState(() => new Set<number>([2, 5, 8]))
+  const peer = PEER_PREVIEW_BY_VIEWER_GENDER[viewerGender]
+  const peerPhotoUrl = peer.photoUrl
+
+  const [demoUnlocked, setDemoUnlocked] = useState<Set<number>>(() => new Set())
   const [pulseTile, setPulseTile] = useState<number | null>(null)
-  const [hintIndex, setHintIndex] = useState(0)
-  const unlockSeqRef = useRef([11, 14, 1, 13, 6, 10])
-  const seqPosRef = useRef(0)
+  const [puzzleComplete, setPuzzleComplete] = useState(false)
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
 
@@ -32,6 +67,8 @@ export default function DiscoverPuzzleIntroModal({ open, onComplete }: Props) {
     () => [...PUZZLE_TILES].sort((a, b) => Number(demoUnlocked.has(a)) - Number(demoUnlocked.has(b))),
     [demoUnlocked],
   )
+
+  const unlockedCount = demoUnlocked.size
 
   useEffect(() => {
     if (!open) return
@@ -41,264 +78,279 @@ export default function DiscoverPuzzleIntroModal({ open, onComplete }: Props) {
 
   useEffect(() => {
     if (!open) return
-    setDemoUnlocked(new Set([2, 5, 8]))
-    setHintIndex(0)
-    seqPosRef.current = 0
-  }, [open])
+    setDemoUnlocked(new Set())
+    setPulseTile(null)
+    setPuzzleComplete(false)
 
-  useEffect(() => {
-    if (!open) return
-    const hintTimer = window.setInterval(() => {
-      setHintIndex((i) => (i + 1) % 3)
-    }, 3200)
-    return () => window.clearInterval(hintTimer)
-  }, [open])
+    let cancelled = false
+    let stepIdx = 0
+    let timeoutId = 0
 
-  useEffect(() => {
-    if (!open) return
-    const tick = () => {
-      const seq = unlockSeqRef.current
-      const pos = seqPosRef.current % seq.length
-      const t = seq[pos]!
-      seqPosRef.current += 1
-      setDemoUnlocked((prev) => {
-        const next = new Set(prev)
-        if (next.size >= 14) {
-          next.clear()
-          next.add(2)
-          next.add(5)
-          next.add(8)
-          seqPosRef.current = 0
-          return next
-        }
-        next.add(t)
-        return next
-      })
+    const pulse = (t: number) => {
       setPulseTile(t)
-      window.setTimeout(() => setPulseTile(null), 650)
+      window.setTimeout(() => {
+        if (!cancelled) setPulseTile(null)
+      }, 420)
     }
-    const id = window.setInterval(tick, 1650)
-    return () => window.clearInterval(id)
+
+    function schedule(delay: number) {
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return
+        if (stepIdx < TILE_UNLOCK_SEQUENCE.length) {
+          const t = TILE_UNLOCK_SEQUENCE[stepIdx]
+          stepIdx += 1
+          setDemoUnlocked((prev) => new Set([...prev, t]))
+          pulse(t)
+          schedule(BETWEEN_UNLOCK_MS)
+        }
+      }, delay)
+    }
+
+    schedule(INITIAL_UNLOCK_DELAY_MS)
+
+    return () => {
+      cancelled = true
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
   }, [open])
+
+  useEffect(() => {
+    if (!open || puzzleComplete) return
+    if (unlockedCount < 16) return
+    setPuzzleComplete(true)
+  }, [open, unlockedCount, puzzleComplete])
 
   if (typeof document === 'undefined') return null
-
-  const unlockedCount = demoUnlocked.size
 
   return createPortal(
     <AnimatePresence>
       {open ? (
         <motion.div
-          key="discover-puzzle-intro-backdrop"
-          className="fixed inset-0 z-[380] flex min-h-[100dvh] flex-col items-center justify-center bg-slate-950/70 px-4 pt-safe pb-safe sm:p-5"
+          key="discover-puzzle-intro-shell"
+          className="fixed inset-0 z-[380] flex justify-center bg-white"
           role="dialog"
           aria-modal="true"
           aria-labelledby="discover-puzzle-intro-title"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.25 }}
+          transition={{ duration: 0.2 }}
         >
           <motion.div
-            className="flex max-h-[min(100dvh-2rem,calc(100dvh-env(safe-area-inset-bottom)-2rem))] w-full max-w-[min(100%,380px)] flex-col overflow-hidden rounded-[1.75rem] bg-white shadow-2xl shadow-slate-900/25 ring-1 ring-slate-200/90"
-            initial={{ opacity: 0, y: 20, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+            className="flex h-[100dvh] w-full max-w-md flex-col overflow-hidden bg-white"
+            initial={{ opacity: 0.96, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: 'easeOut' }}
           >
-            <div className="border-b border-slate-100 bg-gradient-to-br from-sky-50 via-white to-violet-50 px-5 pb-4 pt-6">
-              <div className="flex items-center justify-center gap-2">
-                <motion.div
-                  animate={{ rotate: [0, -8, 8, 0] }}
-                  transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-                  className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 shadow-lg shadow-sky-600/25"
-                >
-                  <Sparkles className="h-5 w-5 text-white" aria-hidden />
-                </motion.div>
-              </div>
-              <h2
-                id="discover-puzzle-intro-title"
-                className="mt-3 text-center text-[1.05rem] font-black tracking-tight text-slate-900"
-              >
-                聊天拼圖解鎖
-              </h2>
-              <p className="mt-1.5 text-center text-[11px] font-semibold text-slate-500">
-                實際畫面長這樣 — 配對後在訊息裡會看到
-              </p>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto bg-white px-4 py-4 shadow-inner shadow-slate-100/80">
-              <div className="flex h-[220px] w-full items-stretch justify-center gap-1.5 sm:h-[238px]">
-                <div className="flex w-[72px] shrink-0 flex-col justify-center sm:w-[76px]">
-                  <motion.div
-                    className={cn(
-                      'rounded-2xl px-2 py-3 text-center text-[10px] font-black leading-snug shadow-md',
-                      'bg-gradient-to-b from-sky-500 to-sky-600 text-white shadow-sky-600/30 ring-1 ring-sky-400/40',
-                    )}
-                    animate={{ scale: [1, 1.03, 1] }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                  >
-                    隨機解 1 片
-                  </motion.div>
-                  <p className="mt-2 text-center text-[9px] font-semibold leading-tight text-slate-400">
-                    道具／訂閱
-                  </p>
+            {/* ── ChatRoomView 標頭對齊 ── */}
+            <div
+              className="flex-shrink-0 border-b border-slate-100 bg-white"
+              style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}
+            >
+              <div className="flex items-center gap-2 px-2 py-1">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400 opacity-85">
+                  <ChevronLeft className="w-5 h-5" aria-hidden />
                 </div>
+                <div className="min-w-0 flex-1">
+                  <p
+                    id="discover-puzzle-intro-title"
+                    className="truncate text-sm font-black leading-tight text-slate-900"
+                  >
+                    {peer.name}
+                  </p>
+                  <p className="truncate text-[10px] font-semibold text-slate-400">配對後聊天示意</p>
+                </div>
+                <div className="h-8 rounded-full bg-slate-50 px-2.5 text-[11px] font-bold leading-8 text-slate-400">
+                  封鎖
+                </div>
+              </div>
 
-                <motion.div
-                  className="relative h-full w-[138px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-xl shadow-slate-900/20 ring-1 ring-slate-900/15 sm:w-[150px]"
-                  initial={{ opacity: 0.85 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.15 }}
-                >
-                  <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
-                    <defs>
-                      <linearGradient id={`${svgId}-photo`} x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#38bdf8" />
-                        <stop offset="45%" stopColor="#818cf8" />
-                        <stop offset="100%" stopColor="#c084fc" />
-                      </linearGradient>
-                      <filter id={`${svgId}-blur`}>
-                        <feGaussianBlur stdDeviation="10" />
-                      </filter>
-                      {PUZZLE_TILES.map((tile) => (
-                        <clipPath key={tile} id={`${svgId}-clip-${tile}`} clipPathUnits="userSpaceOnUse">
-                          <path d={getPuzzleTilePath(tile)} />
-                        </clipPath>
-                      ))}
-                    </defs>
-                    {orderedTiles.map((tile) => {
-                      const isUnlocked = demoUnlocked.has(tile)
-                      const tilePath = getPuzzleTilePath(tile)
-                      return (
-                        <g key={tile}>
-                          <g clipPath={`url(#${svgId}-clip-${tile})`}>
-                            <rect width="400" height="600" fill={`url(#${svgId}-photo)`} />
-                            {!isUnlocked && (
-                              <>
-                                <rect width="400" height="600" fill="#0f172a" opacity="0.42" filter={`url(#${svgId}-blur)`} />
-                                <path d={tilePath} fill="rgba(15, 23, 42, 0.36)" />
-                              </>
-                            )}
-                          </g>
-                          <path d={tilePath} fill="none" stroke="rgba(255,255,255,.38)" strokeWidth="2.2" />
-                          {pulseTile === tile && (
-                            <motion.path
-                              d={tilePath}
-                              fill="rgba(56, 189, 248, 0.55)"
-                              initial={{ opacity: 0.9 }}
-                              animate={{ opacity: 0 }}
-                              transition={{ duration: 0.7, ease: 'easeOut' }}
-                            />
-                          )}
-                        </g>
-                      )
-                    })}
-                  </svg>
-                  <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/15" />
+              {/* ── PuzzlePhotoUnlock（鍵盤未開）對齊 ── */}
+              <div className="bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
+                <div className="flex h-[238px] w-full items-stretch justify-center gap-1 sm:gap-1.5">
+                  <div className="flex w-[76px] shrink-0 flex-col justify-center sm:w-[82px]">
+                    <button
+                      type="button"
+                      disabled
+                      className={cn(
+                        'w-full cursor-default rounded-2xl px-2 py-3 text-[11px] font-black leading-snug shadow-sm',
+                        puzzleComplete ? 'bg-slate-100 text-slate-400' : 'bg-sky-500 text-white shadow-sky-500/30',
+                      )}
+                      aria-hidden
+                    >
+                      隨機解 1 片
+                    </button>
+                  </div>
 
-                  <AnimatePresence mode="wait">
-                    {pulseTile !== null && (
-                      <motion.div
-                        key={pulseTile}
-                        className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-black text-sky-600 shadow-lg shadow-sky-900/20"
-                        initial={{ opacity: 0, scale: 0.72, y: 6 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.9, y: -8 }}
-                        transition={{ duration: 0.22, ease: 'easeOut' }}
+                  <div className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]">
+                    <>
+                      {!puzzleComplete ? (
+                        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
+                          <defs>
+                            <filter id={`${svgId}-blur`}>
+                              <feGaussianBlur stdDeviation="8" />
+                            </filter>
+                            {PUZZLE_TILES.map((tile) => (
+                              <clipPath key={tile} id={`${svgId}-clip-${tile}`} clipPathUnits="userSpaceOnUse">
+                                <path d={getPuzzleTilePath(tile)} />
+                              </clipPath>
+                            ))}
+                          </defs>
+                          {orderedTiles.map((tile) => {
+                            const isUnlocked = demoUnlocked.has(tile)
+                            const tilePath = getPuzzleTilePath(tile)
+                            return (
+                              <g key={tile}>
+                                <g clipPath={`url(#${svgId}-clip-${tile})`}>
+                                  <image
+                                    href={peerPhotoUrl}
+                                    x="0"
+                                    y="0"
+                                    width="400"
+                                    height="600"
+                                    preserveAspectRatio="xMidYMid meet"
+                                    opacity={isUnlocked ? 1 : 0.26}
+                                    filter={isUnlocked ? undefined : `url(#${svgId}-blur)`}
+                                  />
+                                  {!isUnlocked && <path d={tilePath} fill="rgba(15, 23, 42, 0.38)" />}
+                                </g>
+                                <path d={tilePath} fill="none" stroke="rgba(255,255,255,.42)" strokeWidth="2.2" />
+                                {pulseTile === tile && (
+                                  <motion.path
+                                    d={tilePath}
+                                    fill="rgba(255,255,255,.72)"
+                                    initial={{ opacity: 0.95 }}
+                                    animate={{ opacity: 0 }}
+                                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                                  />
+                                )}
+                              </g>
+                            )
+                          })}
+                        </svg>
+                      ) : (
+                        <motion.img
+                          src={peerPhotoUrl}
+                          alt=""
+                          aria-hidden
+                          className="absolute inset-0 h-full w-full object-contain object-center"
+                          initial={{ opacity: 0, scale: 1.06 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ duration: 0.55, ease: 'easeOut' }}
+                        />
+                      )}
+                      <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/20" />
+                      <AnimatePresence>
+                        {!puzzleComplete && pulseTile !== null && (
+                          <motion.div
+                            key={pulseTile}
+                            className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[12px] font-black text-sky-600 shadow-lg shadow-sky-900/20"
+                            initial={{ opacity: 0, scale: 0.72, y: 8 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.92, y: -10 }}
+                            transition={{ duration: 0.28, ease: 'easeOut' }}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden />
+                            解鎖 +1
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      <AnimatePresence>
+                        {puzzleComplete && (
+                          <motion.div
+                            key="completion"
+                            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                          >
+                            <motion.div
+                              className="relative flex items-center gap-1.5 rounded-full bg-white/95 px-4 py-2 text-[13px] font-black text-amber-500 shadow-xl shadow-amber-900/20"
+                              initial={{ scale: 0.72, y: 12 }}
+                              animate={{ scale: [0.72, 1.08, 1], y: 0 }}
+                              transition={{ duration: 0.48, ease: 'easeOut' }}
+                            >
+                              <Sparkles className="h-4 w-4" aria-hidden />
+                              拼圖完成
+                            </motion.div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </>
+                  </div>
+
+                  <div className="flex min-w-0 max-w-[118px] flex-1 basis-0 flex-col justify-center gap-2.5 pl-0.5 sm:max-w-[124px]">
+                    <div className="space-y-1">
+                      <p className="truncate text-[11px] font-black leading-tight text-slate-900">
+                        {peer.name} 的拼圖
+                      </p>
+                      <motion.p
+                        key={unlockedCount}
+                        initial={{ scale: 1.28, color: '#0284c7' }}
+                        animate={{ scale: 1, color: '#0f172a' }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 18 }}
+                        className="flex items-baseline gap-0.5 tabular-nums"
                       >
-                        <Sparkles className="h-3 w-3" />
-                        解鎖 +1
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-
-                <div className="flex min-w-0 flex-1 flex-col justify-center pl-0.5">
-                  <p className="truncate text-[11px] font-black text-slate-900">對方暱稱</p>
-                  <motion.p
-                    key={unlockedCount}
-                    initial={{ scale: 1.2, color: '#0284c7' }}
-                    animate={{ scale: 1, color: '#0f172a' }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                    className="mt-1 tabular-nums text-[15px] font-black text-slate-900"
-                  >
-                    <span className="text-sky-600">{unlockedCount}</span>
-                    <span className="text-slate-400">/16</span>
-                  </motion.p>
-                  <p className="mt-1 text-[10px] font-semibold leading-snug text-slate-500">
-                    再互相 3 則訊息可繼續解鎖
-                  </p>
+                        <span className="text-[22px] font-black leading-none tracking-tight text-slate-900">{unlockedCount}</span>
+                        <span className="text-[13px] font-bold text-slate-400">/16</span>
+                      </motion.p>
+                    </div>
+                    <p className="border-l-2 border-sky-200/90 pl-2 text-[10px] font-medium leading-relaxed text-slate-500">
+                      {puzzleComplete
+                        ? '配對後照這樣聊，就能把對方的照片拼完整'
+                        : '再互相 3 則訊息可繼續解鎖'}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="relative h-[4.25rem] shrink-0 overflow-hidden border-t border-slate-100 bg-slate-50/90 px-5 py-3">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={hintIndex}
-                  initial={{ opacity: 0, x: 14 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -14 }}
-                  transition={{ duration: 0.22 }}
-                  className="flex gap-3 text-left"
-                >
-                  {hintIndex === 0 && (
-                    <>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-100">
-                        <MessageCircle className="h-4 w-4 text-sky-600" />
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-800">照片變成 16 片拼圖</p>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-                          未開的區域會模糊；聊越多、開越多片，輪廓越清晰。
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {hintIndex === 1 && (
-                    <>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-100">
-                        <Sparkles className="h-4 w-4 text-amber-500" />
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-800">互相傳訊累積進度</p>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-                          同一則對話雙方來回算數；別太快 spam，好好聊更有感。
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {hintIndex === 2 && (
-                    <>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-slate-100">
-                        <Sparkles className="h-4 w-4 text-violet-600" />
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-bold text-slate-800">等不及就用道具</p>
-                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
-                          「隨機解 1 片」立刻開一格（依訂閱與餘額）；上方動畫為示意。
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </motion.div>
-              </AnimatePresence>
-              <div className="mt-2 flex justify-center gap-1">
-                {[0, 1, 2].map((i) => (
+            {/* ── 訊息區（對齊 ChatRoom 氣泡規格）── */}
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-3 py-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <div className="flex min-h-[5.5rem] flex-col justify-end gap-3 pb-1">
+                <div className="flex items-end gap-2 justify-start">
                   <div
-                    key={i}
-                    className={cn(
-                      'h-1 rounded-full transition-all',
-                      hintIndex === i ? 'w-4 bg-slate-800' : 'w-1 bg-slate-300',
-                    )}
-                  />
-                ))}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
+                    style={{ background: `linear-gradient(135deg, ${peer.from}, ${peer.to})` }}
+                    aria-hidden
+                  >
+                    {peer.initials}
+                  </div>
+                  <div className="flex max-w-[72%] flex-col gap-1">
+                    <p className="px-1 text-[11px] text-slate-500">{peer.name}</p>
+                    <div className="rounded-2xl rounded-bl-md border border-transparent bg-slate-100 px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 shadow-sm ring-1 ring-slate-200/55">
+                      嗨👋 配對後在這裡聊天，照片的拼圖就會慢慢開哦。
+                    </div>
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <div className="max-w-[72%] rounded-2xl rounded-br-md bg-[#8fe37f] px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 whitespace-pre-wrap break-words">
+                    瞭解～聊越多越看得到清楚的樣子對吧？
+                  </div>
+                </div>
               </div>
             </div>
 
-            <p className="shrink-0 border-t border-slate-100 px-5 pb-5 pt-2 text-center text-[11px] font-semibold text-slate-400">
-              約 {AUTO_CLOSE_MS / 1000} 秒後自動繼續
+            {/* ── 輸入列（對齊 ChatRoomView「有文字可送出」態，僅示意）── */}
+            <div className="pointer-events-none flex-shrink-0 border-t border-slate-200 bg-white px-2 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500">
+                  <Plus className="w-5 h-5" aria-hidden />
+                </span>
+                <div className="flex min-h-[38px] flex-1 items-center rounded-full bg-slate-100 pl-4 pr-1">
+                  <span className="py-1 text-[15px] text-slate-400">輸入訊息</span>
+                  <span className="ml-auto flex h-7 w-7 items-center justify-center text-slate-500">
+                    <Smile className="w-[18px] h-[18px]" aria-hidden />
+                  </span>
+                </div>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white">
+                  <Send className="h-4 w-4 text-white" aria-hidden />
+                </span>
+              </div>
+            </div>
+
+            <p className="shrink-0 border-t border-slate-100 bg-white px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 text-center text-[11px] font-semibold text-slate-400">
+              {AUTO_CLOSE_MS / 1000} 秒後自動進入探索
             </p>
           </motion.div>
         </motion.div>

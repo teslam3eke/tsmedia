@@ -54,7 +54,7 @@ $$;
 grant execute on function public.instant_session_abandon(uuid) to authenticated;
 
 --------------------------------------------------------------------------------
--- poll：將「已 abort」场次納入主查詢，並回傳 instant_end_reason
+-- poll：將「已 abort」場次納入主查詢，並回傳 instant_end_reason
 --------------------------------------------------------------------------------
 
 drop function if exists public.instant_match_poll(boolean);
@@ -214,7 +214,7 @@ $$;
 grant execute on function public.instant_match_poll(boolean) to authenticated;
 
 --------------------------------------------------------------------------------
--- send / decide：已終止场次禁止操作
+-- send / decide：已終止場次禁止操作
 --------------------------------------------------------------------------------
 
 create or replace function public.instant_session_send_message(

@@ -139,7 +139,7 @@ export interface MatchRow {
   created_at: string
   /** 即時七分鐘房升格為此文 matches 時的來源 instant_sessions.id（拼圖接續語意見 migration 064） */
   instant_carry_session_id?: string | null
-  /** instant_sessions.created_at 快照（與 PuzzlePhotoUnlock matchedAt／boost 一致） */
+  /** instant_sessions.created_at 快照；與拼圖 seed／matchedAt 推演一致（此來源不配對後 30 分加倍） */
   instant_carry_matched_at?: string | null
 }
 

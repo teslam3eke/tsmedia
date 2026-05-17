@@ -60,6 +60,10 @@ type Props = {
   onMutualFriendMatchCreated?: () => void
   /** 通知主殼是否在「排隊中」，以便切 tab 時跳出離開確認 */
   onWaitingStateChange?: (waiting: boolean) => void
+  /** `in_session` 時對齊配對聊天：隱藏頂／底外殼、main 鎖 overflow:hidden；鍵盤時再配合隱藏底欄 */
+  onInstantSessionShellActiveChange?: (active: boolean) => void
+  /** 聚焦輸入框時請主殼隱藏底欄，以免與 ChatRoom／即時共用之 visualViewport inset 留白重疊 */
+  onInstantComposerKeyboardOpenChange?: (keyboardLikelyOpen: boolean) => void
 }
 
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
@@ -309,6 +313,8 @@ export default function InstantMatchTab({
   assumeEnqueuePollIntent = false,
   onMutualFriendMatchCreated,
   onWaitingStateChange,
+  onInstantSessionShellActiveChange,
+  onInstantComposerKeyboardOpenChange,
 }: Props) {
   const onMutualFriendMatchCreatedRef = useRef(onMutualFriendMatchCreated)
   onMutualFriendMatchCreatedRef.current = onMutualFriendMatchCreated
@@ -333,7 +339,7 @@ export default function InstantMatchTab({
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
 
   const doneHoldRef = useRef(false)
-  /** 使用者已對該场次按「我知道了」——後續 poll 仍會帶舊 done，過濾成 idle */
+  /** 使用者已對該場次按「我知道了」——後續 poll 仍會帶舊 done，過濾成 idle */
   const dismissedInstantSessionIdsRef = useRef<Set<string>>(new Set())
   /** 僅在「等候中」輪詢送 p_enqueue=true，避免僅開分頁之 enqueue:false 清列／刷新誤撮合（見 migration 053）。 */
   const pollEnqueueWhileWaitingRef = useRef(false)
@@ -383,6 +389,12 @@ export default function InstantMatchTab({
   }, [pollReady, snapshot, onWaitingStateChange])
 
   useInstantTabLifecycleExit(snapshot, setSnapshot, doneHoldRef, chainInstantMatchPoll)
+
+  useEffect(() => {
+    const inSession = pollReady && snapshot?.status === 'in_session'
+    onInstantSessionShellActiveChange?.(inSession)
+    return () => onInstantSessionShellActiveChange?.(false)
+  }, [pollReady, snapshot?.status, onInstantSessionShellActiveChange])
 
   /** userId 變更時重置；須優先於輪詢 effect，否則 remount 首輪若以 enqueue:false，053 會刪除本人在等候之列。 */
   useEffect(() => {
@@ -845,124 +857,138 @@ export default function InstantMatchTab({
 
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col bg-slate-50"
+      className="relative flex h-full min-h-0 flex-1 flex-col bg-white"
       style={keyboardInsetBottom > 0 ? { paddingBottom: keyboardInsetBottom } : undefined}
     >
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="flex-shrink-0 border-b border-gray-200 bg-white px-3 pb-2.5 pt-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200/80">
-                  即時聊天
-                </span>
-                <motion.div
-                  className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-100"
-                  animate={liveChat ? { opacity: [1, 0.75, 1] } : {}}
-                  transition={{ duration: 1.2, repeat: liveChat ? Infinity : 0 }}
-                >
-                  <Timer className="h-3 w-3 shrink-0 text-amber-700" aria-hidden />
-                  {sess.phase === 'chat'
-                    ? `剩餘 ${mm}:${ss}`
-                    : sess.phase === 'decide'
-                      ? `加好友剩餘 ${decMm}:${decSs}`
-                      : '已結束'}
-                </motion.div>
-              </div>
-              <p className="mt-1 truncate text-base font-bold text-slate-900">{peerDisplay}</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                七分鐘匿名文字聊天；上方拼圖會隨互傳訊息解鎖對方生活照（與「配對」聊天相同規則）。時間到後可加好友到「配對」繼續聊。
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void confirmLeaveInstantChat()}
-              className="flex shrink-0 items-center gap-1 rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-800 shadow-sm disabled:opacity-50"
-            >
-              <DoorOpen className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden />
-              離開
-            </button>
-          </div>
-        </div>
-
-        {liveChat && puzzleConversation ? (
-          <PuzzlePhotoUnlock
-            conversation={puzzleConversation}
-            messages={puzzleChatMessages}
-            manualUnlockedTiles={[]}
-            isKeyboardOpen={instantPuzzleKeyboardOpen}
-            liveUseDbTilesOnly={false}
-            onSpendUnlock={() => {
-              setPollError(
-                '即時匿名僅能用「互傳訊息」解鎖拼圖；道具「隨機解 1 片」請在雙方加好友後，於「配對」聊天使用。',
-              )
-            }}
-          />
-        ) : null}
-
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3"
-            style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
-          >
-            {messages.length === 0 && liveChat && (
-              <p className="rounded-2xl border border-dashed border-gray-200 bg-white/80 px-4 py-6 text-center text-xs leading-relaxed text-slate-500">
-                還沒有訊息，打個招呼吧。雙方若以文字聊得來，時間到後可按「加為好友」到配對裡繼續。
-              </p>
-            )}
-            {messages.map((m) => (
+      <div
+        className="flex-shrink-0 border-b border-slate-100 bg-white px-2 py-1"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)' }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 py-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 ring-1 ring-slate-200/80">
+                即時聊天
+              </span>
               <motion.div
-                key={m.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={cn('flex', m.fromMe ? 'justify-end' : 'justify-start')}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-100"
+                animate={liveChat ? { opacity: [1, 0.75, 1] } : {}}
+                transition={{ duration: 1.2, repeat: liveChat ? Infinity : 0 }}
               >
-                <div
-                  className={cn(
-                    'max-w-[82%] rounded-2xl px-3.5 py-2 text-[15px] leading-snug',
-                    m.fromMe ? 'bg-emerald-500 text-white' : 'border border-gray-200 bg-white text-slate-900 shadow-sm',
-                  )}
-                >
-                  {m.text}
-                </div>
+                <Timer className="h-3 w-3 shrink-0 text-amber-700" aria-hidden />
+                {sess.phase === 'chat'
+                  ? `剩餘 ${mm}:${ss}`
+                  : sess.phase === 'decide'
+                    ? `加好友剩餘 ${decMm}:${decSs}`
+                    : '已結束'}
               </motion.div>
-            ))}
-            <div ref={messagesEndRef} className="h-px w-full shrink-0" aria-hidden />
+            </div>
+            <p className="mt-1 truncate text-sm font-black leading-tight text-slate-900">{peerDisplay}</p>
           </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void confirmLeaveInstantChat()}
+            className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-800 shadow-sm disabled:opacity-50"
+          >
+            <DoorOpen className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden />
+            離開
+          </button>
+        </div>
+      </div>
 
-          {pollError && (
-            <p className="shrink-0 px-3 pb-1 text-center text-[11px] font-medium text-red-600">{pollError}</p>
+      {liveChat && puzzleConversation ? (
+        <PuzzlePhotoUnlock
+          conversation={puzzleConversation}
+          messages={puzzleChatMessages}
+          manualUnlockedTiles={[]}
+          isKeyboardOpen={instantPuzzleKeyboardOpen}
+          liveUseDbTilesOnly={false}
+          onSpendUnlock={() => {
+            setPollError(
+              '即時匿名僅能用「互傳訊息」解鎖拼圖；道具「隨機解 1 片」請在雙方加好友後，於「配對」聊天使用。',
+            )
+          }}
+        />
+      ) : null}
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div
+          className="min-h-0 flex-1 space-y-1 overflow-y-auto bg-slate-50/70 px-3 py-2"
+          style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
+        >
+          {messages.length === 0 && liveChat && (
+            <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-[11px] leading-relaxed text-slate-500">
+              還沒有訊息，打個招呼吧。
+            </p>
           )}
-
-          <div className="flex shrink-0 items-center gap-2 border-t border-gray-200 bg-white px-2 py-2 pb-safe">
-            <input
-              ref={instantInputRef}
-              value={input}
-              disabled={sess.phase !== 'chat'}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  void handleSend()
-                }
-              }}
-              placeholder={sess.phase === 'chat' ? '說點什麼…' : '聊天已關閉'}
-              style={{ fontSize: '16px' }}
-              className="min-h-[40px] flex-1 rounded-full border border-gray-200 bg-slate-50 px-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-45"
-            />
-            <button
-              type="button"
-              disabled={sess.phase !== 'chat'}
-              onClick={() => void handleSend()}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white disabled:opacity-35"
+          {messages.map((m) => (
+            <motion.div
+              key={m.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn('flex', m.fromMe ? 'justify-end' : 'justify-start')}
             >
-              <Send className="h-[18px] w-[18px]" />
-            </button>
-          </div>
+              <div
+                className={cn(
+                  'max-w-[72%] rounded-2xl px-3.5 py-2 text-[14px] leading-[1.45] whitespace-pre-wrap break-words',
+                  m.fromMe
+                    ? 'rounded-br-md bg-[#8fe37f] text-slate-900'
+                    : 'rounded-bl-md bg-slate-100 text-slate-900 shadow-sm ring-1 ring-slate-200/60',
+                )}
+              >
+                {m.text}
+              </div>
+            </motion.div>
+          ))}
+          <div ref={messagesEndRef} className="h-px w-full shrink-0" aria-hidden />
         </div>
 
-        {showDecide &&
+        {pollError && (
+          <p className="shrink-0 px-3 pb-1 text-center text-[11px] font-medium text-red-600">{pollError}</p>
+        )}
+
+        <div className="flex shrink-0 items-center gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5">
+          <input
+            ref={instantInputRef}
+            value={input}
+            disabled={sess.phase !== 'chat'}
+            onChange={(e) => setInput(e.target.value)}
+            onFocus={() => {
+              window.setTimeout(
+                () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+                280,
+              )
+              onInstantComposerKeyboardOpenChange?.(true)
+            }}
+            onBlur={() => onInstantComposerKeyboardOpenChange?.(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void handleSend()
+              }
+            }}
+            placeholder={sess.phase === 'chat' ? '輸入訊息' : '聊天已關閉'}
+            style={{ fontSize: '16px' }}
+            className="min-h-[38px] flex-1 rounded-full border border-slate-200 bg-slate-100 px-4 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 disabled:opacity-45"
+          />
+          <button
+            type="button"
+            disabled={sess.phase !== 'chat'}
+            onClick={() => void handleSend()}
+            className={cn(
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-35',
+              input.trim()
+                ? 'bg-emerald-500 text-white'
+                : 'bg-slate-200 text-slate-500',
+            )}
+          >
+            <Send className="h-[16px] w-[16px]" />
+          </button>
+        </div>
+      </div>
+
+      {showDecide &&
           sessionId &&
           createPortal(
             <div
@@ -1053,7 +1079,6 @@ export default function InstantMatchTab({
             </div>,
             document.body,
           )}
-      </div>
     </div>
   )
 }
