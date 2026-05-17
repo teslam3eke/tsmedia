@@ -5,23 +5,71 @@ import { ChevronLeft, Plus, Send, Smile, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
-/** 總長 10 秒：末段留白展示完整對方照片 */
-const AUTO_CLOSE_MS = 10_000
-const INTRO_TAIL_FOR_FULL_MS = 2000
-const INITIAL_UNLOCK_DELAY_MS = 450
-/** 對齊 {@link PuzzlePhotoUnlock}：解鎖格動線 */
+/** 固定總長 10 s：關閉與對話／解鎖事件對齊（含最後留白看完整照片） */
+const TOTAL_INTRO_MS = 10_000
+/** 五輪「對方一句 → 你一句」；對應每一輪解鎖：3 + 3 + 3 + 3 + 4 = 16 */
+const ROUND_COUNT = 5 as const
+const UNLOCK_AFTER_ROUND = [3, 3, 3, 3, 4] as const
+const ROUND_SLOT_MS = Math.floor(TOTAL_INTRO_MS / ROUND_COUNT)
+/** 輪內節奏（整段對齊 10 s）：對方冒泡 → 你回覆 → 解鎖 */
+const ROUND_LEAD_MS = 40
+const PEER_TO_ME_MS = 500
+const ME_TO_UNLOCK_MS = 440
+
+/** 對齊 {@link PuzzlePhotoUnlock}：單張圖格子拆片順序 */
 const TILE_UNLOCK_SEQUENCE = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15] as const
 
-/** 第一段等 INITIAL_UNLOCK_DELAY_MS，之後 15 段間隔解完 16 格 */
-const BETWEEN_UNLOCK_MS = Math.max(
-  220,
-  Math.floor(
-    (AUTO_CLOSE_MS - INTRO_TAIL_FOR_FULL_MS - INITIAL_UNLOCK_DELAY_MS) /
-      Math.max(1, TILE_UNLOCK_SEQUENCE.length - 1),
-  ),
-)
-
 const PUZZLE_TILES = Array.from({ length: 16 }, (_, i) => i)
+
+/** 五輪對話（男性視角對方為女性） */
+const DEMO_CHAT_PAIRS = [
+  {
+    peer: '嗨，滑到妳了，覺得我們對週末的想像滿相近的。',
+    me: '真的嗎？妳會把行程排滿，還是故意留一片空白？',
+  },
+  {
+    peer: '我會留一整天不排行事曆，不然會被自己追著跑。',
+    me: '同感，這樣回血比較快。',
+  },
+  {
+    peer: '那妳最近有出門走走嗎？還是比較想宅在家？',
+    me: '有啊，繞個公園走一走就滿療癒。',
+  },
+  {
+    peer: '太好了。妳對手沖有興趣嗎？我最近很沉迷。',
+    me: '超有，只是我拖延症發作一直沒入坑。',
+  },
+  {
+    peer: '沒問題，改天我們來交換豆子清單。',
+    me: '一言為定，先記下來了。',
+  },
+] as const
+
+/** 對方為男性（敬稱為主）；輪數與上表一致 */
+const DEMO_CHAT_PAIRS_MALE_PEER = [
+  {
+    peer: '嗨，滑到您了，覺得我們對週末的想像滿相近的。',
+    me: '真的嗎？您會把行程排滿，還是故意留一片空白？',
+  },
+  {
+    peer: '我會留一整天不排行事曆，不然會被自己追著跑。',
+    me: '同感，這樣回血比較快。',
+  },
+  {
+    peer: '那您最近有出門走走嗎？還是比較想宅在家？',
+    me: '有，繞個公園走一走就滿療癒。',
+  },
+  {
+    peer: '太好了。您對手沖有興趣嗎？我最近很沉迷。',
+    me: '有興趣，只是我拖延症的關係還沒入坑。',
+  },
+  {
+    peer: '沒問題，改天來交換豆子清單。',
+    me: '一言為定，先記下來了。',
+  },
+] as const
+
+type DemoUiMsg = { id: string; from: 'them' | 'me'; text: string }
 
 /** 與 MainScreen DEMO 同性別／異性對照的名片資料對齊 */
 const PEER_PREVIEW_BY_VIEWER_GENDER = {
@@ -31,6 +79,7 @@ const PEER_PREVIEW_BY_VIEWER_GENDER = {
     from: '#7c3aed',
     to: '#6d28d9',
     photoUrl: 'https://images.unsplash.com/photo-1773216282433-1d79669534c6?w=640&h=800&fit=crop&q=85',
+    scriptPairs: DEMO_CHAT_PAIRS,
   },
   female: {
     name: '劉承恩',
@@ -38,19 +87,40 @@ const PEER_PREVIEW_BY_VIEWER_GENDER = {
     from: '#0f766e',
     to: '#0d9488',
     photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&h=900&fit=crop&q=80',
+    scriptPairs: DEMO_CHAT_PAIRS_MALE_PEER,
   },
 } as const
 
 type Props = {
   open: boolean
   viewerGender: 'male' | 'female'
-  /** 滿檔約 10 秒後自動關閉；無手動略過 */
+  /** 固定 10 秒播畢後自動關閉；無手動略過 */
   onComplete: () => void
 }
 
+type TimelineEv =
+  | { at: number; kind: 'msg-them'; text: string }
+  | { at: number; kind: 'msg-me'; text: string }
+  | { at: number; kind: 'unlock'; add: number }
+
+function buildTimeline(
+  pairs: readonly { peer: string; me: string }[],
+  unlocks: readonly number[],
+): TimelineEv[] {
+  const evs: TimelineEv[] = []
+  const n = Math.min(pairs.length, unlocks.length, ROUND_COUNT)
+  for (let k = 0; k < n; k += 1) {
+    const base = ROUND_SLOT_MS * k + ROUND_LEAD_MS
+    evs.push({ at: base, kind: 'msg-them', text: pairs[k]!.peer })
+    evs.push({ at: base + PEER_TO_ME_MS, kind: 'msg-me', text: pairs[k]!.me })
+    evs.push({ at: base + PEER_TO_ME_MS + ME_TO_UNLOCK_MS, kind: 'unlock', add: unlocks[k]! })
+  }
+  return evs
+}
+
 /**
- * 首次進入探索：以「配對聊天室」同版型示範拼圖動畫，約 10 秒內收尾並呈現對方清晰生活照；
- * 男性示意為女性對象／女性為男性對象。
+ * 首次進入探索：版型同配對聊天室；對方一句、你一句輪流出現後拼圖才進度；
+ * 示範為前四輪各 +3、最後一輪 +4（合 16），整段 **剛好 10 秒**。
  */
 export default function DiscoverPuzzleIntroModal({
   open,
@@ -58,12 +128,20 @@ export default function DiscoverPuzzleIntroModal({
   onComplete,
 }: Props) {
   const svgId = 'discover-puzzle-intro'
-  const peer = PEER_PREVIEW_BY_VIEWER_GENDER[viewerGender]
-  const peerPhotoUrl = peer.photoUrl
+  const peerCfg = PEER_PREVIEW_BY_VIEWER_GENDER[viewerGender]
+  const peerPhotoUrl = peerCfg.photoUrl
+  const timeline = useMemo(
+    () => buildTimeline(peerCfg.scriptPairs, UNLOCK_AFTER_ROUND),
+    [peerCfg.scriptPairs],
+  )
 
   const [demoUnlocked, setDemoUnlocked] = useState<Set<number>>(() => new Set())
   const [pulseTile, setPulseTile] = useState<number | null>(null)
+  const [unlockBurstLabel, setUnlockBurstLabel] = useState<number | null>(null)
   const [puzzleComplete, setPuzzleComplete] = useState(false)
+  const [demoMessages, setDemoMessages] = useState<DemoUiMsg[]>([])
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
 
@@ -75,48 +153,82 @@ export default function DiscoverPuzzleIntroModal({
   const unlockedCount = demoUnlocked.size
 
   useEffect(() => {
-    if (!open) return
-    const id = window.setTimeout(() => onCompleteRef.current(), AUTO_CLOSE_MS)
-    return () => window.clearTimeout(id)
-  }, [open])
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [demoMessages])
 
   useEffect(() => {
     if (!open) return
     setDemoUnlocked(new Set())
     setPulseTile(null)
+    setUnlockBurstLabel(null)
     setPuzzleComplete(false)
+    setDemoMessages([])
 
     let cancelled = false
-    let stepIdx = 0
-    let timeoutId = 0
+    const timers: ReturnType<typeof window.setTimeout>[] = []
+    let msgSerial = 0
 
-    const pulse = (t: number) => {
-      setPulseTile(t)
+    function pickNextTiles(prev: Set<number>, need: number): number[] {
+      const add: number[] = []
+      for (const ti of TILE_UNLOCK_SEQUENCE) {
+        if (!prev.has(ti)) add.push(ti)
+        if (add.length >= need) break
+      }
+      return add
+    }
+
+    for (const ev of timeline) {
+      timers.push(
+        window.setTimeout(() => {
+          if (cancelled) return
+          if (ev.kind === 'msg-them') {
+            msgSerial += 1
+            setDemoMessages((p) => [
+              ...p,
+              { id: `t-${msgSerial}`, from: 'them', text: ev.text },
+            ])
+            return
+          }
+          if (ev.kind === 'msg-me') {
+            msgSerial += 1
+            setDemoMessages((p) => [
+              ...p,
+              { id: `m-${msgSerial}`, from: 'me', text: ev.text },
+            ])
+            return
+          }
+          const add = ev.add
+          setDemoUnlocked((prev) => {
+            const pick = pickNextTiles(prev, add)
+            if (pick.length === 0) return prev
+            const lastPulse = pick[pick.length - 1] ?? null
+            if (lastPulse != null) {
+              setPulseTile(lastPulse)
+              window.setTimeout(() => {
+                if (!cancelled) setPulseTile(null)
+              }, 460)
+            }
+            setUnlockBurstLabel(pick.length)
+            window.setTimeout(() => {
+              if (!cancelled) setUnlockBurstLabel(null)
+            }, 680)
+            return new Set([...prev, ...pick])
+          })
+        }, ev.at),
+      )
+    }
+
+    timers.push(
       window.setTimeout(() => {
-        if (!cancelled) setPulseTile(null)
-      }, 420)
-    }
-
-    function schedule(delay: number) {
-      timeoutId = window.setTimeout(() => {
-        if (cancelled) return
-        if (stepIdx < TILE_UNLOCK_SEQUENCE.length) {
-          const t = TILE_UNLOCK_SEQUENCE[stepIdx]
-          stepIdx += 1
-          setDemoUnlocked((prev) => new Set([...prev, t]))
-          pulse(t)
-          schedule(BETWEEN_UNLOCK_MS)
-        }
-      }, delay)
-    }
-
-    schedule(INITIAL_UNLOCK_DELAY_MS)
+        if (!cancelled) onCompleteRef.current()
+      }, TOTAL_INTRO_MS),
+    )
 
     return () => {
       cancelled = true
-      if (timeoutId) window.clearTimeout(timeoutId)
+      for (const id of timers) window.clearTimeout(id)
     }
-  }, [open])
+  }, [open, timeline])
 
   useEffect(() => {
     if (!open || puzzleComplete) return
@@ -160,9 +272,9 @@ export default function DiscoverPuzzleIntroModal({
                     id="discover-puzzle-intro-title"
                     className="truncate text-sm font-black leading-tight text-slate-900"
                   >
-                    {peer.name}
+                    {peerCfg.name}
                   </p>
-                  <p className="truncate text-[10px] font-semibold text-slate-400">配對後聊天示意</p>
+                  <p className="truncate text-[10px] font-semibold text-slate-400">配對後聊天示意（訊息驅動解鎖）</p>
                 </div>
                 <div className="h-8 rounded-full bg-slate-50 px-2.5 text-[11px] font-bold leading-8 text-slate-400">
                   封鎖
@@ -245,9 +357,9 @@ export default function DiscoverPuzzleIntroModal({
                       )}
                       <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/20" />
                       <AnimatePresence>
-                        {!puzzleComplete && pulseTile !== null && (
+                        {!puzzleComplete && unlockBurstLabel !== null && (
                           <motion.div
-                            key={pulseTile}
+                            key={unlockBurstLabel + unlockedCount}
                             className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[12px] font-black text-sky-600 shadow-lg shadow-sky-900/20"
                             initial={{ opacity: 0, scale: 0.72, y: 8 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -255,7 +367,7 @@ export default function DiscoverPuzzleIntroModal({
                             transition={{ duration: 0.28, ease: 'easeOut' }}
                           >
                             <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                            解鎖 +1
+                            解鎖 +{unlockBurstLabel}
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -286,7 +398,7 @@ export default function DiscoverPuzzleIntroModal({
                   <div className="flex min-w-0 max-w-[118px] flex-1 basis-0 flex-col justify-center gap-2.5 pl-0.5 sm:max-w-[124px]">
                     <div className="space-y-1">
                       <p className="truncate text-[11px] font-black leading-tight text-slate-900">
-                        {peer.name} 的拼圖
+                        {peerCfg.name} 的拼圖
                       </p>
                       <motion.p
                         key={unlockedCount}
@@ -301,37 +413,46 @@ export default function DiscoverPuzzleIntroModal({
                     </div>
                     <p className="border-l-2 border-sky-200/90 pl-2 text-[10px] font-medium leading-relaxed text-slate-500">
                       {puzzleComplete
-                        ? '真人聊天裡要等雙方都傳過訊息、累積到門檻才會多出格數'
-                        : '真實聊天：雙方互傳訊息達門檻才會一片片解鎖'}
+                        ? '真人門檻以聊天室標示為準（例：再互相幾則）'
+                        : '對方一句、你一句輪到你後才會進度（示範壓縮秒數）'}
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* ── 訊息區（對齊 ChatRoom 氣泡規格）── */}
-            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-3 py-2" style={{ WebkitOverflowScrolling: 'touch' }}>
-              <div className="flex min-h-[5.5rem] flex-col justify-end gap-3 pb-1">
-                <div className="flex items-end gap-2 justify-start">
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
-                    style={{ background: `linear-gradient(135deg, ${peer.from}, ${peer.to})` }}
-                    aria-hidden
-                  >
-                    {peer.initials}
-                  </div>
-                  <div className="flex max-w-[72%] flex-col gap-1">
-                    <p className="px-1 text-[11px] text-slate-500">{peer.name}</p>
-                    <div className="rounded-2xl rounded-bl-md border border-transparent bg-slate-100 px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 shadow-sm ring-1 ring-slate-200/55">
-                      這裡的拼圖要<strong className="font-black">對方也跟著回話</strong>才會一片片開哦——不是光看畫面就會自動解鎖。
+            {/* ── 訊息區（對齊 ChatRoom 氣泡；內容由腳本逐句插入）── */}
+            <div
+              className="min-h-0 flex-1 overflow-y-auto bg-slate-50/70 px-3 py-2"
+              style={{ WebkitOverflowScrolling: 'touch' }}
+            >
+              <div className="flex min-h-[5rem] flex-col gap-3 pb-1">
+                {demoMessages.map((m) =>
+                  m.from === 'them' ? (
+                    <div key={m.id} className="flex items-end gap-2 justify-start">
+                      <div
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
+                        style={{ background: `linear-gradient(135deg, ${peerCfg.from}, ${peerCfg.to})` }}
+                        aria-hidden
+                      >
+                        {peerCfg.initials}
+                      </div>
+                      <div className="flex max-w-[72%] flex-col gap-1">
+                        <p className="px-1 text-[11px] text-slate-500">{peerCfg.name}</p>
+                        <div className="rounded-2xl rounded-bl-md border border-transparent bg-slate-100 px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 shadow-sm ring-1 ring-slate-200/55">
+                          {m.text}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <div className="max-w-[72%] rounded-2xl rounded-br-md bg-[#8fe37f] px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 whitespace-pre-wrap break-words">
-                    瞭解——所以<strong className="font-black">兩個人都要有傳訊</strong>，上面格數才會跟著長。
-                  </div>
-                </div>
+                  ) : (
+                    <motion.div key={m.id} className="flex justify-end" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      <div className="max-w-[72%] rounded-2xl rounded-br-md bg-[#8fe37f] px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 whitespace-pre-wrap break-words">
+                        {m.text}
+                      </div>
+                    </motion.div>
+                  ),
+                )}
+                <div ref={messagesEndRef} className="h-px w-full shrink-0" aria-hidden />
               </div>
             </div>
 
@@ -355,10 +476,14 @@ export default function DiscoverPuzzleIntroModal({
 
             <div className="shrink-0 space-y-1 border-t border-slate-100 bg-slate-50/90 px-3 py-2 pb-[max(0.75rem,calc(env(safe-area-inset-bottom)+4px))]">
               <p className="text-center text-[11px] font-bold leading-snug text-slate-700">
-                實際解鎖需<strong className="text-slate-900">雙方在聊天室互傳訊息</strong>並達成「互相幾則」的門檻；這裡為加速示範的動畫。
+                下方<strong className="text-slate-900">對方一句、你一句輪流出現</strong>後上面才會解鎖；
+                示範為效率：前四輪各解 <strong className="text-slate-900">3</strong>{' '}
+                格、最後一輪解 <strong className="text-slate-900">4</strong>{' '}
+                格。整段示範固定 <strong className="text-slate-900">{TOTAL_INTRO_MS / 1000}</strong>{' '}
+                秒。
               </p>
               <p className="text-center text-[11px] font-semibold tabular-nums text-slate-400">
-                {AUTO_CLOSE_MS / 1000} 秒後自動進入探索
+                {TOTAL_INTRO_MS / 1000} 秒後自動進入探索
               </p>
             </div>
           </motion.div>
