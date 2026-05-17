@@ -5,16 +5,20 @@ import { ChevronLeft, Plus, Send, Smile, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
-/** 總長 5 秒：末段留白展示完整對方照片 */
-const AUTO_CLOSE_MS = 5000
-const INTRO_TAIL_FOR_FULL_MS = 1100
-const INITIAL_UNLOCK_DELAY_MS = 280
+/** 總長 10 秒：末段留白展示完整對方照片 */
+const AUTO_CLOSE_MS = 10_000
+const INTRO_TAIL_FOR_FULL_MS = 2000
+const INITIAL_UNLOCK_DELAY_MS = 450
 /** 對齊 {@link PuzzlePhotoUnlock}：解鎖格動線 */
 const TILE_UNLOCK_SEQUENCE = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15] as const
 
+/** 第一段等 INITIAL_UNLOCK_DELAY_MS，之後 15 段間隔解完 16 格 */
 const BETWEEN_UNLOCK_MS = Math.max(
-  155,
-  Math.floor((AUTO_CLOSE_MS - INTRO_TAIL_FOR_FULL_MS - INITIAL_UNLOCK_DELAY_MS) / TILE_UNLOCK_SEQUENCE.length),
+  220,
+  Math.floor(
+    (AUTO_CLOSE_MS - INTRO_TAIL_FOR_FULL_MS - INITIAL_UNLOCK_DELAY_MS) /
+      Math.max(1, TILE_UNLOCK_SEQUENCE.length - 1),
+  ),
 )
 
 const PUZZLE_TILES = Array.from({ length: 16 }, (_, i) => i)
@@ -40,12 +44,12 @@ const PEER_PREVIEW_BY_VIEWER_GENDER = {
 type Props = {
   open: boolean
   viewerGender: 'male' | 'female'
-  /** 滿檔約 5 秒後自動關閉；無手動略過 */
+  /** 滿檔約 10 秒後自動關閉；無手動略過 */
   onComplete: () => void
 }
 
 /**
- * 首次進入探索：以「配對聊天室」同版型示範拼圖動畫，最後一秒呈現對方清晰生活照；
+ * 首次進入探索：以「配對聊天室」同版型示範拼圖動畫，約 10 秒內收尾並呈現對方清晰生活照；
  * 男性示意為女性對象／女性為男性對象。
  */
 export default function DiscoverPuzzleIntroModal({
@@ -297,8 +301,8 @@ export default function DiscoverPuzzleIntroModal({
                     </div>
                     <p className="border-l-2 border-sky-200/90 pl-2 text-[10px] font-medium leading-relaxed text-slate-500">
                       {puzzleComplete
-                        ? '配對後照這樣聊，就能把對方的照片拼完整'
-                        : '再互相 3 則訊息可繼續解鎖'}
+                        ? '真人聊天裡要等雙方都傳過訊息、累積到門檻才會多出格數'
+                        : '真實聊天：雙方互傳訊息達門檻才會一片片解鎖'}
                     </p>
                   </div>
                 </div>
@@ -319,13 +323,13 @@ export default function DiscoverPuzzleIntroModal({
                   <div className="flex max-w-[72%] flex-col gap-1">
                     <p className="px-1 text-[11px] text-slate-500">{peer.name}</p>
                     <div className="rounded-2xl rounded-bl-md border border-transparent bg-slate-100 px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 shadow-sm ring-1 ring-slate-200/55">
-                      嗨👋 配對後在這裡聊天，照片的拼圖就會慢慢開哦。
+                      這裡的拼圖要<strong className="font-black">對方也跟著回話</strong>才會一片片開哦——不是光看畫面就會自動解鎖。
                     </div>
                   </div>
                 </div>
                 <div className="flex justify-end">
                   <div className="max-w-[72%] rounded-2xl rounded-br-md bg-[#8fe37f] px-3.5 py-2 text-[14px] leading-[1.45] text-slate-900 whitespace-pre-wrap break-words">
-                    瞭解～聊越多越看得到清楚的樣子對吧？
+                    瞭解——所以<strong className="font-black">兩個人都要有傳訊</strong>，上面格數才會跟著長。
                   </div>
                 </div>
               </div>
@@ -349,9 +353,14 @@ export default function DiscoverPuzzleIntroModal({
               </div>
             </div>
 
-            <p className="shrink-0 border-t border-slate-100 bg-white px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 text-center text-[11px] font-semibold text-slate-400">
-              {AUTO_CLOSE_MS / 1000} 秒後自動進入探索
-            </p>
+            <div className="shrink-0 space-y-1 border-t border-slate-100 bg-slate-50/90 px-3 py-2 pb-[max(0.75rem,calc(env(safe-area-inset-bottom)+4px))]">
+              <p className="text-center text-[11px] font-bold leading-snug text-slate-700">
+                實際解鎖需<strong className="text-slate-900">雙方在聊天室互傳訊息</strong>並達成「互相幾則」的門檻；這裡為加速示範的動畫。
+              </p>
+              <p className="text-center text-[11px] font-semibold tabular-nums text-slate-400">
+                {AUTO_CLOSE_MS / 1000} 秒後自動進入探索
+              </p>
+            </div>
           </motion.div>
         </motion.div>
       ) : null}
