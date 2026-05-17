@@ -3,6 +3,10 @@ import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronLeft, Plus, Send, Smile, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
+  DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
+} from '@/lib/discoverDemoPhotoUrls'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 
 /** 固定總長 10 s：關閉與對話／解鎖事件對齊（含最後留白看完整照片） */
@@ -78,7 +82,7 @@ const PEER_PREVIEW_BY_VIEWER_GENDER = {
     initials: '王',
     from: '#7c3aed',
     to: '#6d28d9',
-    photoUrl: 'https://images.unsplash.com/photo-1773216282433-1d79669534c6?w=640&h=800&fit=crop&q=85',
+    photoUrl: DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
     scriptPairs: DEMO_CHAT_PAIRS,
   },
   female: {
@@ -86,7 +90,7 @@ const PEER_PREVIEW_BY_VIEWER_GENDER = {
     initials: '劉',
     from: '#0f766e',
     to: '#0d9488',
-    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&h=900&fit=crop&q=80',
+    photoUrl: DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
     scriptPairs: DEMO_CHAT_PAIRS_MALE_PEER,
   },
 } as const

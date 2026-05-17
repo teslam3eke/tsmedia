@@ -54,6 +54,10 @@ import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import InstantMatchTab from '@/screens/InstantMatchTab'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import {
+  DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
+  DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
+} from '@/lib/discoverDemoPhotoUrls'
+import {
   PuzzlePhotoUnlock,
   collectConversationPhotoUrls,
   getPuzzleProgress,
@@ -175,11 +179,11 @@ const MATCH_PROFILES: Profile[] = [
     homeRegion: 'north',
     incomeTier: 'gold',
     showIncomeBorder: true,
-    photoUrl: 'https://images.unsplash.com/photo-1773216282433-1d79669534c6?w=640&h=800&fit=crop&q=85',
+    photoUrl: DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
     photoUrls: [
-      'https://images.unsplash.com/photo-1773216282433-1d79669534c6?w=640&h=800&fit=crop&q=85',
-      'https://images.unsplash.com/photo-1767786887394-9271ceacf801?w=640&h=800&fit=crop&q=85',
-      'https://images.unsplash.com/photo-1759873821395-c29de82a5b99?w=640&h=800&fit=crop&q=85',
+      DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
+      DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
+      DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
     ],
     qa: [
       { question: '你覺得愛情裡最被誤解的事情是什麼？',                  answer: '「我懂你」這三個字。大多數時候我們其實只是投射自己，真正的懂需要長期觀察、而且承認自己的偏見。' },
@@ -207,11 +211,11 @@ const MATCH_PROFILES: Profile[] = [
     compatScore: 88,
     workRegion: 'north',
     homeRegion: 'north',
-    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&h=900&fit=crop&q=80',
+    photoUrl: DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
     photoUrls: [
-      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&h=900&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=600&h=900&fit=crop&q=80',
-      'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=600&h=900&fit=crop&q=80',
+      DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
+      DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
+      DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
     ],
     qa: [
       { question: '你如何定義「一段健康的關係」？',                     answer: '兩個人都不需要為了維繫關係而縮小自己。可以吵架，但吵完以後彼此更清楚對方是誰。' },
@@ -1155,7 +1159,7 @@ const DEMO_PUZZLE_CLEARED_KEY = 'tsm-demo-puzzle-cleared-slots'
 
 function discoverChatPuzzleIntroStorageKey(userId: string) {
   /** 版次昇級視為全域「未看過」一次（僅前端；無伺服器側旗標）。 */
-  return `tsm-discover-chat-puzzle-intro:v3:${userId}`
+  return `tsm-discover-chat-puzzle-intro:v4:${userId}`
 }
 
 function hasSeenDiscoverChatPuzzleIntro(userId: string): boolean {
