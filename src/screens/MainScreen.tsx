@@ -4748,9 +4748,18 @@ function CompanyVerifyScreen({
     const optimisticCompany = selectedCompany
     companyAiFinalizePendingRef.current = false
     setSubmitted(true)
-    setCompanyReviewCountdown(0)
-    setAiMessage('正在上傳並送審⋯')
     onVerified({ ...profile, company: optimisticCompany, verification_status: 'submitted' })
+
+    /** 送出後立即顯示 5 秒倒數（AI 辨識與上傳在背景進行） */
+    const isImageDoc = docFile.type.startsWith('image/')
+    if (isImageDoc) {
+      companyAiFinalizePendingRef.current = true
+      setCompanyReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
+      setAiMessage(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
+    } else {
+      setCompanyReviewCountdown(0)
+      setAiMessage('正在上傳並送審⋯')
+    }
 
     let aiResult: Awaited<ReturnType<typeof verifyCompanyDocWithAI>>
     let reviewMode: 'ai_auto' | 'manual' = 'manual'
@@ -4770,12 +4779,16 @@ function CompanyVerifyScreen({
     if (!aiResult.passed) {
       manualReason = aiResult.reason || 'AI 初審未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
       setAiMessage(manualReason)
+      companyAiFinalizePendingRef.current = false
+      setCompanyReviewCountdown(0)
     } else if (selectedDocType === 'employee_id') {
       reviewMode = 'ai_auto'
     } else {
       reviewMode = 'manual'
       manualReason = 'AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。人工審核時間可能大於 12 小時。'
       setAiMessage(manualReason)
+      companyAiFinalizePendingRef.current = false
+      setCompanyReviewCountdown(0)
     }
 
     if (aiResult.company) setSelectedCompany(aiResult.company)
@@ -4849,8 +4862,10 @@ function CompanyVerifyScreen({
     setSubmitting(false)
     if (reviewMode === 'ai_auto') {
       companyAiFinalizePendingRef.current = true
-      setCompanyReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
-      setAiMessage(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
+      setCompanyReviewCountdown((prev) => {
+        if (prev <= 0) void finalizeDueAiReviews()
+        return prev > 0 ? prev : AI_AUTO_REVIEW_UI_SECONDS
+      })
     }
   }
 
@@ -5954,7 +5969,12 @@ export default function MainScreen({
   /** 後台 app_notifications：全分頁彈窗；同一 id 會話內只會排入佇列一次，按「知道了」後標已讀再顯示下一則。 */
   const appNotifPopupQueueRef = useRef<AppNotificationRow[]>([])
   const appNotifQueuedOnceIdsRef = useRef(new Set<string>())
+  const activeAppNotifPopupRef = useRef<AppNotificationRow | null>(null)
   const [activeAppNotifPopup, setActiveAppNotifPopup] = useState<AppNotificationRow | null>(null)
+
+  useEffect(() => {
+    activeAppNotifPopupRef.current = activeAppNotifPopup
+  }, [activeAppNotifPopup])
 
   useEffect(() => {
     appNotifPopupQueueRef.current = []
@@ -6066,11 +6086,28 @@ export default function MainScreen({
       try {
         const list = await getUnreadAppNotifications(uid)
         if (cancelled) return
+        const verificationKindsQueued = new Set<string>()
         for (const n of list) {
           /** LINE 類 UX：新訊息不插隊全螢「知道了」，只靠聊天室／角標；背景推播由 SW 負責 */
           if (n.kind === 'message_received') {
             void markAppNotificationRead(n.id)
             continue
+          }
+          /** 驗證通過／拒絕：同 kind 只保留一則站內彈窗（避免 finalize 競態重複 INSERT） */
+          if (n.kind === 'verification_approved' || n.kind === 'verification_rejected') {
+            if (verificationKindsQueued.has(n.kind)) {
+              void markAppNotificationRead(n.id)
+              continue
+            }
+            if (activeAppNotifPopupRef.current?.kind === n.kind) {
+              void markAppNotificationRead(n.id)
+              continue
+            }
+            if (appNotifPopupQueueRef.current.some((q) => q.kind === n.kind)) {
+              void markAppNotificationRead(n.id)
+              continue
+            }
+            verificationKindsQueued.add(n.kind)
           }
           if (!appNotifQueuedOnceIdsRef.current.has(n.id)) {
             appNotifQueuedOnceIdsRef.current.add(n.id)
@@ -6085,9 +6122,17 @@ export default function MainScreen({
 
     void poll()
     const iv = window.setInterval(poll, 5_000)
+
+    const onSwMsg = (ev: Event) => {
+      const data = (ev as MessageEvent).data as { type?: string } | undefined
+      if (data?.type === 'TM_PUSH_APP_NOTIF_FOREGROUND') void poll()
+    }
+    navigator.serviceWorker?.addEventListener('message', onSwMsg)
+
     return () => {
       cancelled = true
       window.clearInterval(iv)
+      navigator.serviceWorker?.removeEventListener('message', onSwMsg)
     }
   }, [user?.id, foregroundReloadNonce, tryDequeueAppNotifPopup])
 

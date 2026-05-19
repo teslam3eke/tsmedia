@@ -289,6 +289,11 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     setAiStatus('idle')
     setAiMessage('')
     setAiResultData(null)
+    employmentAiOutcomeRef.current = null
+    const file = newProofs[0]?.file
+    if (file?.type.startsWith('image/')) {
+      void fetchEmploymentAiOutcome(file)
+    }
   }
 
   const removeProof = () => {
@@ -853,8 +858,9 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 setStep(step + 1)
                 return
               }
-              employmentAiOutcomeRef.current = null
-              void fetchEmploymentAiOutcome(file)
+              if (!employmentAiOutcomeRef.current) {
+                void fetchEmploymentAiOutcome(file)
+              }
               setEmploymentHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
             } else {
               setStep(step + 1)

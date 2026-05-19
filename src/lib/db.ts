@@ -466,13 +466,25 @@ export async function getTodayVerificationSubmissionCount(userId: string): Promi
   return count ?? 0
 }
 
+let finalizeDueAiReviewsInFlight: Promise<{ ok: boolean; error?: string }> | null = null
+
 export async function finalizeDueAiReviews(): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase.rpc('finalize_due_ai_reviews')
-  if (error) {
-    console.error('[db] finalizeDueAiReviews error:', error.message)
-    return { ok: false, error: error.message }
+  if (finalizeDueAiReviewsInFlight) return finalizeDueAiReviewsInFlight
+
+  finalizeDueAiReviewsInFlight = (async () => {
+    const { error } = await supabase.rpc('finalize_due_ai_reviews')
+    if (error) {
+      console.error('[db] finalizeDueAiReviews error:', error.message)
+      return { ok: false, error: error.message }
+    }
+    return { ok: true }
+  })()
+
+  try {
+    return await finalizeDueAiReviewsInFlight
+  } finally {
+    finalizeDueAiReviewsInFlight = null
   }
-  return { ok: true }
 }
 
 // ─── Admin functions ─────────────────────────────────────────────────────────

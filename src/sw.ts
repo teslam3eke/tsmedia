@@ -98,6 +98,29 @@ function shouldSuppressMessagePushForMatch(
   return false
 }
 
+async function pingClientsForegroundAppNotifQuiet(): Promise<void> {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  for (const x of clients) {
+    if (!(x instanceof WindowClient)) continue
+    if (!x.url.startsWith(self.location.origin)) continue
+    try {
+      x.postMessage({ type: 'TM_PUSH_APP_NOTIF_FOREGROUND' })
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function hasForegroundOriginClient(clients: readonly Client[]): boolean {
+  return clients.some(
+    (x) =>
+      x instanceof WindowClient &&
+      typeof x.url === 'string' &&
+      x.url.startsWith(self.location.origin) &&
+      (x.visibilityState === 'visible' || x.focused === true || x.visibilityState === undefined),
+  )
+}
+
 async function pingClientsForegroundMessageQuiet(): Promise<void> {
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
   for (const x of clients) {
@@ -145,12 +168,20 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
-      /** 同 LINE：僅在「有前景視窗且 SW 也認為正在該房」時不橫幅；背景／鎖屏一律照常推播 */
+      const isAppNotifTag =
+        tag.startsWith('app-notif-') || (tag.includes('app-notif') && !tag.includes('discover'))
       const isMessageReceivedTag =
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+
+      /** PWA 前景：站內彈窗即可，不秀 OS 橫幅（驗證通過／拒絕等） */
+      if (isAppNotifTag && !isMessageReceivedTag && hasForegroundOriginClient(clients)) {
+        await pingClientsForegroundAppNotifQuiet()
+        return
+      }
+
       if (isMessageReceivedTag) {
         const incomingMatchLc = payloadMatchLc ?? matchIdFromPayloadUrl(openUrl)
-        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
         if (incomingMatchLc != null && shouldSuppressMessagePushForMatch(incomingMatchLc, clients)) {
           await pingClientsForegroundMessageQuiet()
