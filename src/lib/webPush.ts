@@ -1,3 +1,4 @@
+import { getPushClientKey } from './chatPresence'
 import { supabase } from './supabase'
 
 const VAPID = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
@@ -54,6 +55,7 @@ async function upsertPushSubscription(
       endpoint: json.endpoint,
       p256dh: json.keys.p256dh,
       auth: json.keys.auth,
+      client_key: getPushClientKey(),
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'endpoint' },

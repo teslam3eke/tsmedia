@@ -58,6 +58,46 @@ function matchIdFromPayloadUrl(openUrlPath: string): string | null {
   }
 }
 
+/** 前景聊天室備援：`?tm_chat=`（主執行緒 replaceState）或推播 deep link 的 `?match=` */
+function matchIdFromClientUrl(clientUrl: string): string | null {
+  try {
+    const u = new URL(clientUrl)
+    if (u.origin !== self.location.origin) return null
+    const raw = u.searchParams.get('tm_chat') ?? u.searchParams.get('match')
+    if (!raw?.trim()) return null
+    return normalizeMatchIdForCompare(raw)
+  } catch {
+    return null
+  }
+}
+
+function shouldSuppressMessagePushForMatch(
+  incomingMatchLc: string,
+  clients: readonly Client[],
+): boolean {
+  const originClients = clients.filter(
+    (x): x is WindowClient =>
+      x instanceof WindowClient &&
+      typeof x.url === 'string' &&
+      x.url.startsWith(self.location.origin),
+  )
+  if (originClients.length === 0) return false
+
+  /** iOS：postMessage 常漏，以 clients.url 的 tm_chat 為準 */
+  if (originClients.some((c) => matchIdFromClientUrl(c.url) === incomingMatchLc)) {
+    return true
+  }
+
+  /** postMessage 有 arm 時：前景／focused 即抑制（visibilityState 在 iOS 常失準） */
+  if (activeChatMatchIdLc === incomingMatchLc) {
+    return originClients.some(
+      (c) => c.visibilityState === 'visible' || c.focused === true || c.visibilityState === undefined,
+    )
+  }
+
+  return false
+}
+
 async function pingClientsForegroundMessageQuiet(): Promise<void> {
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
   for (const x of clients) {
@@ -111,26 +151,20 @@ self.addEventListener('push', (event: PushEvent) => {
       if (isMessageReceivedTag) {
         const incomingMatchLc = payloadMatchLc ?? matchIdFromPayloadUrl(openUrl)
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-        const visibleOriginClients = clients.filter(
-          (x): x is WindowClient =>
-            x instanceof WindowClient &&
-            x.visibilityState === 'visible' &&
-            typeof x.url === 'string' &&
-            x.url.startsWith(self.location.origin),
-        )
 
-        if (
-          incomingMatchLc != null &&
-          activeChatMatchIdLc != null &&
-          incomingMatchLc === activeChatMatchIdLc &&
-          visibleOriginClients.length > 0
-        ) {
+        if (incomingMatchLc != null && shouldSuppressMessagePushForMatch(incomingMatchLc, clients)) {
           await pingClientsForegroundMessageQuiet()
           return
         }
 
-        /** 舊 payload 無 match：僅在前景且 focused 時略過（站內靠列表／角標） */
-        const focusedVisibleHere = visibleOriginClients.some((x) => x.focused === true)
+        /** 舊 payload 無 match：僅在前景 focused 時略過（站內靠列表／角標） */
+        const focusedVisibleHere = clients.some(
+          (x) =>
+            x instanceof WindowClient &&
+            x.focused === true &&
+            typeof x.url === 'string' &&
+            x.url.startsWith(self.location.origin),
+        )
         if (focusedVisibleHere && incomingMatchLc == null) {
           await pingClientsForegroundMessageQuiet()
           return

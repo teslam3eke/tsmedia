@@ -33,7 +33,6 @@ import {
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
-  getPhotoUnlockState,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
@@ -66,7 +65,7 @@ import {
 import AdminScreen from '@/screens/AdminScreen'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser, requestRemotePushSelfTest } from '@/lib/webPush'
-import { notifyServiceWorkerActiveChatMatch, notifyServiceWorkerActiveChatMatchIfForeground } from '@/lib/swActiveChat'
+import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
 import {
   TM_APP_DEEP_LINK_EVENT,
   TM_FOREGROUND_TRANSPORT_KICK_EVENT,
@@ -3309,17 +3308,17 @@ function ChatRoomView({
   const lastInsetCommitRef = useRef<number | null>(null)
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
 
-  /** 回報 SW：僅前景且此配對聊天開著時略過同對象推播；背景必清 active，避免鎖屏後仍被誤判在聊天室 */
+  /** 前景開 chat + 伺服器 presence（Webhook 主抑制）+ SW 備援 */
   useLayoutEffect(() => {
     if (!isLive || !conversation.matchId) return
-    notifyServiceWorkerActiveChatMatchIfForeground(conversation.matchId)
+    armChatPresenceIfForeground(conversation.matchId)
   }, [isLive, conversation.matchId])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
-    const arm = () => notifyServiceWorkerActiveChatMatchIfForeground(conversation.matchId)
+    const arm = () => armChatPresenceIfForeground(conversation.matchId)
     arm()
-    const hb = window.setInterval(arm, 2500)
+    const hb = window.setInterval(arm, 15_000)
     document.addEventListener('visibilitychange', arm)
     const sw = navigator.serviceWorker
     const onCtl = () => arm()
@@ -3328,7 +3327,7 @@ function ChatRoomView({
       clearInterval(hb)
       document.removeEventListener('visibilitychange', arm)
       sw?.removeEventListener('controllerchange', onCtl)
-      notifyServiceWorkerActiveChatMatch(null)
+      clearChatPresence()
     }
   }, [isLive, conversation.matchId])
 
@@ -3381,16 +3380,9 @@ function ChatRoomView({
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
-    let cancelled = false
-    ;(async () => {
-      const row = await getPhotoUnlockState(conversation.matchId!)
-      if (cancelled || !row?.unlocked_tiles) return
-      setManualUnlockedTiles([...row.unlocked_tiles])
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [isLive, conversation.matchId, foregroundReloadNonce, physicalChannelResubscribeNonce])
+    /** 064：即時升格 DB 刻意空列；一般配對（含 super like）亦改由訊息推導，勿灌入 sync 線性 0..n */
+    setManualUnlockedTiles([])
+  }, [isLive, conversation.matchId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
@@ -3545,7 +3537,7 @@ function ChatRoomView({
         ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
         : String(conversation.id),
       photoSlots,
-      isLive && !conversation.instantCarrySessionId,
+      false,
       recentMatchBoostEnabled,
     )
     if (progress.allPhotosComplete) return
@@ -3650,7 +3642,7 @@ function ChatRoomView({
           manualUnlockedTiles={manualUnlockedTiles}
           isKeyboardOpen={isKeyboardOpen}
           onSpendUnlock={spendDemoUnlock}
-          liveUseDbTilesOnly={isLive && !conversation.instantCarrySessionId}
+          liveUseDbTilesOnly={false}
           onPuzzleSlotComplete={
             !isLive && typeof conversation.id === 'number'
               ? (slot: number) => onDemoPuzzleSlotCleared?.(conversation.id as number, slot)
@@ -6018,6 +6010,17 @@ export default function MainScreen({
       window.removeEventListener('pageshow', run)
       window.removeEventListener('focus', run)
     }
+  }, [user?.id])
+
+  /** App 進背景：清 presence（不在聊天室時也要清，避免舊狀態誤擋推播） */
+  useEffect(() => {
+    if (!user?.id) return
+    const onHide = () => {
+      if (document.visibilityState !== 'hidden') return
+      void upsertUserChatPresenceOnServer(null, 'hidden')
+    }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
   }, [user?.id])
 
   /** 後台 app_notifications：全分頁彈窗；同一 id 會話內只會排入佇列一次，按「知道了」後標已讀再顯示下一則。 */
