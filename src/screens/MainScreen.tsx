@@ -65,8 +65,8 @@ import {
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
-import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
-import { notifyServiceWorkerActiveChatMatch } from '@/lib/swActiveChat'
+import { subscribeWebPushForCurrentUser, requestRemotePushSelfTest } from '@/lib/webPush'
+import { notifyServiceWorkerActiveChatMatch, notifyServiceWorkerActiveChatMatchIfForeground } from '@/lib/swActiveChat'
 import {
   TM_APP_DEEP_LINK_EVENT,
   TM_FOREGROUND_TRANSPORT_KICK_EVENT,
@@ -612,8 +612,8 @@ function NotificationModal({
         setTestError('通知權限未允許，請到裝置設定開啟')
         return
       }
-      const title = '測試通知'
-      const body  = '如果你看到這則通知，代表通知功能運作正常 ✅'
+      const title = '測試通知（本機）'
+      const body  = '本機 Service Worker 正常。若聊天推播仍收不到，請看下方遠端測試結果。'
       const options: NotificationOptions = {
         body,
         icon: '/icons/icon-192.png',
@@ -627,7 +627,16 @@ function NotificationModal({
       } else {
         new Notification(title, options)
       }
-      if (userId) void subscribeWebPushForCurrentUser(userId)
+      if (userId) await subscribeWebPushForCurrentUser(userId)
+      const remote = userId ? await requestRemotePushSelfTest() : { ok: false as const, error: '未登入' }
+      if (!remote.ok) {
+        setTestStatus('error')
+        setTestError(
+          remote.error ??
+            '本機通知已發，但遠端推播失敗（聊天／10 點通知走這條路）。請關 App 再開或重新允許通知。',
+        )
+        return
+      }
       setTestStatus('sent')
       setTimeout(() => setTestStatus('idle'), 2500)
     } catch (e) {
@@ -732,9 +741,9 @@ function NotificationModal({
               : 'bg-slate-900 text-white active:scale-[0.98]',
           )}
         >
-          {testStatus === 'idle'    && <><BellRing className="w-4 h-4" /> 發送測試通知</>}
+          {testStatus === 'idle'    && <><BellRing className="w-4 h-4" /> 測試本機＋遠端推播</>}
           {testStatus === 'sending' && <>發送中</>}
-          {testStatus === 'sent'    && <><Check className="w-4 h-4" /> 已發送！請查看通知</>}
+          {testStatus === 'sent'    && <><Check className="w-4 h-4" /> 本機與遠端推播已送出</>}
           {testStatus === 'error'   && <><AlertCircle className="w-4 h-4" /> {testError || '發送失敗'}</>}
         </button>
 
@@ -3300,15 +3309,15 @@ function ChatRoomView({
   const lastInsetCommitRef = useRef<number | null>(null)
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
 
-  /** 回報 SW：此配對聊天開著時略過同對象推播；SW 重啟／切回前景時重新 arm；短週期 heartbeat 對齊 iOS／多 registration */
+  /** 回報 SW：僅前景且此配對聊天開著時略過同對象推播；背景必清 active，避免鎖屏後仍被誤判在聊天室 */
   useLayoutEffect(() => {
     if (!isLive || !conversation.matchId) return
-    notifyServiceWorkerActiveChatMatch(conversation.matchId)
+    notifyServiceWorkerActiveChatMatchIfForeground(conversation.matchId)
   }, [isLive, conversation.matchId])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
-    const arm = () => notifyServiceWorkerActiveChatMatch(conversation.matchId)
+    const arm = () => notifyServiceWorkerActiveChatMatchIfForeground(conversation.matchId)
     arm()
     const hb = window.setInterval(arm, 2500)
     document.addEventListener('visibilitychange', arm)

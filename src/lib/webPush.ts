@@ -23,33 +23,79 @@ export async function subscribeWebPushForCurrentUser(userId: string): Promise<bo
     const reg = await navigator.serviceWorker.ready
     let sub = await reg.pushManager.getSubscription()
     if (!sub) {
-      const key = urlBase64ToUint8Array(VAPID.trim())
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: key as BufferSource,
-      })
+      sub = await subscribeFresh(reg)
+      if (!sub) return false
     }
-    const json = sub.toJSON()
-    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false
-
-    const { error } = await supabase.from('push_subscriptions').upsert(
-      {
-        user_id: userId,
-        endpoint: json.endpoint,
-        p256dh: json.keys.p256dh,
-        auth: json.keys.auth,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'endpoint' },
-    )
-    if (error) {
-      console.warn('[webPush] upsert', error.message)
-      return false
-    }
-    return true
+    return await upsertPushSubscription(userId, sub)
   } catch (e) {
     console.warn('[webPush] subscribe', e)
     return false
+  }
+}
+
+async function subscribeFresh(reg: ServiceWorkerRegistration) {
+  const key = urlBase64ToUint8Array(VAPID!.trim())
+  return reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: key as BufferSource,
+  })
+}
+
+async function upsertPushSubscription(
+  userId: string,
+  sub: PushSubscription,
+): Promise<boolean> {
+  const json = sub.toJSON()
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false
+
+  const { error } = await supabase.from('push_subscriptions').upsert(
+    {
+      user_id: userId,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'endpoint' },
+  )
+  if (error) {
+    console.warn('[webPush] upsert', error.message)
+    return false
+  }
+  return true
+}
+
+/** 端到端推播自測：走 Vercel → push_subscriptions → SW（需已登入）。 */
+export async function requestRemotePushSelfTest(): Promise<{
+  ok: boolean
+  sent?: number
+  failed?: number
+  error?: string
+}> {
+  try {
+    const { data: sess } = await supabase.auth.getSession()
+    const token = sess.session?.access_token
+    if (!token) return { ok: false, error: '未登入' }
+    const res = await fetch('/api/push-test-self', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean
+      sent?: number
+      failed?: number
+      error?: string
+    }
+    if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` }
+    if ((body.sent ?? 0) === 0) {
+      return {
+        ok: false,
+        error: '伺服器找不到此裝置的 push 訂閱，請再按一次測試或重新開啟 App',
+      }
+    }
+    return { ok: true, sent: body.sent, failed: body.failed }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '請求失敗' }
   }
 }
 

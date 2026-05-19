@@ -105,31 +105,33 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
-      /** 與 LINE 類似：同 chat match id／或多數瀏覽器 `visibilityState:visible` 時不橫幅（補齊 `focused` 在 iOS 失準） */
+      /** 同 LINE：僅在「有前景視窗且 SW 也認為正在該房」時不橫幅；背景／鎖屏一律照常推播 */
       const isMessageReceivedTag =
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
       if (isMessageReceivedTag) {
         const incomingMatchLc = payloadMatchLc ?? matchIdFromPayloadUrl(openUrl)
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        const visibleOriginClients = clients.filter(
+          (x): x is WindowClient =>
+            x instanceof WindowClient &&
+            x.visibilityState === 'visible' &&
+            typeof x.url === 'string' &&
+            x.url.startsWith(self.location.origin),
+        )
 
         if (
           incomingMatchLc != null &&
           activeChatMatchIdLc != null &&
-          incomingMatchLc === activeChatMatchIdLc
+          incomingMatchLc === activeChatMatchIdLc &&
+          visibleOriginClients.length > 0
         ) {
           await pingClientsForegroundMessageQuiet()
           return
         }
 
-        const focusedHere = clients.some(
-          (x) =>
-            x instanceof WindowClient &&
-            x.focused === true &&
-            typeof x.url === 'string' &&
-            x.url.startsWith(self.location.origin),
-        )
-        /** 舊 payload 無 match：`focused` 時仍不強打橫幅（站內靠列表／角標） */
-        if (focusedHere && incomingMatchLc == null) {
+        /** 舊 payload 無 match：僅在前景且 focused 時略過（站內靠列表／角標） */
+        const focusedVisibleHere = visibleOriginClients.some((x) => x.focused === true)
+        if (focusedVisibleHere && incomingMatchLc == null) {
           await pingClientsForegroundMessageQuiet()
           return
         }

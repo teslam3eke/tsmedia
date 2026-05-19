@@ -74,6 +74,7 @@ async function sendToSubscription(
 export async function sendWebPushToUser(
   userId: string,
   payload: { title: string; body: string; tag: string; url?: string; matchId?: string | null },
+  options: typeof PUSH_PAYLOAD_OPTIONS | typeof PUSH_OPTIONS_BROADCAST = PUSH_PAYLOAD_OPTIONS,
 ): Promise<{ sent: number; failed: number }> {
   configureWebPush()
   const supabase = adminSupabase()
@@ -98,11 +99,19 @@ export async function sendWebPushToUser(
   let sent = 0
   let failed = 0
   for (const r of rows) {
-    const out = await sendToSubscription(supabase, r, payloadText)
+    const out = await sendToSubscription(supabase, r, payloadText, options)
     if (out === 'ok') sent++
     else failed++
   }
   return { sent, failed }
+}
+
+/** 聊天／訊息類：較高 urgency，降低 iOS/APNs 慢排或合併 */
+export async function sendWebPushMessageToUser(
+  userId: string,
+  payload: { title: string; body: string; tag: string; url?: string; matchId?: string | null },
+): Promise<{ sent: number; failed: number }> {
+  return sendWebPushToUser(userId, payload, { TTL: 86_400, urgency: 'high' })
 }
 
 /** 每晚換日廣播：依 endpoint 逐筆送出（同一使用者多裝置各自一則）。 */

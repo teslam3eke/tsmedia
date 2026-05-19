@@ -13,7 +13,7 @@
  * - PUSH_WEBHOOK_SECRET（隨機字串）
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { sendWebPushToUser } from './_utils/pushSend.js'
+import { sendWebPushMessageToUser, sendWebPushToUser } from './_utils/pushSend.js'
 
 /** 與前端 MainScreen / App 的 `?tab=` 對齊；含 `notif` 以便開啟後標已讀、不重複站內彈窗 */
 function buildOpenUrlForAppNotification(record: {
@@ -75,7 +75,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     const tag = `app-notif-${record.kind ?? 'generic'}`
     const url = buildOpenUrlForAppNotification(record)
-    const result = await sendWebPushToUser(record.user_id, {
+    const sendPush =
+      record.kind === 'message_received' ? sendWebPushMessageToUser : sendWebPushToUser
+    const result = await sendPush(record.user_id, {
       title: record.title,
       body: record.body ?? '',
       tag,
