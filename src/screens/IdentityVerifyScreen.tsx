@@ -355,7 +355,13 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       const uploadedPhotoUrls: string[] = []
       for (const file of photoFiles) {
         const result = await uploadPhoto(userId, file)
-        if (result.ok) uploadedPhotoUrls.push(result.path)
+        if (!result.ok) {
+          setSubmitting(false)
+          setAiStatus('fail')
+          setAiMessage(result.error)
+          return
+        }
+        uploadedPhotoUrls.push(result.path)
       }
       if (uploadedPhotoUrls.length < PROFILE_PHOTO_MIN) {
         setSubmitting(false)
@@ -490,7 +496,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   <h2 className="text-xl font-bold text-slate-900">上傳你的生活照</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  請上傳 {PROFILE_PHOTO_MIN}–{PROFILE_PHOTO_MAX} 張能展現真實生活風格的照片，所有照片必須是近期本人。
+                  請上傳 {PROFILE_PHOTO_MIN}–{PROFILE_PHOTO_MAX} 張能展現真實生活風格的照片；每張須有<strong className="font-semibold">清楚可辨的本人臉部</strong>，不可使用風景、美食、寵物或物品照。
                 </p>
               </>
             )}

@@ -4174,7 +4174,12 @@ function EditProfileScreen({
         uploadedPaths.push(photo.storagePath)
       } else if (photo.file) {
         const res = await uploadPhoto(userId, photo.file)
-        if (res.ok) uploadedPaths.push(res.path)
+        if (!res.ok) {
+          setSaving(false)
+          setSaveMsg(res.error)
+          return
+        }
+        uploadedPaths.push(res.path)
       }
     }
 
@@ -4363,7 +4368,7 @@ function EditProfileScreen({
               <div className="col-span-2 aspect-[2/1] rounded-2xl border-2 border-dashed border-slate-100 flex items-center justify-center bg-slate-50">
                 <div className="text-center">
                   <ImageIcon className="w-8 h-8 text-slate-200 mx-auto mb-1" />
-                  <p className="text-xs text-slate-300">最多 {PROFILE_PHOTO_MAX} 張生活照，至少 {PROFILE_PHOTO_MIN} 張</p>
+                  <p className="text-xs text-slate-300">須有清楚臉部，不可風景／寵物照 · 最多 {PROFILE_PHOTO_MAX} 張</p>
                 </div>
               </div>
             )}

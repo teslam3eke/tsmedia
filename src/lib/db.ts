@@ -236,6 +236,12 @@ export async function uploadPhoto(
   file: File,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
   const compressed = await compressImage(file)
+  const { verifyLifePhotoCompressed } = await import('./verifyLifePhoto')
+  const verify = await verifyLifePhotoCompressed(compressed)
+  if (!verify.ok) {
+    return { ok: false, error: verify.message }
+  }
+
   const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`
 
   const { error } = await supabase.storage
