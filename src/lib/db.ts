@@ -234,12 +234,15 @@ async function compressImage(file: File, maxPx = 1080, quality = 0.85): Promise<
 export async function uploadPhoto(
   userId: string,
   file: File,
+  options?: { skipVerify?: boolean },
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
   const compressed = await compressImage(file)
-  const { verifyLifePhotoCompressed } = await import('./verifyLifePhoto')
-  const verify = await verifyLifePhotoCompressed(compressed)
-  if (!verify.ok) {
-    return { ok: false, error: verify.message }
+  if (!options?.skipVerify) {
+    const { verifyLifePhotoCompressed } = await import('./verifyLifePhoto')
+    const verify = await verifyLifePhotoCompressed(compressed)
+    if (!verify.ok) {
+      return { ok: false, error: verify.message }
+    }
   }
 
   const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`

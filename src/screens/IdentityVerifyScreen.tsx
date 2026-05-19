@@ -3,19 +3,20 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, FileText, Trash2, ChevronRight, ChevronLeft,
-  ShieldCheck, AlertCircle, Cpu, Upload, ImageIcon, Gem, Sparkles,
+  ShieldCheck, AlertCircle, Cpu, Upload, Gem, Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  uploadPhoto, uploadProofDoc, submitVerificationDoc,
+  uploadProofDoc, submitVerificationDoc,
   submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
   type AiResult,
 } from '@/lib/db'
 import type { DocType, IncomeTier } from '@/lib/types'
-import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
+import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
+import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 
 interface Props {
   userId?: string
@@ -23,13 +24,6 @@ interface Props {
   gender?: 'male' | 'female'
   onComplete: () => void
   onSkip: () => void
-}
-
-interface PhotoItem {
-  id: string
-  url: string
-  name: string
-  file: File
 }
 
 interface ProofItem {
@@ -52,7 +46,7 @@ const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
 export default function IdentityVerifyScreen({ userId, claimedName, gender = 'male', onComplete, onSkip }: Props) {
   const steps = gender === 'female' ? STEPS_FEMALE : STEPS_MALE
   const [step, setStep] = useState(0)
-  const [photos, setPhotos] = useState<PhotoItem[]>([])
+  const [photos, setPhotos] = useState<LifePhotoSlot[]>([])
   const [proofs, setProofs] = useState<ProofItem[]>([])
   const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>('')
   const [submitting, setSubmitting] = useState(false)
@@ -90,7 +84,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   } | null>(null)
   const incomeHoldResolveRef = useRef<(() => void) | null>(null)
 
-  const photoInputRef  = useRef<HTMLInputElement>(null)
   const proofInputRef  = useRef<HTMLInputElement>(null)
   const incomeInputRef = useRef<HTMLInputElement>(null)
 
@@ -275,25 +268,9 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     setIncomeDoc(null)
   }
 
-  const addPhotos = (files: FileList | null) => {
-    if (!files) return
-    const newPhotos: PhotoItem[] = Array.from(files)
-      .slice(0, PROFILE_PHOTO_MAX - photos.length)
-      .map((f) => ({
-        id: `${Date.now()}-${f.name}`,
-        url: URL.createObjectURL(f),
-        name: f.name,
-        file: f,
-      }))
-    setPhotos((prev) => [...prev, ...newPhotos].slice(0, PROFILE_PHOTO_MAX))
-  }
-
-  const removePhoto = (id: string) => {
-    setPhotos((prev) => {
-      const removed = prev.find((p) => p.id === id)
-      if (removed) URL.revokeObjectURL(removed.url)
-      return prev.filter((p) => p.id !== id)
-    })
+  const handleLifePhotoUploadSuccess = async (next: LifePhotoSlot[]) => {
+    if (!userId) return
+    await upsertProfile({ userId, photoUrls: next.map((p) => p.storagePath) })
   }
 
   const addProof = (files: FileList | null) => {
@@ -350,19 +327,8 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         return
       }
 
-      // 1. Upload life photos to Storage (both genders)
-      const photoFiles = photos.map((p) => p.file).filter(Boolean) as File[]
-      const uploadedPhotoUrls: string[] = []
-      for (const file of photoFiles) {
-        const result = await uploadPhoto(userId, file)
-        if (!result.ok) {
-          setSubmitting(false)
-          setAiStatus('fail')
-          setAiMessage(result.error)
-          return
-        }
-        uploadedPhotoUrls.push(result.path)
-      }
+      // 1. 生活照應已於選擇後逐張上傳至 Storage
+      const uploadedPhotoUrls = photos.map((p) => p.storagePath)
       if (uploadedPhotoUrls.length < PROFILE_PHOTO_MIN) {
         setSubmitting(false)
         setAiStatus('fail')
@@ -496,7 +462,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   <h2 className="text-xl font-bold text-slate-900">上傳你的生活照</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  請上傳 {PROFILE_PHOTO_MIN}–{PROFILE_PHOTO_MAX} 張能展現真實生活風格的照片；每張須有<strong className="font-semibold">清楚可辨的本人臉部</strong>，不可使用風景、美食、寵物或物品照。
+                  選擇照片後按「上傳這張照片」；通過審核後會寫入你的個人檔案。
                 </p>
               </>
             )}
@@ -538,116 +504,29 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
             className="space-y-4"
           >
             {/* ── Life photos ─────────────────────────────── */}
-            {stepLabel === '生活照上傳' && (
+            {stepLabel === '生活照上傳' && userId && (
               <>
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => addPhotos(e.target.files)}
+                <LifePhotoUploadSection
+                  userId={userId}
+                  photos={photos}
+                  onPhotosChange={setPhotos}
+                  onUploadSuccess={handleLifePhotoUploadSuccess}
                 />
 
-                {/* Photo grid */}
-                {photos.length > 0 && (
-                  <div className="grid grid-cols-3 gap-2">
-                    {photos.map((photo) => (
-                      <motion.div
-                        key={photo.id}
-                        initial={{ opacity: 0, scale: 0.85 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="relative aspect-square rounded-2xl overflow-hidden bg-slate-100"
-                      >
-                        <img
-                          src={photo.url}
-                          alt={photo.name}
-                          className="w-full h-full object-cover scale-110"
-                          style={{ filter: 'blur(6px)' }}
-                        />
-                        <div className="absolute inset-0 bg-black/10" />
-                        <div className="absolute left-2 right-2 bottom-2 rounded-xl bg-white/80 backdrop-blur-sm px-2.5 py-1.5">
-                          <p className="text-[10px] font-semibold text-slate-700 text-center tracking-wide">
-                            隱私保護預覽
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => removePhoto(photo.id)}
-                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center"
-                        >
-                          <Trash2 className="w-3 h-3 text-white" />
-                        </button>
-                      </motion.div>
-                    ))}
-
-                    {/* Add more slot */}
-                    {photos.length < PROFILE_PHOTO_MAX && (
-                      <button
-                        onClick={() => clickFileInputWithGrace(photoInputRef.current)}
-                        className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 bg-white hover:border-slate-400 transition-colors"
-                      >
-                        <Upload className="w-5 h-5 text-slate-300" />
-                        <span className="text-[10px] text-slate-300 font-medium">新增</span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Upload button when empty */}
-                {photos.length === 0 && (
-                  <button
-                    onClick={() => clickFileInputWithGrace(photoInputRef.current)}
-                    className="w-full bg-white rounded-3xl p-8 shadow-sm ring-1 ring-slate-100 flex flex-col items-center gap-3 hover:ring-slate-300 transition-all"
-                  >
-                    <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center">
-                      <ImageIcon className="w-7 h-7 text-slate-400" />
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-semibold text-slate-700">點擊上傳生活照</p>
-                      <p className="text-xs text-slate-400 mt-1">至少 {PROFILE_PHOTO_MIN} 張、最多 {PROFILE_PHOTO_MAX} 張 · JPG / PNG / HEIC</p>
-                    </div>
-                  </button>
-                )}
-
-                {/* Count hint */}
-                <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-500">已上傳</span>
-                    <span className={cn(
-                      'text-xs font-bold',
-                      photos.length >= PROFILE_PHOTO_MIN ? 'text-emerald-500' : 'text-slate-400',
-                    )}>
-                      {photos.length} / {PROFILE_PHOTO_MAX} 張 {photos.length >= PROFILE_PHOTO_MIN ? '✓ 符合要求' : `（需要至少 ${PROFILE_PHOTO_MIN} 張）`}
-                    </span>
-                  </div>
-                  <div className="flex gap-1 mt-2">
-                    {Array.from({ length: PROFILE_PHOTO_MAX }, (_, i) => i + 1).map((n) => (
-                      <div
-                        key={n}
-                        className={cn(
-                          'flex-1 h-1.5 rounded-full transition-all duration-300',
-                          n <= photos.length ? 'bg-emerald-400' : 'bg-slate-100',
-                        )}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Tips */}
                 <div className="bg-slate-50 rounded-2xl p-4 space-y-2">
                   <p className="text-xs font-semibold text-slate-600">照片建議</p>
-                  {['正臉清晰、光線充足的近照', '戶外或生活場景（避免太過精修）', '能展現個性與生活風格的日常照'].map((tip) => (
+                  {['正面露臉、光線充足的單人近照', '避免團體照、墨鏡或口罩遮住臉部', '能展現個性與生活風格的日常照'].map((tip) => (
                     <div key={tip} className="flex items-start gap-2">
                       <div className="w-1 h-1 rounded-full bg-slate-400 mt-1.5 flex-shrink-0" />
                       <p className="text-xs text-slate-500">{tip}</p>
                     </div>
                   ))}
-                  <div className="flex items-start gap-2 pt-1">
-                    <div className="w-1 h-1 rounded-full bg-slate-400 mt-1.5 flex-shrink-0" />
-                    <p className="text-xs text-slate-500">上傳預覽會先做霧化處理，正式審核仍使用原始檔案。</p>
-                  </div>
                 </div>
               </>
+            )}
+
+            {stepLabel === '生活照上傳' && !userId && (
+              <p className="text-sm text-rose-600">請先登入後再上傳生活照。</p>
             )}
 
             {/* ── Employment proof (male only) ──────────────────────────── */}

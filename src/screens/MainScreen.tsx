@@ -6,9 +6,9 @@ import {
   Sparkles, MapPin, CalendarDays, Flame,
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
-  Camera, Trash2, ImageIcon, Users, Star,
+  Camera,
   Plus, Smile, BellRing, AlertCircle, Gem,
-  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye,
+  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Users, Star,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth'
@@ -27,7 +27,7 @@ import {
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
 import {
-  getProfile, resolvePhotoUrls, upsertProfile, uploadPhoto, getIncomeVerification,
+  getProfile, resolvePhotoUrls, upsertProfile, getIncomeVerification,
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
   getUnreadAppNotifications, markAppNotificationRead,
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
@@ -63,6 +63,7 @@ import {
   puzzleRecentMatchBoostEnabled,
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
+import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser, requestRemotePushSelfTest } from '@/lib/webPush'
 import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
@@ -3820,8 +3821,7 @@ function ChatRoomView({
 interface LocalPhoto {
   id: string
   previewUrl: string
-  storagePath?: string  // already uploaded
-  file?: File           // new, not yet uploaded
+  storagePath: string
 }
 
 const REGION_OPTIONS: Region[] = ['north', 'central', 'south', 'east']
@@ -3875,11 +3875,10 @@ function EditProfileScreen({
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
-  // Photos
+  // Photos（僅已上傳至 Storage 的列；新照由 LifePhotoUploadSection 審核後寫入）
   const [photos, setPhotos] = useState<LocalPhoto[]>(() =>
     (profile.photo_urls ?? []).map((p, i) => ({ id: `existing-${i}`, previewUrl: p, storagePath: p })),
   )
-  const photoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -3894,14 +3893,13 @@ function EditProfileScreen({
       const signedUrls = await resolvePhotoUrls(storedPaths)
       if (cancelled) return
 
-      setPhotos((prev) => {
-        const newPhotos = prev.filter((photo) => photo.file)
+      setPhotos(() => {
         const existingPhotos = storedPaths.map((path, i) => ({
           id: `existing-${i}`,
           previewUrl: signedUrls[i] ?? path,
           storagePath: path,
         }))
-        return [...existingPhotos, ...newPhotos].slice(0, PROFILE_PHOTO_MAX)
+        return existingPhotos.slice(0, PROFILE_PHOTO_MAX)
       })
     }
 
@@ -4132,34 +4130,14 @@ function EditProfileScreen({
     setUploadingIncome(false)
   }
 
-  const addPhotos = (files: FileList | null) => {
-    if (!files) return
-    const newItems: LocalPhoto[] = Array.from(files)
-      .slice(0, PROFILE_PHOTO_MAX - photos.length)
-      .map((f) => ({
-        id: `new-${Date.now()}-${f.name}`,
-        previewUrl: URL.createObjectURL(f),
-        file: f,
-      }))
-    setPhotos((prev) => [...prev, ...newItems].slice(0, PROFILE_PHOTO_MAX))
-  }
-
-  const removePhoto = (id: string) => {
-    setPhotos((prev) => {
-      const removed = prev.find((p) => p.id === id)
-      if (removed?.file) URL.revokeObjectURL(removed.previewUrl)
-      return prev.filter((p) => p.id !== id)
-    })
-  }
-
   const updateAnswer = (index: number, answer: string) => {
     setQa((prev) => prev.map((q, i) => i === index ? { ...q, answer } : q))
   }
 
-  const save = async () => {
+  const save = async (photoOverride?: LocalPhoto[]) => {
     if (!name.trim()) return
-    const photoSlots = photos.filter((p) => p.storagePath || p.file)
-    if (photoSlots.length < PROFILE_PHOTO_MIN) {
+    const photoList = photoOverride ?? photos
+    if (photoList.length < PROFILE_PHOTO_MIN) {
       setSaveMsg(`請至少上傳 ${PROFILE_PHOTO_MIN} 張生活照`)
       setTimeout(() => setSaveMsg(''), 3200)
       return
@@ -4167,21 +4145,7 @@ function EditProfileScreen({
     setSaving(true)
     setSaveMsg('')
 
-    // Upload new photos
-    const uploadedPaths: string[] = []
-    for (const photo of photos) {
-      if (photo.storagePath) {
-        uploadedPaths.push(photo.storagePath)
-      } else if (photo.file) {
-        const res = await uploadPhoto(userId, photo.file)
-        if (!res.ok) {
-          setSaving(false)
-          setSaveMsg(res.error)
-          return
-        }
-        uploadedPaths.push(res.path)
-      }
-    }
+    const uploadedPaths = photoList.map((p) => p.storagePath)
 
     const result = await upsertProfile({
       userId,
@@ -4220,6 +4184,13 @@ function EditProfileScreen({
     onSaved(updated)
   }
 
+  const handleLifePhotoUploadSuccess = async (next: LifePhotoSlot[]) => {
+    setPhotos(next)
+    await save(next)
+  }
+
+  const uploadedPhotoCount = photos.length
+
   return createPortal(
     <motion.div
       className="fixed inset-0 z-[100] bg-[#fafafa] flex flex-col"
@@ -4242,11 +4213,11 @@ function EditProfileScreen({
 
         <motion.button
           whileTap={{ scale: 0.95 }}
-          onClick={save}
-          disabled={!name.trim() || !nickname.trim() || saving || photos.filter((p) => p.storagePath || p.file).length < PROFILE_PHOTO_MIN}
+          onClick={() => void save()}
+          disabled={!name.trim() || !nickname.trim() || saving || uploadedPhotoCount < PROFILE_PHOTO_MIN}
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-bold transition-all',
-            name.trim() && nickname.trim() && !saving && photos.filter((p) => p.storagePath || p.file).length >= PROFILE_PHOTO_MIN
+            name.trim() && nickname.trim() && !saving && uploadedPhotoCount >= PROFILE_PHOTO_MIN
               ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
               : 'bg-slate-100 text-slate-300',
           )}
@@ -4328,61 +4299,13 @@ function EditProfileScreen({
         {/* ── 生活照 ───────────────────────────────────── */}
         <section>
           <SectionHeading label="生活照" hint={`${photos.length} / ${PROFILE_PHOTO_MAX} 張，至少 ${PROFILE_PHOTO_MIN} 張`} />
-
-          <div className="grid grid-cols-3 gap-2">
-            {photos.map((photo) => (
-              <div key={photo.id} className="relative aspect-square rounded-2xl overflow-hidden bg-slate-100">
-                <img
-                  src={photo.previewUrl}
-                  alt=""
-                  className="w-full h-full object-cover scale-110"
-                  style={{ filter: 'blur(6px)' }}
-                />
-                <div className="absolute inset-0 bg-black/10" />
-                <div className="absolute left-2 right-2 bottom-2 rounded-xl bg-white/80 backdrop-blur-sm px-2.5 py-1.5">
-                  <p className="text-[10px] font-semibold text-slate-700 text-center tracking-wide">
-                    隱私保護預覽
-                  </p>
-                </div>
-                <button
-                  onClick={() => removePhoto(photo.id)}
-                  className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/50 backdrop-blur rounded-full flex items-center justify-center"
-                >
-                  <Trash2 className="w-3 h-3 text-white" />
-                </button>
-              </div>
-            ))}
-
-            {photos.length < PROFILE_PHOTO_MAX && (
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => clickFileInputWithGrace(photoInputRef.current)}
-                className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-1 bg-white"
-              >
-                <Camera className="w-5 h-5 text-slate-300" />
-                <span className="text-[10px] text-slate-300 font-medium">新增照片</span>
-              </motion.button>
-            )}
-
-            {photos.length === 0 && (
-              <div className="col-span-2 aspect-[2/1] rounded-2xl border-2 border-dashed border-slate-100 flex items-center justify-center bg-slate-50">
-                <div className="text-center">
-                  <ImageIcon className="w-8 h-8 text-slate-200 mx-auto mb-1" />
-                  <p className="text-xs text-slate-300">須有清楚臉部，不可風景／寵物照 · 最多 {PROFILE_PHOTO_MAX} 張</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <input
-            ref={photoInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => addPhotos(e.target.files)}
+          <LifePhotoUploadSection
+            userId={userId}
+            photos={photos}
+            onPhotosChange={setPhotos}
+            onUploadSuccess={handleLifePhotoUploadSuccess}
           />
-          <p className="text-xs text-slate-400 mt-2">上傳預覽會先以霧化方式顯示，正式照片會保留原始清晰版本。</p>
+          <p className="text-xs text-slate-400 mt-2">上傳成功後會自動儲存個人檔案。預覽以霧化方式顯示，正式照片保留原始清晰版本。</p>
         </section>
 
         {/* ── 收入認證 皇冠特效 ─────────────────────────── */}

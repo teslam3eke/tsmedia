@@ -1,3 +1,5 @@
+import { supabase } from './supabase'
+
 /** 生活照 AI 審核（上傳前呼叫 /api/verify-life-photo） */
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -10,46 +12,25 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 export type VerifyLifePhotoResult =
-  | { ok: true; message: string }
-  | { ok: false; message: string }
-
-/** 壓縮後再送審，降低 Vision token 用量（與 uploadPhoto 相同上限） */
-async function compressForVerify(file: File, maxPx = 1080, quality = 0.85): Promise<File> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    const objectUrl = URL.createObjectURL(file)
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl)
-      const { naturalWidth: w, naturalHeight: h } = img
-      const scale = Math.min(1, maxPx / Math.max(w, h))
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(w * scale)
-      canvas.height = Math.round(h * scale)
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            resolve(file)
-            return
-          }
-          resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }))
-        },
-        'image/jpeg',
-        quality,
-      )
+  | { ok: true; message: string; remaining?: number }
+  | {
+      ok: false
+      message: string
+      limited?: boolean
+      failuresToday?: number
+      remaining?: number
     }
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
-      resolve(file)
-    }
-    img.src = objectUrl
-  })
-}
 
-export async function verifyLifePhotoFile(file: File): Promise<VerifyLifePhotoResult> {
-  const compressed = await compressForVerify(file)
-  return verifyLifePhotoCompressed(compressed)
+async function authHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  try {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    if (token) headers.Authorization = `Bearer ${token}`
+  } catch {
+    /* ignore */
+  }
+  return headers
 }
 
 export async function verifyLifePhotoCompressed(file: File): Promise<VerifyLifePhotoResult> {
@@ -57,17 +38,33 @@ export async function verifyLifePhotoCompressed(file: File): Promise<VerifyLifeP
     const imageBase64 = await fileToDataUrl(file)
     const res = await fetch('/api/verify-life-photo', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders(),
       body: JSON.stringify({ imageBase64 }),
     })
-    const data = (await res.json()) as { ok?: boolean; message?: string }
+    const data = (await res.json()) as {
+      ok?: boolean
+      message?: string
+      limited?: boolean
+      failuresToday?: number
+      remaining?: number
+    }
     if (!res.ok) {
       return { ok: false, message: data.message ?? '照片審核失敗，請稍後再試' }
     }
     if (!data.ok) {
-      return { ok: false, message: data.message ?? '此照片不符合生活照要求，請重新選擇' }
+      return {
+        ok: false,
+        message: data.message ?? '此照片不符合生活照要求，請重新選擇',
+        limited: data.limited,
+        failuresToday: data.failuresToday,
+        remaining: data.remaining,
+      }
     }
-    return { ok: true, message: data.message ?? 'OK' }
+    return {
+      ok: true,
+      message: data.message ?? 'OK',
+      remaining: data.remaining,
+    }
   } catch {
     return { ok: false, message: '照片審核失敗，請檢查網路後再試' }
   }
