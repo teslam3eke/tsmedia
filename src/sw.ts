@@ -98,13 +98,22 @@ function shouldSuppressMessagePushForMatch(
   return false
 }
 
-async function pingClientsForegroundAppNotifQuiet(): Promise<void> {
+type ForegroundAppNotifPayload = {
+  id: string
+  kind: string
+  title: string
+  body: string
+  url: string
+  ref_match_id?: string | null
+}
+
+async function pingClientsForegroundAppNotifQuiet(notification: ForegroundAppNotifPayload): Promise<void> {
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
   for (const x of clients) {
     if (!(x instanceof WindowClient)) continue
     if (!x.url.startsWith(self.location.origin)) continue
     try {
-      x.postMessage({ type: 'TM_PUSH_APP_NOTIF_FOREGROUND' })
+      x.postMessage({ type: 'TM_PUSH_APP_NOTIF_FOREGROUND', notification })
     } catch {
       /* ignore */
     }
@@ -142,6 +151,9 @@ self.addEventListener('push', (event: PushEvent) => {
       let tag = 'tsmedia'
       let openUrl = '/'
       let payloadMatchLc: string | null = null
+      let payloadKind = ''
+      let payloadNotifId = ''
+      let payloadRefMatchId: string | null = null
       try {
         if (event.data) {
           const j = event.data.json() as {
@@ -150,13 +162,22 @@ self.addEventListener('push', (event: PushEvent) => {
             tag?: string
             url?: string
             matchId?: string
+            refMatchId?: string
+            kind?: string
+            notifId?: string
           }
           if (j.title) title = j.title
           if (typeof j.body === 'string') body = j.body
           if (j.tag) tag = j.tag
           if (typeof j.url === 'string') openUrl = j.url
+          if (typeof j.kind === 'string') payloadKind = j.kind
+          if (typeof j.notifId === 'string') payloadNotifId = j.notifId
+          if (typeof j.refMatchId === 'string' && j.refMatchId.trim()) {
+            payloadRefMatchId = j.refMatchId.trim()
+          }
           if (typeof j.matchId === 'string' && j.matchId.trim()) {
             payloadMatchLc = normalizeMatchIdForCompare(j.matchId)
+            if (!payloadRefMatchId) payloadRefMatchId = j.matchId.trim()
           }
         }
       } catch {
@@ -168,15 +189,24 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
+      const isDiscoverDeckTag = tag.startsWith('tsm-discover-deck-day-')
       const isAppNotifTag =
         tag.startsWith('app-notif-') || (tag.includes('app-notif') && !tag.includes('discover'))
       const isMessageReceivedTag =
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
-      /** PWA 前景：站內彈窗即可，不秀 OS 橫幅（驗證通過／拒絕等） */
+      /** 站內事件（驗證／超喜等）：PWA 前景不秀 OS 橫幅，改 postMessage 觸發站內彈窗 */
       if (isAppNotifTag && !isMessageReceivedTag && hasForegroundOriginClient(clients)) {
-        await pingClientsForegroundAppNotifQuiet()
+        const kindFromTag = tag.startsWith('app-notif-') ? tag.slice('app-notif-'.length) : payloadKind
+        await pingClientsForegroundAppNotifQuiet({
+          id: payloadNotifId || tag,
+          kind: payloadKind || kindFromTag || 'generic',
+          title,
+          body,
+          url: openUrl,
+          ref_match_id: payloadRefMatchId,
+        })
         return
       }
 
@@ -200,6 +230,11 @@ self.addEventListener('push', (event: PushEvent) => {
           await pingClientsForegroundMessageQuiet()
           return
         }
+      }
+
+      /** 10 點探索換日：不論前景背景一律 showNotification */
+      if (isDiscoverDeckTag) {
+        /* fall through */
       }
 
       const o: NotificationOptions & { renotify?: boolean } = {

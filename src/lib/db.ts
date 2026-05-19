@@ -1105,6 +1105,7 @@ type RealtimeSubscribeLabel =
   | 'messages_incoming_sound'
   | 'instant_session_messages'
   | 'instant_sessions'
+  | 'app_notifications'
 
 /** 任一頻道本地重建與時間錯開，降低與全域 wake 同一幀 teardown 競態（Console 會噴連線在半開又被關）。 */
 let lastRealtimeChannelLocalRecycleTs = 0
@@ -1217,6 +1218,30 @@ export function subscribeToNewMatches(
           if (row) onInsert(row)
         },
       )
+  )
+}
+
+/** Realtime：本人 app_notifications INSERT（須在 publication supabase_realtime，見 migration 070） */
+export function subscribeToMyAppNotifications(
+  userId: string,
+  onInsert: (row: AppNotificationRow) => void,
+): () => void {
+  return subscribePostgresChannelWithBackoff('app_notifications', () =>
+    supabase
+      .channel(`realtime-app-notifications:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'app_notifications',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          const row = payload.new as AppNotificationRow | null
+          if (row) onInsert(row)
+        },
+      ),
   )
 }
 

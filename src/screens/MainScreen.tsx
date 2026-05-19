@@ -38,6 +38,7 @@ import {
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
   instantMatchLeaveQueueKeepalive,
+  subscribeToMyAppNotifications,
 } from '@/lib/db'
 import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
@@ -69,6 +70,7 @@ import { subscribeWebPushForCurrentUser, requestRemotePushSelfTest } from '@/lib
 import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
 import {
   TM_APP_DEEP_LINK_EVENT,
+  TM_APP_NOTIF_FOREGROUND_EVENT,
   TM_FOREGROUND_TRANSPORT_KICK_EVENT,
   TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
 } from '@/lib/appDeepLinkEvents'
@@ -6002,6 +6004,41 @@ export default function MainScreen({
     })
   }, [])
 
+  const ingestUnreadAppNotifications = useCallback(
+    (list: AppNotificationRow[]) => {
+      const verificationKindsQueued = new Set<string>()
+      for (const n of list) {
+        /** LINE 類 UX：新訊息不插隊全螢「知道了」，只靠聊天室／角標；背景推播由 SW 負責 */
+        if (n.kind === 'message_received') {
+          void markAppNotificationRead(n.id)
+          continue
+        }
+        /** 驗證通過／拒絕：同 kind 只保留一則站內彈窗（避免 finalize 競態重複 INSERT） */
+        if (n.kind === 'verification_approved' || n.kind === 'verification_rejected') {
+          if (verificationKindsQueued.has(n.kind)) {
+            void markAppNotificationRead(n.id)
+            continue
+          }
+          if (activeAppNotifPopupRef.current?.kind === n.kind) {
+            void markAppNotificationRead(n.id)
+            continue
+          }
+          if (appNotifPopupQueueRef.current.some((q) => q.kind === n.kind)) {
+            void markAppNotificationRead(n.id)
+            continue
+          }
+          verificationKindsQueued.add(n.kind)
+        }
+        if (!appNotifQueuedOnceIdsRef.current.has(n.id)) {
+          appNotifQueuedOnceIdsRef.current.add(n.id)
+          appNotifPopupQueueRef.current.push(n)
+        }
+      }
+      tryDequeueAppNotifPopup()
+    },
+    [tryDequeueAppNotifPopup],
+  )
+
   /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id。SW 點通知時 replaceState 後再觸發此邏輯。 */
   const consumeUrlPushDeepLink = useCallback(() => {
     if (!user?.id) return
@@ -6079,62 +6116,68 @@ export default function MainScreen({
   useEffect(() => {
     const uid = user?.id
     if (!uid) return
+
+    return subscribeToMyAppNotifications(uid, (row) => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      ingestUnreadAppNotifications([row])
+    })
+  }, [user?.id, physicalChannelResubscribeNonce, ingestUnreadAppNotifications])
+
+  /** SW 前景抑制 OS 橫幅 → main.tsx 轉發 payload → 站內彈窗（與 Realtime 共用 ingest） */
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
+
+    const onForegroundAppNotif = (ev: Event) => {
+      const sw = (ev as CustomEvent<{
+        id: string
+        kind: string
+        title: string
+        body: string
+        url?: string
+        ref_match_id?: string | null
+      }>).detail
+      if (!sw?.id || !sw.kind) return
+      ingestUnreadAppNotifications([
+        {
+          id: sw.id,
+          user_id: uid,
+          kind: sw.kind as AppNotificationKind,
+          title: sw.title,
+          body: sw.body,
+          ref_match_id: sw.ref_match_id ?? null,
+          read_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ])
+    }
+
+    window.addEventListener(TM_APP_NOTIF_FOREGROUND_EVENT, onForegroundAppNotif)
+    return () => window.removeEventListener(TM_APP_NOTIF_FOREGROUND_EVENT, onForegroundAppNotif)
+  }, [user?.id, ingestUnreadAppNotifications])
+
+  /** Cold start 與回前景：抓斷線期間未讀 backlog（Realtime 斷線 fallback） */
+  useEffect(() => {
+    const uid = user?.id
+    if (!uid) return
     let cancelled = false
 
-    const poll = async () => {
+    const fetchBacklog = async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       try {
         const list = await getUnreadAppNotifications(uid)
         if (cancelled) return
-        const verificationKindsQueued = new Set<string>()
-        for (const n of list) {
-          /** LINE 類 UX：新訊息不插隊全螢「知道了」，只靠聊天室／角標；背景推播由 SW 負責 */
-          if (n.kind === 'message_received') {
-            void markAppNotificationRead(n.id)
-            continue
-          }
-          /** 驗證通過／拒絕：同 kind 只保留一則站內彈窗（避免 finalize 競態重複 INSERT） */
-          if (n.kind === 'verification_approved' || n.kind === 'verification_rejected') {
-            if (verificationKindsQueued.has(n.kind)) {
-              void markAppNotificationRead(n.id)
-              continue
-            }
-            if (activeAppNotifPopupRef.current?.kind === n.kind) {
-              void markAppNotificationRead(n.id)
-              continue
-            }
-            if (appNotifPopupQueueRef.current.some((q) => q.kind === n.kind)) {
-              void markAppNotificationRead(n.id)
-              continue
-            }
-            verificationKindsQueued.add(n.kind)
-          }
-          if (!appNotifQueuedOnceIdsRef.current.has(n.id)) {
-            appNotifQueuedOnceIdsRef.current.add(n.id)
-            appNotifPopupQueueRef.current.push(n)
-          }
-        }
-        tryDequeueAppNotifPopup()
+        ingestUnreadAppNotifications(list)
       } catch {
         /* offline / transient */
       }
     }
 
-    void poll()
-    const iv = window.setInterval(poll, 5_000)
-
-    const onSwMsg = (ev: Event) => {
-      const data = (ev as MessageEvent).data as { type?: string } | undefined
-      if (data?.type === 'TM_PUSH_APP_NOTIF_FOREGROUND') void poll()
-    }
-    navigator.serviceWorker?.addEventListener('message', onSwMsg)
-
+    void fetchBacklog()
     return () => {
       cancelled = true
-      window.clearInterval(iv)
-      navigator.serviceWorker?.removeEventListener('message', onSwMsg)
     }
-  }, [user?.id, foregroundReloadNonce, tryDequeueAppNotifPopup])
+  }, [user?.id, foregroundReloadNonce, ingestUnreadAppNotifications])
 
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)

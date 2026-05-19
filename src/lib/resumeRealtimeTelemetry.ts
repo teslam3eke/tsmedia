@@ -45,6 +45,7 @@ type ChannelFamily =
   | 'messages_incoming_sound'
   | 'instant_session_messages'
   | 'instant_sessions'
+  | 'app_notifications'
 
 type ConnectionRepairBrief =
   | { phase: 'start'; attempt: number; message: string }

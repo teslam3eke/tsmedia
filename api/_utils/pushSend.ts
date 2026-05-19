@@ -26,9 +26,6 @@ const PUSH_PAYLOAD_OPTIONS = { TTL: 86_400 } as const
 /** 換日廣播專用：Web Push RFC 對 `urgency` 的語意有助於部分推播網（含 APNs）較不慢排／晚送。聊天推播維持預設即可。 */
 const PUSH_OPTIONS_BROADCAST = { TTL: 86_400, urgency: 'high' as const }
 
-/** 與前端心跳間隔對齊：超過此時間視為不在聊天室 */
-const PRESENCE_TTL_MS = 45_000
-
 /** 與探索「每晚 10 點」同一曆日（Asia/Taipei）；tag 加分日避免被推播 SDK 過度去重 */
 function discoverRolloverTagSuffix(): string {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -39,12 +36,6 @@ function discoverRolloverTagSuffix(): string {
   }).format(new Date())
 }
 
-function normalizeMatchIdCompact(raw: string | null | undefined): string | null {
-  if (typeof raw !== 'string') return null
-  const t = raw.trim().toLowerCase().replace(/-/g, '')
-  return t.length > 0 ? t : null
-}
-
 type PushSubscriptionRow = {
   endpoint: string
   p256dh: string
@@ -52,48 +43,34 @@ type PushSubscriptionRow = {
   client_key: string | null
 }
 
-type PresenceRow = {
-  client_key: string
-  active_match_id: string | null
-  visibility: string
-  updated_at: string
+export type WebPushPayload = {
+  title: string
+  body: string
+  tag: string
+  url?: string
+  matchId?: string | null
+  kind?: string
+  notifId?: string
+  refMatchId?: string | null
 }
 
-async function loadFreshPresenceByClientKey(
-  supabase: ReturnType<typeof adminSupabase>,
-  userId: string,
-  clientKeys: readonly string[],
-): Promise<Map<string, PresenceRow>> {
-  const map = new Map<string, PresenceRow>()
-  const keys = [...new Set(clientKeys.filter(Boolean))]
-  if (keys.length === 0) return map
-
-  const sinceIso = new Date(Date.now() - PRESENCE_TTL_MS).toISOString()
-  const { data, error } = await supabase
-    .from('user_chat_presence')
-    .select('client_key, active_match_id, visibility, updated_at')
-    .eq('user_id', userId)
-    .in('client_key', keys)
-    .gte('updated_at', sinceIso)
-
-  if (error) throw error
-  for (const row of data ?? []) {
-    if (row?.client_key) map.set(row.client_key, row as PresenceRow)
-  }
-  return map
-}
-
-function shouldSkipMessagePushForPresence(
-  presence: PresenceRow | undefined,
-  refMatchId: string,
-): boolean {
-  if (!presence) return false
-  if (presence.visibility !== 'visible') return false
-  if (!presence.active_match_id) return false
-  const activeLc = normalizeMatchIdCompact(presence.active_match_id)
-  const refLc = normalizeMatchIdCompact(refMatchId)
-  if (!activeLc || !refLc) return false
-  return activeLc === refLc
+function buildPushPayloadText(payload: WebPushPayload): string {
+  const matchId =
+    typeof payload.matchId === 'string' && payload.matchId.trim() ? payload.matchId.trim() : ''
+  const refMatchId =
+    typeof payload.refMatchId === 'string' && payload.refMatchId.trim()
+      ? payload.refMatchId.trim()
+      : matchId
+  return JSON.stringify({
+    title: payload.title,
+    body: payload.body,
+    tag: payload.tag,
+    url: payload.url ?? '/',
+    ...(matchId ? { matchId } : {}),
+    ...(refMatchId ? { refMatchId } : {}),
+    ...(payload.kind ? { kind: payload.kind } : {}),
+    ...(payload.notifId ? { notifId: payload.notifId } : {}),
+  })
 }
 
 async function parallelMapChunks<T>(
@@ -133,7 +110,7 @@ async function sendToSubscription(
 
 export async function sendWebPushToUser(
   userId: string,
-  payload: { title: string; body: string; tag: string; url?: string; matchId?: string | null },
+  payload: WebPushPayload,
   options: typeof PUSH_PAYLOAD_OPTIONS | typeof PUSH_OPTIONS_BROADCAST = PUSH_PAYLOAD_OPTIONS,
 ): Promise<{ sent: number; failed: number; skipped: number }> {
   configureWebPush()
@@ -146,82 +123,24 @@ export async function sendWebPushToUser(
   if (error) throw error
   if (!rows?.length) return { sent: 0, failed: 0, skipped: 0 }
 
-  const payloadText = JSON.stringify({
-    title: payload.title,
-    body: payload.body,
-    tag: payload.tag,
-    url: payload.url ?? '/',
-    ...(typeof payload.matchId === 'string' && payload.matchId.trim()
-      ? { matchId: payload.matchId.trim() }
-      : {}),
-  })
+  const payloadText = buildPushPayloadText(payload)
 
   let sent = 0
   let failed = 0
-  const skipped = 0
   for (const r of rows as PushSubscriptionRow[]) {
     const out = await sendToSubscription(supabase, r, payloadText, options)
     if (out === 'ok') sent++
     else failed++
   }
-  return { sent, failed, skipped }
+  return { sent, failed, skipped: 0 }
 }
 
-/** 聊天／訊息類：較高 urgency；依 server presence 對「正在看該房」的裝置略過推播 */
+/** 聊天／訊息類：較高 urgency；橫幅抑制交由 Service Worker（不再 server-side presence skip） */
 export async function sendWebPushMessageToUser(
   userId: string,
-  payload: { title: string; body: string; tag: string; url?: string; matchId?: string | null },
+  payload: WebPushPayload,
 ): Promise<{ sent: number; failed: number; skipped: number }> {
-  configureWebPush()
-  const supabase = adminSupabase()
-  const refMatchId = typeof payload.matchId === 'string' ? payload.matchId.trim() : ''
-
-  const { data: rows, error } = await supabase
-    .from('push_subscriptions')
-    .select('endpoint, p256dh, auth, client_key')
-    .eq('user_id', userId)
-
-  if (error) throw error
-  if (!rows?.length) return { sent: 0, failed: 0, skipped: 0 }
-
-  const subs = rows as PushSubscriptionRow[]
-  const presenceByKey =
-    refMatchId.length > 0
-      ? await loadFreshPresenceByClientKey(
-          supabase,
-          userId,
-          subs.map((s) => s.client_key ?? ''),
-        )
-      : new Map<string, PresenceRow>()
-
-  const payloadText = JSON.stringify({
-    title: payload.title,
-    body: payload.body,
-    tag: payload.tag,
-    url: payload.url ?? '/',
-    ...(refMatchId ? { matchId: refMatchId } : {}),
-  })
-
-  let sent = 0
-  let failed = 0
-  let skipped = 0
-  for (const r of subs) {
-    if (
-      refMatchId &&
-      r.client_key &&
-      shouldSkipMessagePushForPresence(presenceByKey.get(r.client_key), refMatchId)
-    ) {
-      skipped++
-      continue
-    }
-    const out = await sendToSubscription(supabase, r, payloadText, {
-      TTL: 86_400,
-      urgency: 'high',
-    })
-    if (out === 'ok') sent++
-    else failed++
-  }
-  return { sent, failed, skipped }
+  return sendWebPushToUser(userId, payload, { TTL: 86_400, urgency: 'high' })
 }
 
 /** 每晚換日廣播：依 endpoint 逐筆送出（同一使用者多裝置各自一則）。 */

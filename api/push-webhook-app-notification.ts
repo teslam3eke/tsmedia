@@ -82,10 +82,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       body: record.body ?? '',
       tag,
       url,
+      kind: record.kind,
+      notifId: record.id,
       matchId:
         record.kind === 'message_received' && typeof record.ref_match_id === 'string'
           ? record.ref_match_id
           : undefined,
+      refMatchId: typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
     })
     res.status(200).json({ ok: true, ...result })
   } catch (e) {

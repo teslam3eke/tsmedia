@@ -13,7 +13,7 @@ import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
-import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
+import { TM_APP_DEEP_LINK_EVENT, TM_APP_NOTIF_FOREGROUND_EVENT } from '@/lib/appDeepLinkEvents'
 
 void maybeInitEruda()
 markPwaStandaloneSeenIfNeeded()
@@ -33,7 +33,18 @@ function applyHrefFromServiceWorker(hrefLike: string) {
 /** Service Worker → 前景訊息推播改由站內更新，不彈系統通知 */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (ev: MessageEvent) => {
-    const d = ev.data as { type?: string; url?: string } | undefined
+    const d = ev.data as {
+      type?: string
+      url?: string
+      notification?: {
+        id: string
+        kind: string
+        title: string
+        body: string
+        url?: string
+        ref_match_id?: string | null
+      }
+    } | undefined
     if (!d?.type) return
 
     if (d.type === 'TM_NAVIGATE' || d.type === 'TM_PUSH_OPEN') {
@@ -49,6 +60,13 @@ if ('serviceWorker' in navigator) {
         /* ignore */
       }
       window.dispatchEvent(new CustomEvent('tm_foreground_message_push'))
+      return
+    }
+
+    if (d.type === 'TM_PUSH_APP_NOTIF_FOREGROUND' && d.notification) {
+      window.dispatchEvent(
+        new CustomEvent(TM_APP_NOTIF_FOREGROUND_EVENT, { detail: d.notification }),
+      )
       return
     }
   })
