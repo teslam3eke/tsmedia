@@ -68,6 +68,7 @@ import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePho
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser, requestRemotePushSelfTest } from '@/lib/webPush'
 import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
+import { syncAppIconBadge, clearAppIconBadge } from '@/lib/appIconBadge'
 import {
   TM_APP_DEEP_LINK_EVENT,
   TM_APP_NOTIF_FOREGROUND_EVENT,
@@ -6530,6 +6531,7 @@ export default function MainScreen({
 
   const handleSignOut = async () => {
     if (user?.id) clearLiveConvSessionCache(user.id)
+    await clearAppIconBadge()
     await signOut()
     onSignOut?.()
   }
@@ -6637,6 +6639,15 @@ export default function MainScreen({
     for (const n of Object.values(matchTabUnreadByMatchId)) sum += n
     return sum
   }, [matchTabUnreadByMatchId])
+
+  /** LINE 式主畫面圖示角標：配對聊天未讀加總（iOS 16.4+ PWA Badging API） */
+  useEffect(() => {
+    if (!user?.id) {
+      void clearAppIconBadge()
+      return
+    }
+    void syncAppIconBadge(matchesTabUnreadCount)
+  }, [user?.id, matchesTabUnreadCount])
 
   const immersiveChatChrome =
     (activeTab === 'matches' && matchesChatConversation != null) ||

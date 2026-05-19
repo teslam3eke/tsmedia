@@ -20,7 +20,14 @@ self.addEventListener('install', () => {
 })
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim())
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(),
+      loadAppIconBadgeCountFromCache().then((n) => {
+        cachedAppIconBadgeCount = n
+      }),
+    ]),
+  )
 })
 
 /** 主執行緒回報：使用者正待在與該 match 的一對一聊；此 match 的新訊息不顯示推播橫幅 */
@@ -37,13 +44,63 @@ function normalizeMatchIdForCompare(raw: string | null | undefined): string | nu
 
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   try {
-    const d = event.data as { type?: string; matchId?: string | null } | undefined
-    if (d?.type !== 'TM_ACTIVE_CHAT_MATCH') return
-    activeChatMatchIdLc = normalizeMatchIdForCompare(d.matchId)
+    const d = event.data as { type?: string; matchId?: string | null; count?: number } | undefined
+    if (d?.type === 'TM_ACTIVE_CHAT_MATCH') {
+      activeChatMatchIdLc = normalizeMatchIdForCompare(d.matchId)
+      return
+    }
+    if (d?.type === 'TM_BADGE_SYNC' && typeof d.count === 'number') {
+      void persistAppIconBadgeCount(Math.max(0, Math.min(99, Math.floor(d.count))))
+    }
   } catch {
     /* ignore */
   }
 })
+
+const BADGE_CACHE_NAME = 'tm-app-badge-v1'
+const BADGE_CACHE_KEY = '/badge-count'
+const BADGE_MAX = 99
+let cachedAppIconBadgeCount = 0
+
+async function loadAppIconBadgeCountFromCache(): Promise<number> {
+  try {
+    const cache = await caches.open(BADGE_CACHE_NAME)
+    const res = await cache.match(BADGE_CACHE_KEY)
+    if (!res) return cachedAppIconBadgeCount
+    const t = await res.text()
+    const n = parseInt(t, 10)
+    return Number.isFinite(n) ? Math.max(0, Math.min(BADGE_MAX, n)) : 0
+  } catch {
+    return cachedAppIconBadgeCount
+  }
+}
+
+async function persistAppIconBadgeCount(n: number): Promise<void> {
+  cachedAppIconBadgeCount = Math.max(0, Math.min(BADGE_MAX, Math.floor(n)))
+  try {
+    const cache = await caches.open(BADGE_CACHE_NAME)
+    await cache.put(BADGE_CACHE_KEY, new Response(String(cachedAppIconBadgeCount)))
+  } catch {
+    /* ignore */
+  }
+  try {
+    const reg = self.registration as ServiceWorkerRegistration & {
+      setAppBadge?: (contents?: number) => Promise<void>
+      clearAppBadge?: () => Promise<void>
+    }
+    if (!('setAppBadge' in reg)) return
+    if (cachedAppIconBadgeCount <= 0) await reg.clearAppBadge!()
+    else await reg.setAppBadge!(cachedAppIconBadgeCount)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** App 未開／背景收到訊息推播且將秀 OS 橫幅時，角標 +1（開 App 後由主程式以 DB 總數覆寫） */
+async function bumpAppIconBadgeForBackgroundMessage(): Promise<void> {
+  const base = await loadAppIconBadgeCountFromCache()
+  await persistAppIconBadgeCount(base + 1)
+}
 
 function matchIdFromPayloadUrl(openUrlPath: string): string | null {
   try {
@@ -246,6 +303,9 @@ self.addEventListener('push', (event: PushEvent) => {
         renotify: true,
       }
       await self.registration.showNotification(title, o)
+      if (isMessageReceivedTag) {
+        await bumpAppIconBadgeForBackgroundMessage()
+      }
     })(),
   )
 })

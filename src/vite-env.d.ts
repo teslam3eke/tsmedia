@@ -4,6 +4,16 @@
 /** 由 vite.config define 注入，供 `src/lib/appVersion.ts` 與 `/build-id.txt` 比對 */
 declare const __APP_BUILD_ID__: string
 
+interface Navigator {
+  setAppBadge?(contents?: number): Promise<void>
+  clearAppBadge?(): Promise<void>
+}
+
+interface ServiceWorkerRegistration {
+  setAppBadge?(contents?: number): Promise<void>
+  clearAppBadge?(): Promise<void>
+}
+
 interface ImportMetaEnv {
   /** POST JSON：`resume`、`realtime_ws`、`realtime_channel`、`connection_repair`（無 PII） */
   readonly VITE_RESUME_REALTIME_TELEMETRY_URL?: string
