@@ -146,6 +146,14 @@ export default function App() {
   }
 
   const launchMainFromProfile = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (profile && maleNeedsIdentityVerify(profile)) {
+      go('identity-verify')
+      return
+    }
+    if (profile && femaleNeedsLifePhotoOnboarding(profile)) {
+      go('identity-verify')
+      return
+    }
     const tabHint = readPreferredMainShellTab()
     if (!profile) {
       setMainInitialTab(tabHint ?? 'discover')
@@ -710,6 +718,8 @@ export default function App() {
               launchMainFromProfile(profile)
             }}
             onSkip={async () => {
+              /** 正式環境：男性未完成職業驗證送出（仍 pending）不可略過 */
+              if (!import.meta.env.DEV) return
               const u = await getActiveUser()
               const profile = u ? await getProfile(u.id) : null
               launchMainFromProfile(profile)

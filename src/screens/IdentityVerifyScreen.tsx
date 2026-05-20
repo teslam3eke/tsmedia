@@ -894,7 +894,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           )}
         </motion.button>
 
-        {gender !== 'female' && (
+        {gender !== 'female' && import.meta.env.DEV && (
         <button type="button" onClick={onSkip} className="w-full text-slate-400 text-sm py-2">
           跳過（測試模式）
         </button>
