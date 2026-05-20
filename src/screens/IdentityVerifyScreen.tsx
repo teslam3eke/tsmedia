@@ -9,11 +9,11 @@ import { cn } from '@/lib/utils'
 import {
   uploadProofDoc, submitVerificationDoc,
   submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
-  getProfile, finalizeDueAiReviews,
+  getProfile, finalizeDueAiReviews, resolvePhotoUrls,
   type AiResult,
 } from '@/lib/db'
 import type { DocType, IncomeTier, VerificationStatus } from '@/lib/types'
-import { PROFILE_PHOTO_MIN } from '@/lib/types'
+import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
@@ -83,24 +83,49 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   onCompleteRef.current = onComplete
 
   useEffect(() => {
-    if (gender !== 'male' || !userId) {
-      setMaleVerifyGate(null)
+    if (!userId) {
+      setPhotos([])
+      if (gender !== 'male') setMaleVerifyGate(null)
       return
     }
     let cancelled = false
-    void getProfile(userId).then((p) => {
-      if (cancelled) return
-      const st = p?.verification_status ?? 'pending'
-      setMaleVerifyGate(st)
-      if (st === 'approved') {
-        employmentSubmittedRef.current = true
-        if ((p?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN) {
-          setStep(2)
-        }
+    void (async () => {
+      const p = await getProfile(userId)
+      if (cancelled || !p) return
+
+      const storedPaths = (p.photo_urls ?? []).filter(Boolean)
+      if (storedPaths.length > 0) {
+        const signedUrls = await resolvePhotoUrls(storedPaths)
+        if (cancelled) return
+        setPhotos(
+          storedPaths.slice(0, PROFILE_PHOTO_MAX).map((path, i) => ({
+            id: `existing-${i}`,
+            previewUrl: signedUrls[i] ?? path,
+            storagePath: path,
+          })),
+        )
+      } else {
+        setPhotos([])
       }
-    })
+
+      if (gender === 'male') {
+        const st = p.verification_status ?? 'pending'
+        setMaleVerifyGate(st)
+        if (st === 'approved') {
+          employmentSubmittedRef.current = true
+          if (storedPaths.length >= PROFILE_PHOTO_MIN) {
+            setStep(2)
+          }
+        }
+        if (p.company === 'TSMC' || p.company === 'MediaTek') {
+          setSelectedCompany(p.company)
+        }
+      } else {
+        setMaleVerifyGate(null)
+      }
+    })()
     return () => { cancelled = true }
-  }, [gender, userId])
+  }, [userId, gender])
 
   /** 重新進入（step 0）且仍 submitted：輪詢直到 approved 再進主殼 */
   useEffect(() => {
