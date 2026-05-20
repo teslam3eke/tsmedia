@@ -74,6 +74,13 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const [maleVerifyGate, setMaleVerifyGate] = useState<VerificationStatus | 'loading' | null>(
     gender === 'male' && userId ? 'loading' : null,
   )
+  /** 職業步驟：人工審核中，通過後自動進收入頁 */
+  const [employmentManualWait, setEmploymentManualWait] = useState(false)
+
+  /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
+  const employmentSubmittedRef = useRef(false)
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
 
   useEffect(() => {
     if (gender !== 'male' || !userId) {
@@ -83,13 +90,22 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     let cancelled = false
     void getProfile(userId).then((p) => {
       if (cancelled) return
-      setMaleVerifyGate(p?.verification_status ?? 'pending')
+      const st = p?.verification_status ?? 'pending'
+      setMaleVerifyGate(st)
+      if (st === 'approved') {
+        employmentSubmittedRef.current = true
+        if ((p?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN) {
+          setStep(2)
+        }
+      }
     })
     return () => { cancelled = true }
   }, [gender, userId])
 
+  /** 重新進入（step 0）且仍 submitted：輪詢直到 approved 再進主殼 */
   useEffect(() => {
     if (gender !== 'male' || !userId || maleVerifyGate !== 'submitted') return
+    if (step !== 0 || employmentManualWait) return
     let cancelled = false
     const tick = async () => {
       await finalizeDueAiReviews()
@@ -97,10 +113,12 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       if (cancelled) return
       const st = p?.verification_status ?? 'submitted'
       if (st === 'approved') {
-        onComplete()
+        employmentSubmittedRef.current = true
+        setMaleVerifyGate('approved')
+        onCompleteRef.current()
         return
       }
-      setMaleVerifyGate(st)
+      if (st === 'rejected') setMaleVerifyGate('rejected')
     }
     void tick()
     const iv = window.setInterval(() => void tick(), 4000)
@@ -108,7 +126,36 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       cancelled = true
       window.clearInterval(iv)
     }
-  }, [gender, userId, maleVerifyGate, onComplete])
+  }, [gender, userId, maleVerifyGate, step, employmentManualWait])
+
+  useEffect(() => {
+    if (!employmentManualWait || !userId) return
+    let cancelled = false
+    const tick = async () => {
+      await finalizeDueAiReviews()
+      const p = await getProfile(userId)
+      if (cancelled) return
+      if (p?.verification_status === 'approved') {
+        employmentSubmittedRef.current = true
+        setMaleVerifyGate('approved')
+        setEmploymentManualWait(false)
+        setStep(2)
+        return
+      }
+      if (p?.verification_status === 'rejected') {
+        setEmploymentManualWait(false)
+        setMaleVerifyGate('rejected')
+        setAiStatus('fail')
+        setAiMessage('職業驗證未通過，請重新上傳文件。')
+      }
+    }
+    void tick()
+    const iv = window.setInterval(() => void tick(), 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(iv)
+    }
+  }, [employmentManualWait, userId])
 
   const employmentAiOutcomeRef = useRef<{
     passed: boolean
@@ -361,51 +408,135 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     return false
   })()
 
+  /** 上傳並送審職業文件；AI 自動路徑會等到 approved 才回 ok */
+  const submitEmploymentProof = async (): Promise<{ ok: boolean; error?: string; manualWait?: boolean }> => {
+    if (!userId) return { ok: false, error: '請先登入。' }
+    if (employmentSubmittedRef.current) {
+      const p = await getProfile(userId)
+      if (p?.verification_status === 'approved') return { ok: true }
+    }
+    if (!selectedCompany || proofs.length === 0 || !proofs[0].file) {
+      return { ok: false, error: '請選擇公司並上傳驗證文件。' }
+    }
+
+    const submissionCount = await getTodayVerificationSubmissionCount(userId)
+    if (submissionCount >= 20) {
+      return { ok: false, error: '今天已達送審上限 20 次，請明天再試。' }
+    }
+
+    const proofResult = await uploadProofDoc(userId, proofs[0].file)
+    if (!proofResult.ok) {
+      return { ok: false, error: proofResult.error ?? '文件上傳失敗，請再試一次。' }
+    }
+
+    const docTypeMap: Record<string, DocType> = {
+      'image/jpeg': 'employee_id', 'image/png': 'employee_id',
+      'image/heic': 'employee_id', 'application/pdf': 'tax_return',
+    }
+    const docType: DocType = docTypeMap[proofs[0].type] ?? 'payslip'
+    const submitResult = await submitVerificationDoc(
+      userId,
+      selectedCompany,
+      docType,
+      proofResult.path,
+      aiResultData ?? undefined,
+      aiResultData?.passed ? 'ai_auto' : 'manual',
+      aiResultData?.passed ? undefined : 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。',
+    )
+    if (!submitResult.ok) {
+      return { ok: false, error: submitResult.error ?? '送審失敗，請稍後再試。' }
+    }
+
+    employmentSubmittedRef.current = true
+    setMaleVerifyGate('submitted')
+
+    const isAiAuto = Boolean(aiResultData?.passed)
+    if (!isAiAuto) {
+      return { ok: false, manualWait: true, error: '已送出，等待人工審核通過後會自動進入下一步。' }
+    }
+
+    const deadline = Date.now() + (AI_AUTO_REVIEW_UI_SECONDS + 10) * 1000
+    while (Date.now() < deadline) {
+      await finalizeDueAiReviews()
+      const p = await getProfile(userId)
+      if (p?.verification_status === 'approved') {
+        setMaleVerifyGate('approved')
+        return { ok: true }
+      }
+      if (p?.verification_status === 'rejected') {
+        employmentSubmittedRef.current = false
+        return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
+      }
+      await new Promise((r) => setTimeout(r, 800))
+    }
+    return { ok: false, manualWait: true, error: '審核時間較長，請稍候…' }
+  }
+
+  const advanceFromEmploymentStep = async () => {
+    setSubmitting(true)
+    try {
+      const result = await submitEmploymentProof()
+      if (result.ok) {
+        setStep((s) => s + 1)
+        return
+      }
+      if (result.manualWait) {
+        setEmploymentManualWait(true)
+        setAiStatus('fail')
+        setAiMessage(result.error ?? '已送出，等待人工審核。')
+        return
+      }
+      setAiStatus('fail')
+      setAiMessage(result.error ?? '送審失敗，請稍後再試。')
+    } catch {
+      setAiStatus('fail')
+      setAiMessage('送審失敗，請檢查網路後再試。')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const handleSubmit = async () => {
     setSubmitting(true)
-
-    if (userId) {
-      const submissionCount = await getTodayVerificationSubmissionCount(userId)
-      if (submissionCount >= 20) {
-        setSubmitting(false)
-        setAiStatus('fail')
-        setAiMessage('今天已達送審上限 20 次，請明天再試。')
+    try {
+      if (!userId) {
+        await new Promise((r) => setTimeout(r, 1200))
+        onCompleteRef.current()
         return
       }
 
-      // 1. 生活照應已於選擇後逐張上傳至 Storage
       const uploadedPhotoUrls = photos.map((p) => p.storagePath)
       if (uploadedPhotoUrls.length < PROFILE_PHOTO_MIN) {
-        setSubmitting(false)
         setAiStatus('fail')
         setAiMessage(`請至少成功上傳 ${PROFILE_PHOTO_MIN} 張生活照後再繼續。`)
         return
       }
-      await upsertProfile({ userId, photoUrls: uploadedPhotoUrls })
+      const profilePatch = await upsertProfile({ userId, photoUrls: uploadedPhotoUrls })
+      if (!profilePatch.ok) {
+        setAiStatus('fail')
+        setAiMessage(profilePatch.error ?? '生活照儲存失敗，請再試一次。')
+        return
+      }
 
-      // 2. Male-only: employment proof
-      if (selectedCompany && proofs.length > 0 && proofs[0].file) {
-        const proofResult = await uploadProofDoc(userId, proofs[0].file)
-        if (proofResult.ok) {
-          const docTypeMap: Record<string, DocType> = {
-            'image/jpeg': 'employee_id', 'image/png': 'employee_id',
-            'image/heic': 'employee_id', 'application/pdf': 'tax_return',
-          }
-          const docType: DocType = docTypeMap[proofs[0].type] ?? 'payslip'
-          await submitVerificationDoc(
-            userId,
-            selectedCompany,
-            docType,
-            proofResult.path,
-            aiResultData ?? undefined,
-            aiResultData?.passed ? 'ai_auto' : 'manual',
-            aiResultData?.passed ? undefined : 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。',
-          )
+      // 職業應已在步驟 2 完成；若尚未 approved 則擋下
+      if (gender === 'male') {
+        const p = await getProfile(userId)
+        if (p?.verification_status !== 'approved') {
+          setAiStatus('fail')
+          setAiMessage('請先完成並通過職業驗證後再繼續。')
+          return
         }
       }
 
-      // 3. Optional: income verification (male onboarding optional step)
+      // 選填：收入認證
       if (selectedTier && incomeDoc) {
+        const submissionCount = await getTodayVerificationSubmissionCount(userId)
+        if (submissionCount >= 20) {
+          setAiStatus('fail')
+          setAiMessage('今天已達送審上限 20 次，請明天再試。')
+          return
+        }
+
         let extraAi: AiResult | undefined
         let reviewMode: 'ai_auto' | 'manual' = 'manual'
         let manualReason = '收入文件由人工審核。人工審核時間可能大於 12 小時。'
@@ -432,36 +563,37 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         }
 
         const r = await uploadProofDoc(userId, incomeDoc.file)
-        if (r.ok) {
-          const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
-          await submitIncomeVerification(
-            userId,
-            selectedTier,
-            docType,
-            r.path,
-            extraAi,
-            reviewMode,
-            reviewMode === 'manual'
-              ? (manualReason || 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。')
-              : undefined,
-          )
+        if (!r.ok) {
+          setAiStatus('fail')
+          setAiMessage(r.error ?? '收入文件上傳失敗，請再試一次。')
+          return
+        }
+        const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
+        const incomeSubmit = await submitIncomeVerification(
+          userId,
+          selectedTier,
+          docType,
+          r.path,
+          extraAi,
+          reviewMode,
+          reviewMode === 'manual'
+            ? (manualReason || 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。')
+            : undefined,
+        )
+        if (!incomeSubmit.ok) {
+          setAiStatus('fail')
+          setAiMessage(incomeSubmit.error ?? '收入認證送審失敗，請稍後再試。')
+          return
         }
       }
-    } else {
-      // Offline / guest mode — just wait briefly
-      await new Promise((r) => setTimeout(r, 1200))
-    }
 
-    setSubmitting(false)
-    if (userId && gender === 'male') {
-      const p = await getProfile(userId)
-      const st = p?.verification_status ?? 'pending'
-      if (st !== 'approved') {
-        setMaleVerifyGate(st === 'pending' ? 'submitted' : st)
-        return
-      }
+      onCompleteRef.current()
+    } catch {
+      setAiStatus('fail')
+      setAiMessage('提交失敗，請檢查網路後再試。')
+    } finally {
+      setSubmitting(false)
     }
-    onComplete()
   }
 
   const stepLabel = steps[step]
@@ -477,7 +609,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     )
   }
 
-  if (gender === 'male' && maleVerifyGate === 'submitted') {
+  if (gender === 'male' && maleVerifyGate === 'submitted' && step === 0 && !employmentManualWait) {
     return (
       <div className="max-w-md mx-auto min-h-[100dvh] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe text-center">
         <ShieldCheck className="w-12 h-12 text-amber-500 mb-4" />
@@ -924,30 +1056,38 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
 
       {/* Footer */}
       <div className="px-5 pb-10 pt-4 space-y-3">
+        {isLastStep && aiStatus === 'fail' && aiMessage && (
+          <div className="rounded-2xl p-3 bg-red-50 ring-1 ring-red-100 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-red-600 leading-relaxed">{aiMessage}</p>
+          </div>
+        )}
         <motion.button
           whileTap={{ scale: canAdvance ? 0.97 : 1 }}
           onClick={async () => {
-            if (!canAdvance) return
+            if (!canAdvance || submitting) return
             if (isLastStep) {
-              handleSubmit()
-            } else if (stepLabel === '職業驗證文件' && proofs.length > 0 && aiStatus !== 'ok') {
-              const file = proofs[0].file
-              if (!file.type.startsWith('image/')) {
+              await handleSubmit()
+            } else if (stepLabel === '職業驗證文件') {
+              const file = proofs[0]?.file
+              if (proofs.length > 0 && file && aiStatus !== 'ok' && file.type.startsWith('image/')) {
+                if (!employmentAiOutcomeRef.current) {
+                  void fetchEmploymentAiOutcome(file)
+                }
+                setEmploymentHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
+              } else if (proofs.length > 0 && file && !file.type.startsWith('image/')) {
                 setAiStatus('ok')
                 setAiMessage('PDF 文件將由人工審核確認')
                 setAiResultData(null)
-                setStep(step + 1)
-                return
+                await advanceFromEmploymentStep()
+              } else {
+                await advanceFromEmploymentStep()
               }
-              if (!employmentAiOutcomeRef.current) {
-                void fetchEmploymentAiOutcome(file)
-              }
-              setEmploymentHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
             } else {
               setStep(step + 1)
             }
           }}
-          disabled={submitting || !canAdvance || employmentHold !== null}
+          disabled={submitting || !canAdvance || employmentHold !== null || employmentManualWait}
           className={cn(
             'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
             canAdvance && !submitting
@@ -1015,7 +1155,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   type="button"
                   onClick={() => {
                     setEmploymentHold(null)
-                    setStep((s) => s + 1)
+                    void advanceFromEmploymentStep()
                   }}
                   className="w-full max-w-xs rounded-2xl bg-slate-900 text-white py-4 font-bold text-base shadow-lg shadow-slate-900/15"
                 >
@@ -1023,6 +1163,24 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 </button>
               </>
             )}
+          </div>,
+          document.body,
+        )
+      : null}
+    {employmentManualWait
+      ? createPortal(
+          <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe text-center">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+              className="mb-5"
+            >
+              <Cpu className="w-10 h-10 text-slate-400" />
+            </motion.div>
+            <p className="text-lg font-bold text-slate-900 mb-2">職業驗證審核中</p>
+            <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
+              文件已送出。通過審核後會自動進入收入認證步驟；人工複核可能需要超過 12 小時。
+            </p>
           </div>,
           document.body,
         )
