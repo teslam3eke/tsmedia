@@ -9,9 +9,10 @@ import { cn } from '@/lib/utils'
 import {
   uploadProofDoc, submitVerificationDoc,
   submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
+  getProfile, finalizeDueAiReviews,
   type AiResult,
 } from '@/lib/db'
-import type { DocType, IncomeTier } from '@/lib/types'
+import type { DocType, IncomeTier, VerificationStatus } from '@/lib/types'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
@@ -68,6 +69,46 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const [employmentHold, setEmploymentHold] = useState<EmploymentHold>(null)
   type IncomeRunningHold = { phase: 'running'; countdown: number }
   const [incomeHold, setIncomeHold] = useState<IncomeRunningHold | null>(null)
+
+  /** 男性：非 approved 時阻擋進主殼；submitted 顯示審核中並輪詢 finalize */
+  const [maleVerifyGate, setMaleVerifyGate] = useState<VerificationStatus | 'loading' | null>(
+    gender === 'male' && userId ? 'loading' : null,
+  )
+
+  useEffect(() => {
+    if (gender !== 'male' || !userId) {
+      setMaleVerifyGate(null)
+      return
+    }
+    let cancelled = false
+    void getProfile(userId).then((p) => {
+      if (cancelled) return
+      setMaleVerifyGate(p?.verification_status ?? 'pending')
+    })
+    return () => { cancelled = true }
+  }, [gender, userId])
+
+  useEffect(() => {
+    if (gender !== 'male' || !userId || maleVerifyGate !== 'submitted') return
+    let cancelled = false
+    const tick = async () => {
+      await finalizeDueAiReviews()
+      const p = await getProfile(userId)
+      if (cancelled) return
+      const st = p?.verification_status ?? 'submitted'
+      if (st === 'approved') {
+        onComplete()
+        return
+      }
+      setMaleVerifyGate(st)
+    }
+    void tick()
+    const iv = window.setInterval(() => void tick(), 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(iv)
+    }
+  }, [gender, userId, maleVerifyGate, onComplete])
 
   const employmentAiOutcomeRef = useRef<{
     passed: boolean
@@ -412,10 +453,50 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     }
 
     setSubmitting(false)
+    if (userId && gender === 'male') {
+      const p = await getProfile(userId)
+      const st = p?.verification_status ?? 'pending'
+      if (st !== 'approved') {
+        setMaleVerifyGate(st === 'pending' ? 'submitted' : st)
+        return
+      }
+    }
     onComplete()
   }
 
   const stepLabel = steps[step]
+
+  if (gender === 'male' && maleVerifyGate === 'loading') {
+    return (
+      <div className="max-w-md mx-auto min-h-[50vh] flex flex-col items-center justify-center px-6 pt-safe pb-safe">
+        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="mb-4">
+          <Cpu className="w-8 h-8 text-slate-400" />
+        </motion.div>
+        <p className="text-sm text-slate-500">載入驗證狀態…</p>
+      </div>
+    )
+  }
+
+  if (gender === 'male' && maleVerifyGate === 'submitted') {
+    return (
+      <div className="max-w-md mx-auto min-h-[100dvh] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe text-center">
+        <ShieldCheck className="w-12 h-12 text-amber-500 mb-4" />
+        <h1 className="text-xl font-bold text-slate-900 mb-2">職業驗證審核中</h1>
+        <p className="text-sm text-slate-600 leading-relaxed mb-8 max-w-[300px]">
+          已收到你的證明文件。通過審核後即可使用探索、聊天等功能；若需人工複核，可能需要超過 12 小時。
+        </p>
+        {import.meta.env.DEV && (
+          <button
+            type="button"
+            onClick={onSkip}
+            className="text-xs text-slate-400 underline underline-offset-2"
+          >
+            略過（測試）
+          </button>
+        )}
+      </div>
+    )
+  }
 
   return (
     <>

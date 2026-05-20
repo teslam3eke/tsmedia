@@ -118,9 +118,9 @@ export default function App() {
     return data.user ?? null
   }
 
-  /** 男性須至少送出職業驗證（verification_status 離開 pending）才可進入主畫面。 */
+  /** 男性須職業驗證 approved 才可進入主畫面（pending／submitted／rejected 皆不可）。 */
   const maleNeedsIdentityVerify = (profile: import('@/lib/types').ProfileRow | null) =>
-    Boolean(profile?.gender === 'male' && profile.verification_status === 'pending')
+    Boolean(profile?.gender === 'male' && profile.verification_status !== 'approved')
 
   const profileHasMinPhotos = (profile: import('@/lib/types').ProfileRow | null) =>
     (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
@@ -145,12 +145,26 @@ export default function App() {
     }
   }
 
-  const launchMainFromProfile = (profile: import('@/lib/types').ProfileRow | null) => {
-    if (profile && maleNeedsIdentityVerify(profile)) {
-      go('identity-verify')
-      return
+  const canEnterMainShell = (
+    profile: import('@/lib/types').ProfileRow | null,
+    opts?: { devBypassMaleVerify?: boolean },
+  ) => {
+    if (
+      profile &&
+      maleNeedsIdentityVerify(profile) &&
+      !(import.meta.env.DEV && opts?.devBypassMaleVerify)
+    ) {
+      return false
     }
-    if (profile && femaleNeedsLifePhotoOnboarding(profile)) {
+    if (profile && femaleNeedsLifePhotoOnboarding(profile)) return false
+    return true
+  }
+
+  const launchMainFromProfile = (
+    profile: import('@/lib/types').ProfileRow | null,
+    opts?: { devBypassMaleVerify?: boolean },
+  ) => {
+    if (!canEnterMainShell(profile, opts)) {
       go('identity-verify')
       return
     }
@@ -718,11 +732,11 @@ export default function App() {
               launchMainFromProfile(profile)
             }}
             onSkip={async () => {
-              /** 正式環境：男性未完成職業驗證送出（仍 pending）不可略過 */
+              /** DEV 專用：略過男性須 approved 的職業驗證閘門 */
               if (!import.meta.env.DEV) return
               const u = await getActiveUser()
               const profile = u ? await getProfile(u.id) : null
-              launchMainFromProfile(profile)
+              launchMainFromProfile(profile, { devBypassMaleVerify: true })
             }}
           />
         )}
