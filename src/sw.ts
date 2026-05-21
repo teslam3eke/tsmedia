@@ -128,6 +128,11 @@ function matchIdFromClientUrl(clientUrl: string): string | null {
   }
 }
 
+/** client 明確可見（不接受 undefined，避免 iOS PWA 背景被誤判為前景） */
+function isClientClearlyForeground(c: WindowClient): boolean {
+  return c.visibilityState === 'visible' || c.focused === true
+}
+
 function shouldSuppressMessagePushForMatch(
   incomingMatchLc: string,
   clients: readonly Client[],
@@ -140,16 +145,25 @@ function shouldSuppressMessagePushForMatch(
   )
   if (originClients.length === 0) return false
 
-  /** iOS：postMessage 常漏，以 clients.url 的 tm_chat 為準 */
-  if (originClients.some((c) => matchIdFromClientUrl(c.url) === incomingMatchLc)) {
+  /**
+   * iOS：postMessage 常漏，以 clients.url 的 ?tm_chat= 為備援。
+   * 但必須同時確認 client 明確在前景（visible/focused），
+   * 否則背景 URL 殘留會讓推播橫幅被吃掉。
+   */
+  if (
+    originClients.some(
+      (c) => matchIdFromClientUrl(c.url) === incomingMatchLc && isClientClearlyForeground(c),
+    )
+  ) {
     return true
   }
 
-  /** postMessage 有 arm 時：前景／focused 即抑制（visibilityState 在 iOS 常失準） */
+  /**
+   * postMessage 有 arm 時：僅在 client 明確前景才抑制。
+   * 移除 visibilityState === undefined，避免 iOS PWA 背景狀態未知時誤擋橫幅。
+   */
   if (activeChatMatchIdLc === incomingMatchLc) {
-    return originClients.some(
-      (c) => c.visibilityState === 'visible' || c.focused === true || c.visibilityState === undefined,
-    )
+    return originClients.some(isClientClearlyForeground)
   }
 
   return false
@@ -183,7 +197,7 @@ function hasForegroundOriginClient(clients: readonly Client[]): boolean {
       x instanceof WindowClient &&
       typeof x.url === 'string' &&
       x.url.startsWith(self.location.origin) &&
-      (x.visibilityState === 'visible' || x.focused === true || x.visibilityState === undefined),
+      isClientClearlyForeground(x),
   )
 }
 
