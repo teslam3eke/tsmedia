@@ -76,6 +76,8 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   )
   /** 職業步驟：人工審核中，通過後自動進收入頁 */
   const [employmentManualWait, setEmploymentManualWait] = useState(false)
+  /** employmentManualWait overlay 動態訊息 */
+  const [employmentWaitMessage, setEmploymentWaitMessage] = useState('職業驗證審核中')
 
   /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
   const employmentSubmittedRef = useRef(false)
@@ -434,7 +436,9 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   })()
 
   /** 上傳並送審職業文件；AI 自動路徑會等到 approved 才回 ok */
-  const submitEmploymentProof = async (): Promise<{ ok: boolean; error?: string; manualWait?: boolean }> => {
+  const submitEmploymentProof = async (
+    setPhase?: (msg: string) => void,
+  ): Promise<{ ok: boolean; error?: string; manualWait?: boolean }> => {
     if (!userId) return { ok: false, error: '請先登入。' }
     if (employmentSubmittedRef.current) {
       const p = await getProfile(userId)
@@ -449,6 +453,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       return { ok: false, error: '今天已達送審上限 20 次，請明天再試。' }
     }
 
+    setPhase?.('正在上傳文件…')
     const proofResult = await uploadProofDoc(userId, proofs[0].file)
     if (!proofResult.ok) {
       return { ok: false, error: proofResult.error ?? '文件上傳失敗，請再試一次。' }
@@ -480,7 +485,8 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       return { ok: false, manualWait: true, error: '已送出，等待人工審核通過後會自動進入下一步。' }
     }
 
-    const deadline = Date.now() + (AI_AUTO_REVIEW_UI_SECONDS + 10) * 1000
+    setPhase?.('等待審核通過…')
+    const deadline = Date.now() + 120 * 1000
     while (Date.now() < deadline) {
       await finalizeDueAiReviews()
       const p = await getProfile(userId)
@@ -498,26 +504,27 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   }
 
   const advanceFromEmploymentStep = async () => {
-    setSubmitting(true)
+    setEmploymentManualWait(true)
+    setEmploymentWaitMessage('正在上傳文件…')
     try {
-      const result = await submitEmploymentProof()
+      const result = await submitEmploymentProof((msg) => setEmploymentWaitMessage(msg))
       if (result.ok) {
+        setEmploymentManualWait(false)
         setStep((s) => s + 1)
         return
       }
       if (result.manualWait) {
-        setEmploymentManualWait(true)
-        setAiStatus('fail')
-        setAiMessage(result.error ?? '已送出，等待人工審核。')
+        // 進入人工審核等待；overlay 繼續顯示，background poll 會在通過後推進
+        setEmploymentWaitMessage('職業驗證審核中')
         return
       }
+      setEmploymentManualWait(false)
       setAiStatus('fail')
       setAiMessage(result.error ?? '送審失敗，請稍後再試。')
     } catch {
+      setEmploymentManualWait(false)
       setAiStatus('fail')
       setAiMessage('送審失敗，請檢查網路後再試。')
-    } finally {
-      setSubmitting(false)
     }
   }
 
@@ -1202,9 +1209,11 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
             >
               <Cpu className="w-10 h-10 text-slate-400" />
             </motion.div>
-            <p className="text-lg font-bold text-slate-900 mb-2">職業驗證審核中</p>
+            <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
             <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-              文件已送出。通過審核後會自動進入收入認證步驟；人工複核可能需要超過 12 小時。
+              {employmentWaitMessage === '職業驗證審核中'
+                ? '文件已送出。通過審核後會自動進入收入認證步驟；人工複核可能需要超過 12 小時。'
+                : '請稍候，不要關閉此頁面。'}
             </p>
           </div>,
           document.body,
