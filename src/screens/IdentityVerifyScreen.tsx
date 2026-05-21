@@ -61,12 +61,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const [aiMessage,    setAiMessage]    = useState('')
   const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: 'TSMC' | 'MediaTek' | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
 
-  type EmploymentHold =
-    | null
-    | { phase: 'running'; countdown: number }
-    | { phase: 'done'; ok: boolean; message: string }
-
-  const [employmentHold, setEmploymentHold] = useState<EmploymentHold>(null)
   type IncomeRunningHold = { phase: 'running'; countdown: number }
   const [incomeHold, setIncomeHold] = useState<IncomeRunningHold | null>(null)
 
@@ -118,6 +112,23 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           if (storedPaths.length >= PROFILE_PHOTO_MIN) {
             setStep(2)
           }
+        } else if (st === 'submitted' && storedPaths.length >= PROFILE_PHOTO_MIN) {
+          employmentSubmittedRef.current = true
+          setStep(1)
+          setEmploymentManualWait(true)
+          setEmploymentWaitMessage('職業驗證審核中')
+          void (async () => {
+            const result = await waitForEmploymentApproval((msg) => setEmploymentWaitMessage(msg))
+            if (result.ok) {
+              setEmploymentManualWait(false)
+              setStep(2)
+            } else if (result.error) {
+              setEmploymentManualWait(false)
+              setMaleVerifyGate('rejected')
+              setAiStatus('fail')
+              setAiMessage(result.error)
+            }
+          })()
         }
         if (p.company === 'TSMC' || p.company === 'MediaTek') {
           setSelectedCompany(p.company)
@@ -155,34 +166,25 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     }
   }, [gender, userId, maleVerifyGate, step, employmentManualWait])
 
-  useEffect(() => {
-    if (!employmentManualWait || !userId) return
-    let cancelled = false
-    const tick = async () => {
+  const waitForEmploymentApproval = async (
+    setPhase?: (msg: string) => void,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!userId) return { ok: false, error: '請先登入。' }
+    setPhase?.('等待審核通過…')
+    while (true) {
       await finalizeDueAiReviews()
       const p = await getProfile(userId)
-      if (cancelled) return
       if (p?.verification_status === 'approved') {
-        employmentSubmittedRef.current = true
         setMaleVerifyGate('approved')
-        setEmploymentManualWait(false)
-        setStep(2)
-        return
+        return { ok: true }
       }
       if (p?.verification_status === 'rejected') {
-        setEmploymentManualWait(false)
-        setMaleVerifyGate('rejected')
-        setAiStatus('fail')
-        setAiMessage('職業驗證未通過，請重新上傳文件。')
+        employmentSubmittedRef.current = false
+        return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
       }
+      await new Promise((r) => setTimeout(r, 800))
     }
-    void tick()
-    const iv = window.setInterval(() => void tick(), 4000)
-    return () => {
-      cancelled = true
-      window.clearInterval(iv)
-    }
-  }, [employmentManualWait, userId])
+  }
 
   const employmentAiOutcomeRef = useRef<{
     passed: boolean
@@ -294,52 +296,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   }
 
   useEffect(() => {
-    if (!employmentHold || employmentHold.phase !== 'running') return
-    if (employmentHold.countdown <= 0) return
-    const t = window.setTimeout(() => {
-      setEmploymentHold((h) =>
-        h?.phase === 'running' ? { ...h, countdown: h.countdown - 1 } : h,
-      )
-    }, 1000)
-    return () => window.clearTimeout(t)
-  }, [employmentHold])
-
-  useEffect(() => {
-    if (!employmentHold || employmentHold.phase !== 'running' || employmentHold.countdown !== 0) return
-    let cancelled = false
-    ;(async () => {
-      while (!employmentAiOutcomeRef.current && !cancelled) {
-        await new Promise((r) => setTimeout(r, 80))
-      }
-      if (cancelled || !employmentAiOutcomeRef.current) return
-      const o = employmentAiOutcomeRef.current
-      const passed = o.passed
-      const aiCompany = o.company
-      const aiConf = o.confidence
-      setAiResultData({
-        passed,
-        company: aiCompany,
-        confidence: aiConf,
-        reason: o.reason,
-      })
-      if (aiCompany) setSelectedCompany(aiCompany)
-      if (passed) {
-        setAiStatus('ok')
-        setAiMessage(o.message)
-      } else {
-        setAiStatus('fail')
-        setAiMessage(`${o.message}。已轉人工審核，人工審核時間可能大於 12 小時。`)
-      }
-      setEmploymentHold({
-        phase: 'done',
-        ok: passed,
-        message: passed ? o.message : `${o.message}。已轉人工審核，人工審核時間可能大於 12 小時。`,
-      })
-    })()
-    return () => { cancelled = true }
-  }, [employmentHold])
-
-  useEffect(() => {
     if (!incomeHold || incomeHold.phase !== 'running') return
     if (incomeHold.countdown <= 0) return
     const t = window.setTimeout(() => {
@@ -435,14 +391,21 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     return false
   })()
 
-  /** 上傳並送審職業文件；AI 自動路徑會等到 approved 才回 ok */
+  /** 上傳並送審職業文件；輪詢直到 approved 或 rejected */
   const submitEmploymentProof = async (
     setPhase?: (msg: string) => void,
-  ): Promise<{ ok: boolean; error?: string; manualWait?: boolean }> => {
+  ): Promise<{ ok: boolean; error?: string }> => {
     if (!userId) return { ok: false, error: '請先登入。' }
     if (employmentSubmittedRef.current) {
       const p = await getProfile(userId)
       if (p?.verification_status === 'approved') return { ok: true }
+      if (p?.verification_status === 'rejected') {
+        employmentSubmittedRef.current = false
+        return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
+      }
+      if (p?.verification_status === 'submitted') {
+        return waitForEmploymentApproval(setPhase)
+      }
     }
     if (!selectedCompany || proofs.length === 0 || !proofs[0].file) {
       return { ok: false, error: '請選擇公司並上傳驗證文件。' }
@@ -453,8 +416,40 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       return { ok: false, error: '今天已達送審上限 20 次，請明天再試。' }
     }
 
+    const proofFile = proofs[0].file
+    let aiForSubmit = aiResultData
+
+    if (proofFile.type.startsWith('image/')) {
+      setPhase?.('AI 審核中…')
+      if (!employmentAiOutcomeRef.current) {
+        await fetchEmploymentAiOutcome(proofFile)
+      }
+      const o = employmentAiOutcomeRef.current
+      if (o) {
+        aiForSubmit = {
+          passed: o.passed,
+          company: o.company,
+          confidence: o.confidence,
+          reason: o.reason,
+        }
+        setAiResultData(aiForSubmit)
+        if (o.company) setSelectedCompany(o.company)
+        if (o.passed) {
+          setAiStatus('ok')
+          setAiMessage(o.message)
+        } else {
+          setAiStatus('fail')
+          setAiMessage(`${o.message}。已轉人工審核，人工審核時間可能大於 12 小時。`)
+        }
+      }
+    } else {
+      setAiStatus('ok')
+      setAiMessage('PDF 文件將由人工審核確認')
+      aiForSubmit = null
+    }
+
     setPhase?.('正在上傳文件…')
-    const proofResult = await uploadProofDoc(userId, proofs[0].file)
+    const proofResult = await uploadProofDoc(userId, proofFile)
     if (!proofResult.ok) {
       return { ok: false, error: proofResult.error ?? '文件上傳失敗，請再試一次。' }
     }
@@ -469,9 +464,9 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       selectedCompany,
       docType,
       proofResult.path,
-      aiResultData ?? undefined,
-      aiResultData?.passed ? 'ai_auto' : 'manual',
-      aiResultData?.passed ? undefined : 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。',
+      aiForSubmit ?? undefined,
+      aiForSubmit?.passed ? 'ai_auto' : 'manual',
+      aiForSubmit?.passed ? undefined : 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。',
     )
     if (!submitResult.ok) {
       return { ok: false, error: submitResult.error ?? '送審失敗，請稍後再試。' }
@@ -479,43 +474,17 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
 
     employmentSubmittedRef.current = true
     setMaleVerifyGate('submitted')
-
-    const isAiAuto = Boolean(aiResultData?.passed)
-    if (!isAiAuto) {
-      return { ok: false, manualWait: true, error: '已送出，等待人工審核通過後會自動進入下一步。' }
-    }
-
-    setPhase?.('等待審核通過…')
-    const deadline = Date.now() + 120 * 1000
-    while (Date.now() < deadline) {
-      await finalizeDueAiReviews()
-      const p = await getProfile(userId)
-      if (p?.verification_status === 'approved') {
-        setMaleVerifyGate('approved')
-        return { ok: true }
-      }
-      if (p?.verification_status === 'rejected') {
-        employmentSubmittedRef.current = false
-        return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
-      }
-      await new Promise((r) => setTimeout(r, 800))
-    }
-    return { ok: false, manualWait: true, error: '審核時間較長，請稍候…' }
+    return waitForEmploymentApproval(setPhase)
   }
 
   const advanceFromEmploymentStep = async () => {
     setEmploymentManualWait(true)
-    setEmploymentWaitMessage('正在上傳文件…')
+    setEmploymentWaitMessage('正在處理…')
     try {
       const result = await submitEmploymentProof((msg) => setEmploymentWaitMessage(msg))
       if (result.ok) {
         setEmploymentManualWait(false)
         setStep((s) => s + 1)
-        return
-      }
-      if (result.manualWait) {
-        // 進入人工審核等待；overlay 繼續顯示，background poll 會在通過後推進
-        setEmploymentWaitMessage('職業驗證審核中')
         return
       }
       setEmploymentManualWait(false)
@@ -855,7 +824,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                       <p className="text-sm font-semibold text-slate-700">
                         {selectedCompany ? `上傳 ${selectedCompany} 驗證文件` : '請先選擇公司'}
                       </p>
-                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · AI 審核時間約 {AI_AUTO_REVIEW_UI_SECONDS} 秒</p>
+                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · 送出後會等待審核完成</p>
                     </div>
                   </button>
                 ) : (
@@ -1101,25 +1070,12 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
             if (isLastStep) {
               await handleSubmit()
             } else if (stepLabel === '職業驗證文件') {
-              const file = proofs[0]?.file
-              if (proofs.length > 0 && file && aiStatus !== 'ok' && file.type.startsWith('image/')) {
-                if (!employmentAiOutcomeRef.current) {
-                  void fetchEmploymentAiOutcome(file)
-                }
-                setEmploymentHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
-              } else if (proofs.length > 0 && file && !file.type.startsWith('image/')) {
-                setAiStatus('ok')
-                setAiMessage('PDF 文件將由人工審核確認')
-                setAiResultData(null)
-                await advanceFromEmploymentStep()
-              } else {
-                await advanceFromEmploymentStep()
-              }
+              await advanceFromEmploymentStep()
             } else {
               setStep(step + 1)
             }
           }}
-          disabled={submitting || !canAdvance || employmentHold !== null || employmentManualWait}
+          disabled={submitting || !canAdvance || employmentManualWait}
           className={cn(
             'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
             canAdvance && !submitting
@@ -1154,51 +1110,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         )}
       </div>
     </div>
-    {employmentHold
-      ? createPortal(
-          <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe">
-            {employmentHold.phase === 'running' ? (
-              <>
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-                  className="mb-5"
-                >
-                  <Cpu className="w-10 h-10 text-slate-400" />
-                </motion.div>
-                <p className="text-lg font-bold text-slate-900 mb-2">職業文件 AI 審核</p>
-                <p className="text-5xl font-black text-slate-900 tabular-nums mb-3">{employmentHold.countdown}</p>
-                <p className="text-sm text-slate-500 text-center leading-relaxed max-w-[280px]">
-                  送出後即開始後端辨識；倒數結束後會立刻顯示通過與否。
-                </p>
-              </>
-            ) : (
-              <>
-                {employmentHold.ok ? (
-                  <ShieldCheck className="w-12 h-12 text-emerald-500 mb-4" />
-                ) : (
-                  <AlertCircle className="w-12 h-12 text-amber-500 mb-4" />
-                )}
-                <p className="text-lg font-bold text-slate-900 mb-3 text-center">
-                  {employmentHold.ok ? 'AI 審核結果' : '需人工複核'}
-                </p>
-                <p className="text-sm text-slate-600 text-center leading-relaxed mb-8 max-w-[300px]">{employmentHold.message}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmploymentHold(null)
-                    void advanceFromEmploymentStep()
-                  }}
-                  className="w-full max-w-xs rounded-2xl bg-slate-900 text-white py-4 font-bold text-base shadow-lg shadow-slate-900/15"
-                >
-                  繼續
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        )
-      : null}
     {employmentManualWait
       ? createPortal(
           <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe text-center">
@@ -1211,9 +1122,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
             </motion.div>
             <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
             <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-              {employmentWaitMessage === '職業驗證審核中'
-                ? '文件已送出。通過審核後會自動進入收入認證步驟；人工複核可能需要超過 12 小時。'
-                : '請稍候，不要關閉此頁面。'}
+              審核完成後會自動進入下一步；若需人工複核，可能需要超過 12 小時。請稍候，不要關閉此頁面。
             </p>
           </div>,
           document.body,
