@@ -35,7 +35,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { getSeededRandomQuestions, getFixedTurningPointQuestion } from '../src/utils/questions.ts'
-import { FOUNDING_ANSWERS_BY_QUESTION_ID } from './founding-questionnaire-answers.ts'
+import { FOUNDING_ANSWERS_BY_QUESTION_ID, turningPointAnswerForFoundingNo } from './founding-questionnaire-answers.ts'
 
 const TERMS_VERSION = '2026-04-28'
 const PASSWORD = '88888888'
@@ -334,7 +334,7 @@ function questionnaireForSeat(no: number, gender: 'male' | 'female') {
       id: fixed.id,
       category: fixed.category,
       text: fixed.text,
-      answer: syntheticAnswer(no, fixed, 5),
+      answer: turningPointAnswerForFoundingNo(no),
     },
   ]
 }
