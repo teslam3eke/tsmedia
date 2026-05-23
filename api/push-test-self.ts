@@ -37,12 +37,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    const result = await sendWebPushToUser(userData.user.id, {
-      title: '遠端推播測試',
-      body: '若看到這則，代表伺服器 → APNs/FCM → Service Worker 路徑正常。',
-      tag: 'tsmedia-remote-push-test',
-      url: '/?tab=profile',
-    })
+    const rawBody = typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}
+    const clientKey =
+      typeof rawBody?.clientKey === 'string' ? rawBody.clientKey.trim() : ''
+    const result = await sendWebPushToUser(
+      userData.user.id,
+      {
+        title: '遠端推播測試',
+        body: '若看到這則，代表伺服器 → APNs/FCM → Service Worker 路徑正常。',
+        tag: 'tsmedia-remote-push-test',
+        url: '/?tab=profile',
+      },
+      undefined,
+      clientKey ? { clientKey } : undefined,
+    )
+    if (clientKey && result.sent === 0) {
+      res.status(200).json({
+        ok: false,
+        userId: userData.user.id,
+        error: '此裝置的 push 訂閱不存在或送達失敗，請重新開啟 App 後再測',
+        ...result,
+      })
+      return
+    }
     res.status(200).json({ ok: true, userId: userData.user.id, ...result })
   } catch (e) {
     console.error('[push-test-self]', e)

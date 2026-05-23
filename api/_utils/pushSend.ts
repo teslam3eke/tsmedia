@@ -108,17 +108,27 @@ async function sendToSubscription(
   }
 }
 
+export type SendWebPushFilter = {
+  /** 僅送此 PWA 安裝（與 push_subscriptions.client_key 對齊） */
+  clientKey?: string
+}
+
 export async function sendWebPushToUser(
   userId: string,
   payload: WebPushPayload,
   options: typeof PUSH_PAYLOAD_OPTIONS | typeof PUSH_OPTIONS_BROADCAST = PUSH_PAYLOAD_OPTIONS,
+  filter?: SendWebPushFilter,
 ): Promise<{ sent: number; failed: number; skipped: number }> {
   configureWebPush()
   const supabase = adminSupabase()
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from('push_subscriptions')
     .select('endpoint, p256dh, auth, client_key')
     .eq('user_id', userId)
+  const clientKey = filter?.clientKey?.trim()
+  if (clientKey) query = query.eq('client_key', clientKey)
+
+  const { data: rows, error } = await query
 
   if (error) throw error
   if (!rows?.length) return { sent: 0, failed: 0, skipped: 0 }

@@ -42,6 +42,21 @@ async function subscribeFresh(reg: ServiceWorkerRegistration) {
   })
 }
 
+/** 同 user + client_key 只保留目前 endpoint；iOS 換 endpoint 時清掉舊列 */
+async function pruneStalePushSubscriptionsForDevice(
+  userId: string,
+  clientKey: string,
+  keepEndpoint: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .delete()
+    .eq('user_id', userId)
+    .eq('client_key', clientKey)
+    .neq('endpoint', keepEndpoint)
+  if (error) console.warn('[webPush] prune same client_key', error.message)
+}
+
 async function upsertPushSubscription(
   userId: string,
   sub: PushSubscription,
@@ -49,13 +64,14 @@ async function upsertPushSubscription(
   const json = sub.toJSON()
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false
 
+  const clientKey = getPushClientKey()
   const { error } = await supabase.from('push_subscriptions').upsert(
     {
       user_id: userId,
       endpoint: json.endpoint,
       p256dh: json.keys.p256dh,
       auth: json.keys.auth,
-      client_key: getPushClientKey(),
+      client_key: clientKey,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'endpoint' },
@@ -64,6 +80,7 @@ async function upsertPushSubscription(
     console.warn('[webPush] upsert', error.message)
     return false
   }
+  await pruneStalePushSubscriptionsForDevice(userId, clientKey, json.endpoint)
   return true
 }
 
@@ -80,7 +97,11 @@ export async function requestRemotePushSelfTest(): Promise<{
     if (!token) return { ok: false, error: '未登入' }
     const res = await fetch('/api/push-test-self', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ clientKey: getPushClientKey() }),
     })
     const body = (await res.json().catch(() => ({}))) as {
       ok?: boolean
@@ -89,10 +110,12 @@ export async function requestRemotePushSelfTest(): Promise<{
       error?: string
     }
     if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` }
-    if ((body.sent ?? 0) === 0) {
+    if (body.ok === false || (body.sent ?? 0) === 0) {
       return {
         ok: false,
-        error: '伺服器找不到此裝置的 push 訂閱，請再按一次測試或重新開啟 App',
+        error:
+          body.error ??
+          '此裝置的遠端推播未送達（請鎖屏再測，或刪除 PWA 重裝後重允許通知）',
       }
     }
     return { ok: true, sent: body.sent, failed: body.failed }

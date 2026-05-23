@@ -616,7 +616,7 @@ function NotificationModal({
         return
       }
       const title = '測試通知（本機）'
-      const body  = '本機 Service Worker 正常。若聊天推播仍收不到，請看下方遠端測試結果。'
+      const body  = '本機 Service Worker 正常。鎖屏後應再收到「遠端推播測試」。'
       const options: NotificationOptions = {
         body,
         icon: '/icons/icon-192.png',
@@ -746,7 +746,7 @@ function NotificationModal({
         >
           {testStatus === 'idle'    && <><BellRing className="w-4 h-4" /> 測試本機＋遠端推播</>}
           {testStatus === 'sending' && <>發送中</>}
-          {testStatus === 'sent'    && <><Check className="w-4 h-4" /> 本機與遠端推播已送出</>}
+          {testStatus === 'sent'    && <><Check className="w-4 h-4" /> 本機與此裝置遠端推播正常</>}
           {testStatus === 'error'   && <><AlertCircle className="w-4 h-4" /> {testError || '發送失敗'}</>}
         </button>
 
