@@ -2,7 +2,7 @@
  * 建立 50 位創始會員：Auth 與 profiles。
  * 性別：founding001、003 為男，002、004 為女，各 25 位。
  *
- * 問卷與 App 相同題池；每位固定 5 題以序號 seed 抽取，見 getSeededRandomQuestions（已預填寫入 profiles.questionnaire）。
+ * 問卷與 App 相同題池；每位固定 5 題隨機 + 第 6 題固定轉折題（見 getSeededRandomQuestions／getFixedTurningPointQuestion）。
  * verification_status 預設 submitted：登入後不會再被導向「身分／職業驗證」流程（見 App.tsx maleNeedsIdentityVerify）。
  *
  * 頭像：
@@ -34,7 +34,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { getSeededRandomQuestions } from '../src/utils/questions.ts'
+import { getSeededRandomQuestions, getFixedTurningPointQuestion } from '../src/utils/questions.ts'
 import { FOUNDING_ANSWERS_BY_QUESTION_ID } from './founding-questionnaire-answers.ts'
 
 const TERMS_VERSION = '2026-04-28'
@@ -321,12 +321,22 @@ function syntheticAnswer(no: number, q: { id: number; category: string; text: st
 function questionnaireForSeat(no: number, gender: 'male' | 'female') {
   const pickSeed = no * 100_003 + (gender === 'male' ? 17 : 91_981)
   const picked = getSeededRandomQuestions(5, gender, pickSeed)
-  return picked.map((q, i) => ({
+  const randomFive = picked.map((q, i) => ({
     id: q.id,
     category: q.category,
     text: q.text,
     answer: syntheticAnswer(no, q, i),
   }))
+  const fixed = getFixedTurningPointQuestion()
+  return [
+    ...randomFive,
+    {
+      id: fixed.id,
+      category: fixed.category,
+      text: fixed.text,
+      answer: syntheticAnswer(no, fixed, 5),
+    },
+  ]
 }
 
 function interestsForSeat(no: number, gender: 'male' | 'female'): string[] {
@@ -367,22 +377,24 @@ const FEMALE_ENGLISH_NICKNAMES = [
   'Wendy', 'Joyce', 'Fiona', 'Esther', 'Nicole', 'Lisa', 'Helen', 'Yuki', 'Gina', 'Sheila',
 ]
 
-/** 約 30% 使用中文風格暱稱；以下 15 筆與 founding_member_no 固定對應，不重複。英文暱稱仍可由池輪替重複。 */
-const ZH_NICKNAME_BY_FOUNDING_NO: Record<number, string> = {
+/** 約 30% 使用中文風格暱稱；以下與 founding_member_no 固定對應，依性別分表。 */
+const ZH_MALE_NICKNAME_BY_FOUNDING_NO: Record<number, string> = {
+  9: '阿杰',
+  19: '阿偉',
+  29: '阿廷',
+  39: '小凱',
+  49: '阿豪',
+}
+const ZH_FEMALE_NICKNAME_BY_FOUNDING_NO: Record<number, string> = {
   8: '小安',
-  9: '阿琳',
   10: '靜宜',
   18: '雅文',
-  19: '慧如',
   20: '芷瑜',
   28: '書瑩',
-  29: '佳雯',
   30: '淑婷',
   38: '怡安',
-  39: '筱婷',
   40: '宜璇',
   48: '韻如',
-  49: '美玲',
   50: '琇琇',
 }
 
@@ -392,7 +404,8 @@ function nicknameForFounding(no: number, gender: 'male' | 'female') {
     const pool = gender === 'male' ? MALE_ENGLISH_NICKNAMES : FEMALE_ENGLISH_NICKNAMES
     return pool[(no - 1) % pool.length]
   }
-  const zh = ZH_NICKNAME_BY_FOUNDING_NO[no]
+  const zhMap = gender === 'male' ? ZH_MALE_NICKNAME_BY_FOUNDING_NO : ZH_FEMALE_NICKNAME_BY_FOUNDING_NO
+  const zh = zhMap[no]
   if (zh) return zh
   const pool = gender === 'male' ? MALE_ENGLISH_NICKNAMES : FEMALE_ENGLISH_NICKNAMES
   return pool[(no - 1) % pool.length]

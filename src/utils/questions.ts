@@ -1,5 +1,34 @@
+import type { QuestionnaireEntry } from '@/lib/types'
+
 export type QuestionCategory = '金錢觀' | '工作與生活平衡' | '未來規劃與自尊'
 export type Gender = 'male' | 'female'
+
+/** 第 6 題固定題（全使用者一致） */
+export const FIXED_TURNING_POINT_QUESTION_ID = 9000
+export const FIXED_TURNING_POINT_QUESTION_TEXT = '目前為止，您遇到人生中最大的轉折是什麼?'
+
+export function getFixedTurningPointQuestion(): Question {
+  return {
+    id: FIXED_TURNING_POINT_QUESTION_ID,
+    category: '未來規劃與自尊',
+    text: FIXED_TURNING_POINT_QUESTION_TEXT,
+  }
+}
+
+/** 前 5 題隨機 + 第 6 題固定轉折題 */
+export function getQuestionnaireQuestions(gender: Gender = 'male'): Question[] {
+  return [...getRandomQuestions(5, gender), getFixedTurningPointQuestion()]
+}
+
+/** 編輯個資／舊資料：補上固定第 6 題（答案留空供填寫） */
+export function ensureQuestionnaireHasFixedSixth(entries: QuestionnaireEntry[]): QuestionnaireEntry[] {
+  const fixed = getFixedTurningPointQuestion()
+  const hasFixed = entries.some(
+    (e) => e.id === fixed.id || e.text.trim() === fixed.text,
+  )
+  if (hasFixed) return entries
+  return [...entries, { ...fixed, answer: '' }]
+}
 
 export interface Question {
   id: number

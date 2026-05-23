@@ -54,6 +54,7 @@ import SubscriptionScreen from '@/screens/SubscriptionScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
+import { ensureQuestionnaireHasFixedSixth } from '@/utils/questions'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
@@ -334,8 +335,8 @@ function uuidToGradients(uuid: string): { from: string; to: string } {
   }
 }
 
-/** 與 QuestionnaireScreen（隨機 5 題）一致；卡片／詳情最多呈現幾組問答 */
-const QUESTIONNAIRE_QA_CARD_LIMIT = 5
+/** 與 QuestionnaireScreen（隨機 5 題 + 固定第 6 題）一致；卡片／詳情最多呈現幾組問答 */
+const QUESTIONNAIRE_QA_CARD_LIMIT = 6
 
 /** 探索／詳情卡不顯示問卷題型標籤用語（舊版種子答案曾嵌入 category）。 */
 function scrubQuestionnaireAnswerForDiscover(answer: string): string {
@@ -1243,6 +1244,7 @@ function BlurredProfilePhotoSlideshow({
   highFetchPrioritySlideCount?: number
 }) {
   const [index, setIndex] = useState(0)
+  const [photoLoadState, setPhotoLoadState] = useState<Record<number, 'loading' | 'loaded' | 'error'>>({})
   const touchStartX = useRef<number | null>(null)
   const n = photoUrls.length
   const clearSet =
@@ -1250,9 +1252,28 @@ function BlurredProfilePhotoSlideshow({
       ? unblockedIndices
       : new Set(unblockedIndices ?? [])
 
+  const gradientBg = `linear-gradient(160deg, ${gradientFrom}, ${gradientTo})`
+
   useEffect(() => {
     setIndex(0)
+    setPhotoLoadState({})
   }, [profileKey, photoUrls.join('|')])
+
+  const markPhotoLoaded = (i: number) => {
+    setPhotoLoadState((prev) => (prev[i] === 'loaded' ? prev : { ...prev, [i]: 'loaded' }))
+  }
+
+  const markPhotoError = (i: number) => {
+    setPhotoLoadState((prev) => (prev[i] === 'error' ? prev : { ...prev, [i]: 'error' }))
+  }
+
+  const bindPhotoRef = (el: HTMLImageElement | null, i: number) => {
+    if (!el) return
+    if (el.complete && el.naturalWidth > 0) markPhotoLoaded(i)
+  }
+
+  const currentPhotoState = n > 0 ? (photoLoadState[index] ?? 'loading') : 'loaded'
+  const showPhotoLoading = n > 0 && currentPhotoState !== 'loaded'
 
   const step = (delta: number) => {
     if (n <= 1) return
@@ -1270,7 +1291,7 @@ function BlurredProfilePhotoSlideshow({
     else if (dx > 56) step(-1)
   }
 
-  const showPrivacy = n > 0
+  const showPrivacy = n > 0 && currentPhotoState === 'loaded'
   const privacyClass =
     variant === 'discover'
       ? 'absolute z-[25] flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5'
@@ -1287,30 +1308,49 @@ function BlurredProfilePhotoSlideshow({
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        {n === 0 ? (
+        <div
+          className="absolute inset-0 z-0"
+          style={{ background: gradientBg }}
+        />
+
+        {n > 0 &&
+          photoUrls.map((src, i) => {
+            const loaded = photoLoadState[i] === 'loaded'
+            return (
+              <img
+                key={`${profileKey}-ph-${i}`}
+                ref={(el) => bindPhotoRef(el, i)}
+                src={src}
+                alt=""
+                fetchPriority={
+                  variant === 'discover' && highFetchPrioritySlideCount > 0 && i < highFetchPrioritySlideCount
+                    ? 'high'
+                    : undefined
+                }
+                className={cn(
+                  'absolute inset-0 h-full w-full object-cover scale-[1.04] transition-opacity duration-200',
+                  i === index ? 'z-[1]' : 'z-0 pointer-events-none',
+                  loaded && i === index ? 'opacity-100' : 'opacity-0',
+                )}
+                style={clearSet.has(i) ? undefined : { filter: 'blur(6px)' }}
+                draggable={false}
+                onLoad={() => markPhotoLoaded(i)}
+                onError={() => markPhotoError(i)}
+              />
+            )
+          })}
+
+        {showPhotoLoading && (
           <div
-            className="absolute inset-0"
-            style={{ background: `linear-gradient(160deg, ${gradientFrom}, ${gradientTo})` }}
-          />
-        ) : (
-          photoUrls.map((src, i) => (
-            <img
-              key={`${profileKey}-ph-${i}`}
-              src={src}
-              alt=""
-              fetchPriority={
-                variant === 'discover' && highFetchPrioritySlideCount > 0 && i < highFetchPrioritySlideCount
-                  ? 'high'
-                  : undefined
-              }
-              className={cn(
-                'absolute inset-0 h-full w-full object-cover scale-[1.04] transition-opacity duration-200',
-                i === index ? 'z-[1] opacity-100' : 'z-0 opacity-0 pointer-events-none',
-              )}
-              style={clearSet.has(i) ? undefined : { filter: 'blur(6px)' }}
-              draggable={false}
-            />
-          ))
+            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-slate-100/95"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="h-8 w-8 rounded-full border-2 border-slate-200 border-t-slate-500 animate-spin" aria-hidden />
+            <p className="text-sm font-semibold text-slate-500">
+              {currentPhotoState === 'error' ? '無法載入圖片' : '圖片載入中'}
+            </p>
+          </div>
         )}
 
         <div className="pointer-events-none absolute inset-0 z-[5] bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
@@ -3911,7 +3951,7 @@ function EditProfileScreen({
 
   // Questionnaire
   const [qa, setQa] = useState<QuestionnaireEntry[]>(() =>
-    profile.questionnaire ?? [],
+    ensureQuestionnaireHasFixedSixth(profile.questionnaire ?? []),
   )
 
   // Income verification status (for display — auto re-loaded after upload completes)

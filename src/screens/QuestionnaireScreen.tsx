@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, MessageSquare, Cpu } from 'lucide-react'
-import { getRandomQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
+import { getQuestionnaireQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -19,7 +19,7 @@ const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot:
 const MIN_CHARS = 20
 
 export default function QuestionnaireScreen({ onComplete, onSkip, gender = 'male' }: Props) {
-  const questions = useMemo(() => getRandomQuestions(5, gender), [gender])
+  const questions = useMemo(() => getQuestionnaireQuestions(gender), [gender])
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
 
@@ -65,7 +65,7 @@ export default function QuestionnaireScreen({ onComplete, onSkip, gender = 'male
         <div className="space-y-2">
           <div className="flex justify-between items-center">
             <span className="text-xs font-semibold text-slate-500">
-              第 {current + 1} 題 · 共 5 題
+              第 {current + 1} 題 · 共 6 題
             </span>
             <span className="text-xs text-slate-400">{Math.round(progress)}% 完成</span>
           </div>
