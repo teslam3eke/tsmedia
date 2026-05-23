@@ -46,6 +46,7 @@ import {
   clearSkipInstantMatchLeaveOnFullUnload,
 } from '@/lib/instantMatchUnloadGuard'
 import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
+import InstantMatchIntroSplash from '@/components/InstantMatchIntroSplash'
 
 type Props = {
   userId: string
@@ -69,6 +70,7 @@ type Props = {
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
 
 const INSTANT_DISMISS_STORAGE_PREFIX = 'tm_instant_dismiss_done_v1'
+const INSTANT_INTRO_SEEN_STORAGE_PREFIX = 'tm_instant_intro_seen_v1'
 
 function parseDismissJson(raw: string | null): Set<string> {
   if (!raw) return new Set()
@@ -102,6 +104,26 @@ function peerGradientFromUserId(uid: string): { from: string; to: string } {
   const h1 = hues[h % hues.length]
   const h2 = hues[(h >> 3) % hues.length]
   return { from: `hsl(${h1} 42% 44%)`, to: `hsl(${h2} 38% 58%)` }
+}
+
+function loadIntroSeenFromStorage(userId: string): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  const k = `${INSTANT_INTRO_SEEN_STORAGE_PREFIX}:${userId}`
+  try {
+    return parseDismissJson(sessionStorage.getItem(k))
+  } catch {
+    return new Set()
+  }
+}
+
+function persistIntroSeenToStorage(userId: string, ids: ReadonlySet<string>) {
+  if (typeof window === 'undefined') return
+  const k = `${INSTANT_INTRO_SEEN_STORAGE_PREFIX}:${userId}`
+  try {
+    sessionStorage.setItem(k, JSON.stringify([...ids].slice(-20)))
+  } catch {
+    /* quota / private mode */
+  }
 }
 
 function persistDismissedToStorage(userId: string, ids: ReadonlySet<string>) {
@@ -330,6 +352,8 @@ export default function InstantMatchTab({
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [pollReady, setPollReady] = useState(false)
   const [decideBusy, setDecideBusy] = useState(false)
+  /** 等候 → in_session：全螢幕模糊照片過場，結束後才顯示聊天 UI */
+  const [showMatchIntro, setShowMatchIntro] = useState(false)
 
   const instantInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -351,6 +375,8 @@ export default function InstantMatchTab({
   /** 主殼 `instantQueueWaiting`：僅用於掛載時帶入，避免依 props 觸發整段 state 重置。 */
   const assumeEnqueuePollIntentRef = useRef(assumeEnqueuePollIntent)
   assumeEnqueuePollIntentRef.current = assumeEnqueuePollIntent
+  const prevPollStatusRef = useRef<InstantMatchPollResult['status'] | null>(null)
+  const introSeenSessionIdsRef = useRef<Set<string>>(new Set())
   const chainInstantMatchPoll = useCallback((enqueue: boolean): Promise<InstantMatchPollResponse> => {
     const next = pollChainTailRef.current.then(() => instantMatchPoll({ enqueue }))
     pollChainTailRef.current = next
@@ -406,8 +432,28 @@ export default function InstantMatchTab({
     doneHoldRef.current = false
     pollEnqueueWhileWaitingRef.current = assumeEnqueuePollIntentRef.current
     dismissedInstantSessionIdsRef.current = loadDismissedFromStorage(userId)
+    introSeenSessionIdsRef.current = loadIntroSeenFromStorage(userId)
+    prevPollStatusRef.current = null
+    setShowMatchIntro(false)
     pollChainTailRef.current = Promise.resolve({ ok: true, data: { status: 'idle' as const } })
   }, [userId])
+
+  useEffect(() => {
+    const status = snapshot?.status ?? null
+    const prev = prevPollStatusRef.current
+    if (snapshot?.status === 'in_session') {
+      const sid = snapshot.session_id
+      const fromWaiting = prev === 'waiting'
+      if (fromWaiting && !introSeenSessionIdsRef.current.has(sid)) {
+        introSeenSessionIdsRef.current.add(sid)
+        persistIntroSeenToStorage(userId, introSeenSessionIdsRef.current)
+        setShowMatchIntro(true)
+      }
+    } else {
+      setShowMatchIntro(false)
+    }
+    prevPollStatusRef.current = status
+  }, [snapshot, userId])
 
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 1000)
@@ -854,6 +900,21 @@ export default function InstantMatchTab({
   const sess = snapshot
   const showDecide = sess.phase === 'decide'
   const liveChat = sess.phase === 'chat'
+
+  if (showMatchIntro) {
+    return (
+      <>
+        <div className="relative flex h-full min-h-0 flex-1 flex-col bg-slate-950" aria-hidden />
+        <InstantMatchIntroSplash
+          open
+          peerUserId={sess.peer_user_id}
+          prefetchedPhotoUrl={resolvedPeerPhotoUrls[0] ?? null}
+          prefetchedDisplayName={peerDisplay}
+          onComplete={() => setShowMatchIntro(false)}
+        />
+      </>
+    )
+  }
 
   return (
     <div
