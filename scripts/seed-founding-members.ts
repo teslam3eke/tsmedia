@@ -3,7 +3,7 @@
  * 性別：founding001、003 為男，002、004 為女，各 25 位。
  *
  * 問卷與 App 相同題池；每位固定 5 題隨機 + 第 6 題固定轉折題（見 getSeededRandomQuestions／getFixedTurningPointQuestion）。
- * verification_status 預設 submitted：登入後不會再被導向「身分／職業驗證」流程（見 App.tsx maleNeedsIdentityVerify）。
+ * verification_status 預設 approved：測試／創始帳號可直接進主畫面（見 App.tsx maleNeedsIdentityVerify）。
  *
  * 頭像：
  * - 預設：免費 Unsplash URL（可能被下架）。
@@ -627,8 +627,8 @@ async function main() {
       home_region: homeRegion,
       preferred_region: preferredRegion,
       show_income_border: false,
-      verification_status: 'submitted',
-      is_verified: false,
+      verification_status: 'approved',
+      is_verified: true,
       account_status: 'active',
       terms_version: TERMS_VERSION,
       terms_accepted_at: now,

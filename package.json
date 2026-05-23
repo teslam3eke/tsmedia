@@ -15,6 +15,7 @@
     "verify:full": "vitest run && npm run build && playwright test",
     "preview": "vite preview",
     "seed:founding": "tsx scripts/seed-founding-members.ts",
+    "approve:employment": "tsx scripts/approve-all-employment.ts",
     "admin:founding-likes-discover": "tsx scripts/admin-founding-likes-discover-pool.ts"
   },
   "dependencies": {
