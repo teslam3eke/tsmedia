@@ -577,7 +577,7 @@ export async function approveVerificationDoc(
       userId: doc.user_id,
       kind: 'verification_approved',
       title: '職業認證已通過',
-      body: `你的${doc.company ? ` ${doc.company} ` : ''}職業認證已通過。`,
+      body: '你的職業認證已通過。',
     })
   } else if (doc.verification_kind === 'income' && doc.claimed_income_tier) {
     await supabase

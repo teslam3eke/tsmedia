@@ -12,8 +12,8 @@ import {
   getProfile, finalizeDueAiReviews, resolvePhotoUrls,
   type AiResult,
 } from '@/lib/db'
-import type { DocType, IncomeTier, VerificationStatus } from '@/lib/types'
-import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX } from '@/lib/types'
+import { parseCompany, resolveEmploymentCompany, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
+import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type IncomeTier, type VerificationStatus } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
@@ -49,7 +49,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<LifePhotoSlot[]>([])
   const [proofs, setProofs] = useState<ProofItem[]>([])
-  const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>('')
   const [submitting, setSubmitting] = useState(false)
 
   // ── Income verification state ────────────────────────────────────
@@ -59,7 +58,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   // ── AI verification state ────────────────────────────────────────
   const [aiStatus,     setAiStatus]     = useState<'idle' | 'ok' | 'fail'>('idle')
   const [aiMessage,    setAiMessage]    = useState('')
-  const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: 'TSMC' | 'MediaTek' | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
+  const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: Company | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
 
   type IncomeRunningHold = { phase: 'running'; countdown: number }
   const [incomeHold, setIncomeHold] = useState<IncomeRunningHold | null>(null)
@@ -130,9 +129,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
             }
           })()
         }
-        if (p.company === 'TSMC' || p.company === 'MediaTek') {
-          setSelectedCompany(p.company)
-        }
       } else {
         setMaleVerifyGate(null)
       }
@@ -189,7 +185,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
   const employmentAiOutcomeRef = useRef<{
     passed: boolean
     message: string
-    company: 'TSMC' | 'MediaTek' | null
+    company: Company | null
     confidence: 'high' | 'medium' | 'low' | null
     reason: string | null
   } | null>(null)
@@ -225,19 +221,18 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           imageBase64,
           verificationKind: 'employment',
           claimedName: claimedName?.trim() || undefined,
-          claimedCompany: selectedCompany || undefined,
           docType: docTypeHint,
         }),
       })
       const data = await res.json() as { ok: boolean; company?: string; confidence?: string; message: string; reason?: string }
-      const aiCompany = (data.company === 'TSMC' || data.company === 'MediaTek') ? data.company : null
+      const aiCompany = parseCompany(data.company)
       const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low') ? data.confidence : null
       employmentAiOutcomeRef.current = {
         passed: data.ok,
-        message: data.message,
+        message: sanitizeVerificationUserMessage(data.message),
         company: aiCompany,
         confidence: aiConf,
-        reason: data.reason ?? null,
+        reason: data.reason ? sanitizeVerificationUserMessage(data.reason) : null,
       }
     } catch {
       employmentAiOutcomeRef.current = {
@@ -262,7 +257,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           verificationKind: 'income',
           claimedIncomeTier: tier,
           claimedName: claimedName?.trim() || undefined,
-          claimedCompany: selectedCompany || undefined,
           docType: 'other',
         }),
       })
@@ -274,7 +268,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         passed: data.ok,
         company: null,
         confidence: aiConf,
-        reason: data.reason ?? data.message,
+        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
       }
       incomeAiOutcomeRef.current = {
         aiResult,
@@ -377,7 +371,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
 
   // Step index mapping differs by gender. Build helpers to check readiness.
   const photosReady  = photos.length >= PROFILE_PHOTO_MIN
-  const jobReady     = selectedCompany !== '' && proofs.length > 0
+  const jobReady     = proofs.length > 0
   // Income step is optional — advance even with nothing selected, but if the
   // user picks a tier they must also upload a doc.
   const incomeReady  = !selectedTier || (selectedTier !== null && incomeDoc !== null)
@@ -407,8 +401,8 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
         return waitForEmploymentApproval(setPhase)
       }
     }
-    if (!selectedCompany || proofs.length === 0 || !proofs[0].file) {
-      return { ok: false, error: '請選擇公司並上傳驗證文件。' }
+    if (proofs.length === 0 || !proofs[0].file) {
+      return { ok: false, error: '請上傳驗證文件。' }
     }
 
     const submissionCount = await getTodayVerificationSubmissionCount(userId)
@@ -433,7 +427,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
           reason: o.reason,
         }
         setAiResultData(aiForSubmit)
-        if (o.company) setSelectedCompany(o.company)
         if (o.passed) {
           setAiStatus('ok')
           setAiMessage(o.message)
@@ -446,6 +439,17 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
       setAiStatus('ok')
       setAiMessage('PDF 文件將由人工審核確認')
       aiForSubmit = null
+    }
+
+    const profile = await getProfile(userId)
+    const companyForSubmit = resolveEmploymentCompany(aiForSubmit?.company ?? null, profile?.company)
+    if (!companyForSubmit) {
+      return {
+        ok: false,
+        error: proofFile.type.startsWith('image/')
+          ? 'AI 無法判定任職公司，請確認文件含清楚的公司名稱後再試。'
+          : '請先上傳圖片格式文件以便 AI 判定任職公司；PDF 需待 AI 或人工辨識後才能送審。',
+      }
     }
 
     setPhase?.('正在上傳文件…')
@@ -461,7 +465,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     const docType: DocType = docTypeMap[proofs[0].type] ?? 'payslip'
     const submitResult = await submitVerificationDoc(
       userId,
-      selectedCompany,
+      companyForSubmit,
       docType,
       proofResult.path,
       aiForSubmit ?? undefined,
@@ -692,7 +696,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   <h2 className="text-xl font-bold text-slate-900">身份驗證文件</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  TsMedia 限台積電（TSMC）或聯發科（MediaTek）員工，請提供以下任一文件。
+                  請上傳任職證明文件，AI 會自動辨識並完成公司驗證。
                 </p>
               </>
             )}
@@ -759,30 +763,6 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                   onChange={(e) => addProof(e.target.files)}
                 />
 
-                {/* Company selection */}
-                <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
-                    任職公司
-                  </p>
-                  <div className="flex gap-3">
-                    {(['TSMC', 'MediaTek'] as const).map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setSelectedCompany(c)}
-                        className={cn(
-                          'flex-1 py-3.5 rounded-2xl text-sm font-bold border-2 transition-all flex flex-col items-center gap-1',
-                          selectedCompany === c
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-200 text-slate-500 bg-white',
-                        )}
-                      >
-                        <Cpu className="w-4 h-4" />
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Accepted documents */}
                 <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
@@ -809,20 +789,14 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 {proofs.length === 0 ? (
                   <button
                     onClick={() => clickFileInputWithGrace(proofInputRef.current)}
-                    disabled={selectedCompany === ''}
-                    className={cn(
-                      'w-full rounded-3xl p-6 flex flex-col items-center gap-3 transition-all',
-                      selectedCompany
-                        ? 'bg-white ring-1 ring-slate-100 shadow-sm hover:ring-slate-300'
-                        : 'bg-slate-50 ring-1 ring-slate-100 opacity-50 cursor-not-allowed',
-                    )}
+                    className="w-full rounded-3xl p-6 flex flex-col items-center gap-3 transition-all bg-white ring-1 ring-slate-100 shadow-sm hover:ring-slate-300"
                   >
                     <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
                       <Upload className="w-6 h-6 text-slate-400" />
                     </div>
                     <div className="text-center">
                       <p className="text-sm font-semibold text-slate-700">
-                        {selectedCompany ? `上傳 ${selectedCompany} 驗證文件` : '請先選擇公司'}
+                        上傳職業驗證文件
                       </p>
                       <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · 送出後會等待審核完成</p>
                     </div>
@@ -901,7 +875,7 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
                 <div className="flex items-start gap-2 px-1">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    非台積電或聯發科員工的申請將不予通過。審核時間約 1–3 個工作天。
+                    僅限頂尖企業正式員工。文件不符資格將不予通過；審核約 1–3 個工作天。
                   </p>
                 </div>
               </>

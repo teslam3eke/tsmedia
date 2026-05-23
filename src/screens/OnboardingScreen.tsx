@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, ChevronRight, Cpu, User, Briefcase, Coffee } from 'lucide-react'
+import { ChevronLeft, ChevronRight, User, Briefcase, Coffee } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const INTERESTS = [
@@ -13,7 +13,6 @@ const INTERESTS = [
 interface FormData {
   name: string
   age: string
-  company: 'TSMC' | 'MediaTek' | ''
   role: string
   department: string
   interests: string[]
@@ -24,14 +23,13 @@ interface Props {
   onSkip: () => void
 }
 
-const STEPS = ['基本資料', '公司資訊', '興趣標籤']
+const STEPS = ['基本資料', '職涯資訊', '興趣標籤']
 
 export default function OnboardingScreen({ onComplete, onSkip }: Props) {
   const [step, setStep] = useState(0)
   const [form, setForm] = useState<FormData>({
     name: '',
     age: '',
-    company: '',
     role: '',
     department: '',
     interests: [],
@@ -50,7 +48,7 @@ export default function OnboardingScreen({ onComplete, onSkip }: Props) {
 
   const canNext = () => {
     if (step === 0) return form.name.trim().length > 0 && form.age.trim().length > 0
-    if (step === 1) return form.company !== '' && form.role.trim().length > 0
+    if (step === 1) return form.role.trim().length > 0
     return true
   }
 
@@ -167,26 +165,6 @@ export default function OnboardingScreen({ onComplete, onSkip }: Props) {
 
             {step === 1 && (
               <>
-                <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3 block">任職公司</label>
-                  <div className="flex gap-3">
-                    {(['TSMC', 'MediaTek'] as const).map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => update('company', c)}
-                        className={cn(
-                          'flex-1 py-3 rounded-xl text-sm font-semibold border-2 transition-all flex items-center justify-center gap-1.5',
-                          form.company === c
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-200 text-slate-500',
-                        )}
-                      >
-                        <Cpu className="w-3.5 h-3.5" />
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </div>
                 <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
                   <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">職稱</label>
                   <input

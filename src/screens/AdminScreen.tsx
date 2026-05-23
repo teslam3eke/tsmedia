@@ -6,6 +6,7 @@ import {
   Cpu, Eye, RefreshCw, AlertCircle, Building2, Gem, Flag, Ban,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { adminVerificationCompanyLabel, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
 import {
   getAllVerifications, approveVerificationDoc,
   rejectVerificationDoc, getDocSignedUrl, getAdminProfileReports,
@@ -366,8 +367,8 @@ function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
   const needsManualReview = isPending && doc.review_mode === 'manual' && doc.ai_passed === false
   const aiTone = doc.ai_passed ? 'pass' : needsManualReview ? 'review' : 'fail'
   const aiReasonLines = [
-    doc.ai_reason && `AI 判斷：${doc.ai_reason}`,
-    doc.manual_review_reason && `人工覆核原因：${doc.manual_review_reason}`,
+    doc.ai_reason && `AI 判斷：${sanitizeVerificationUserMessage(doc.ai_reason)}`,
+    doc.manual_review_reason && `人工覆核原因：${sanitizeVerificationUserMessage(doc.manual_review_reason)}`,
     doc.ai_confidence && `AI 信心度：${CONFIDENCE_LABEL[doc.ai_confidence]}`,
     doc.doc_type && `文件類型：${doc.doc_type === 'employee_id' ? '員工證 / 識別證' : doc.doc_type === 'tax_return' ? '扣繳憑單' : doc.doc_type === 'payslip' ? '薪資單' : doc.doc_type}`,
     needsManualReview && '處理方式：此案件不會自動通過，需要管理員人工確認後核准或拒絕。',
@@ -400,7 +401,7 @@ function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
               </>
             ) : (
               <><Building2 className="w-3 h-3 text-slate-400" />
-                <span className="text-xs text-slate-500">{KIND_LABEL[doc.verification_kind]}・{doc.company ?? '未知公司'}</span>
+                <span className="text-xs text-slate-500">{KIND_LABEL[doc.verification_kind]}・{adminVerificationCompanyLabel(doc.company)}</span>
               </>
             )}
           </div>
@@ -436,7 +437,7 @@ function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
               aiTone === 'pass' ? 'text-emerald-700' : aiTone === 'review' ? 'text-amber-700' : 'text-red-600',
             )}>
               AI 初審：{doc.ai_passed ? `✓ 通過` : needsManualReview ? '需人工覆核' : '✗ 未通過'}
-              {doc.ai_company && ` · ${doc.ai_company}`}
+              {doc.ai_company && ` · ${adminVerificationCompanyLabel(doc.ai_company)}`}
               {doc.ai_confidence && ` · ${CONFIDENCE_LABEL[doc.ai_confidence]}`}
             </p>
             {aiReasonLines.length > 0 && (

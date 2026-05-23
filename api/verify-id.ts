@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { sanitizeVerificationUserMessage } from './_utils/companySanitize.js'
 
 // POST /api/verify-id
 // Body: { imageBase64: string; verificationKind?: 'employment' | 'income'; claimedIncomeTier?: string; claimedName?: string; claimedCompany?: string; docType?: string }
@@ -250,32 +251,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : employmentVendorDoc
           ? '文件疑似廠商、承攬商、外包、駐廠或訪客類證件，不可作為正式員工認證。'
           : employerMismatch
-            ? `扣繳單位/雇主不是台積電或聯發科。辨識到的扣繳單位/雇主：${parsed.detectedEmployer ?? '未辨識'}`
+            ? `扣繳單位/雇主不符合頂尖企業限定資格。辨識到的扣繳單位/雇主：${parsed.detectedEmployer ?? '未辨識'}`
             : employerEvidenceMissing
-              ? `無法從原文片段確認扣繳單位/雇主為台積電或聯發科。原文片段：${parsed.employerEvidenceQuote ?? '未辨識'}`
+              ? `無法從原文片段確認符合頂尖企業限定資格。原文片段：${parsed.employerEvidenceQuote ?? '未辨識'}`
               : incomeNameMismatch
                 ? `文件姓名與使用者姓名不一致或無法確認。使用者姓名：${normalizedClaimedName}；文件姓名：${parsed.detectedName ?? '未辨識'}`
                 : undefined
+      const rawReason = strictReason ?? parsed.reason
+      const rawMessage = strictReason || (isLowConfidenceEmployment ? '員工身份、姓名或正式員工證特徵不足，需人工確認' : parsed.reason) || (verificationKind === 'income'
+        ? '未能辨識為有效收入證明，請確認圖片清晰度並重新上傳'
+        : '未能辨識為符合頂尖企業限定的正式員工文件，請確認圖片清晰度並重新上傳')
       return res.status(200).json({
         ok: false,
         company: null,
-        reason: strictReason ?? parsed.reason,
+        reason: sanitizeVerificationUserMessage(rawReason),
         confidence: parsed.confidence,
-        message: strictReason || (isLowConfidenceEmployment ? '員工身份、姓名或正式員工證特徵不足，需人工確認' : parsed.reason) || (verificationKind === 'income'
-          ? '未能辨識為有效收入證明，請確認圖片清晰度並重新上傳'
-          : '未能辨識為台積電或聯發科員工證，請確認圖片清晰度並重新上傳'),
+        message: sanitizeVerificationUserMessage(rawMessage),
       })
     }
 
+    const successReason = sanitizeVerificationUserMessage(parsed.reason)
     return res.status(200).json({
       ok: true,
       company: parsed.company,
       confidence: parsed.confidence,
-      reason: parsed.reason,
+      reason: successReason,
       suggestedIncomeTier: parsed.suggestedIncomeTier ?? null,
       message: verificationKind === 'income'
-        ? `✓ 已辨識為有效收入證明（${parsed.reason}）`
-        : `✓ 已辨識為 ${parsed.company} 員工證（${parsed.reason}）`,
+        ? `✓ 已辨識為有效收入證明（${successReason}）`
+        : `✓ 已辨識為符合頂尖企業限定的正式員工文件（${successReason}）`,
     })
   } catch (err) {
     console.error('[verify-id] Unexpected error:', err)

@@ -10,7 +10,7 @@ const FEATURES = [
   {
     icon: ShieldCheck,
     title: '嚴格身份審核',
-    desc: '僅限台積電或聯發科員工，公司文件人工核驗。',
+    desc: '頂尖企業限定，職業文件人工核驗。',
     accent: '#6366f1',
   },
   {
@@ -102,7 +102,7 @@ export default function LandingScreen({ onStart, onSkip }: Props) {
           className="relative z-10"
         >
           <p className="text-white/38 text-[11px] font-semibold tracking-[0.22em] uppercase mb-3">
-            台積電 × 聯發科・菁英專屬
+            頂尖企業限定・菁英專屬
           </p>
           <h1
             className="text-white font-medium leading-[1.04]"

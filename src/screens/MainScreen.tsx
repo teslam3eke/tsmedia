@@ -11,6 +11,14 @@ import {
   FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Users, Star,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import {
+  companyBadgeLabel,
+  formatProfileWorkLine,
+  isVerifiedCompany,
+  parseCompany,
+  resolveEmploymentCompany,
+  sanitizeVerificationUserMessage,
+} from '@/lib/companyDisplay'
 import { signOut } from '@/lib/auth'
 import {
   wakeSupabaseAuthFromBackground,
@@ -43,7 +51,7 @@ import {
 import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import SubscriptionScreen from '@/screens/SubscriptionScreen'
-import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, Company, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
+import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
@@ -514,19 +522,11 @@ function formatMatchListTime(ts: number): string {
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
 function CompanyBadge({ company }: { company: string }) {
-  const isTsmc = company === 'TSMC'
-  const isMtk = company === 'MediaTek'
+  if (!isVerifiedCompany(company)) return null
   return (
-    <span className={cn(
-      'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide',
-      isTsmc
-        ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200 uppercase'
-        : isMtk
-          ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200 uppercase'
-          : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
-    )}>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
       <Cpu className="w-2.5 h-2.5" />
-      {company}
+      {companyBadgeLabel(company)}
     </span>
   )
 }
@@ -2854,12 +2854,11 @@ function MatchesTab({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
                     <span className="font-semibold text-slate-900 text-sm">{match.name}</span>
-                    <span className={cn(
-                      'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
-                      match.company === 'TSMC' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600',
-                    )}>
-                      {match.company}
-                    </span>
+                    {isVerifiedCompany(match.company) && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                        {companyBadgeLabel(match.company)}
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">{match.role}</p>
                 </div>
@@ -4063,7 +4062,7 @@ function EditProfileScreen({
         company: null,
         confidence,
         suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
-        reason: data.reason ?? data.message,
+        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
       }
     } finally {
       window.clearTimeout(timeout)
@@ -4551,7 +4550,6 @@ function CompanyVerifyScreen({
   const isApproved  = profile.verification_status === 'approved'
   const isSubmitted = profile.verification_status === 'submitted'
 
-  const [selectedCompany, setSelectedCompany] = useState<'TSMC' | 'MediaTek' | ''>('TSMC')
   const [selectedDocType, setSelectedDocType]   = useState<'employee_id' | 'tax_return' | 'payslip' | ''>('')
   const [docFile, setDocFile]   = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -4656,7 +4654,6 @@ function CompanyVerifyScreen({
           imageBase64,
           verificationKind: 'employment',
           claimedName: profile.name ?? undefined,
-          claimedCompany: selectedCompany || undefined,
           docType: selectedDocType || undefined,
         }),
         signal: controller.signal,
@@ -4670,7 +4667,7 @@ function CompanyVerifyScreen({
         reason?: string
       }
 
-      const aiCompany: Company | null = data.company === 'TSMC' || data.company === 'MediaTek' ? data.company : null
+      const aiCompany = parseCompany(data.company)
       const aiConfidence: AiConfidence | null = data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low'
         ? data.confidence
         : null
@@ -4680,7 +4677,7 @@ function CompanyVerifyScreen({
         company: aiCompany,
         confidence: aiConfidence,
         suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
-        reason: data.reason ?? data.message,
+        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
       }
     } finally {
       window.clearTimeout(timeout)
@@ -4709,7 +4706,7 @@ function CompanyVerifyScreen({
           verificationKind: 'income',
           claimedIncomeTier: tier,
           claimedName: profile.name ?? undefined,
-          claimedCompany: selectedCompany || profile.company || undefined,
+          claimedCompany: parseCompany(profile.company) ?? undefined,
           docType: selectedDocType || undefined,
         }),
         signal: controller.signal,
@@ -4729,7 +4726,7 @@ function CompanyVerifyScreen({
         company: null,
         confidence: aiConfidence,
         suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
-        reason: data.reason ?? data.message,
+        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
       }
     } finally {
       window.clearTimeout(timeout)
@@ -4737,7 +4734,7 @@ function CompanyVerifyScreen({
   }
 
   const submit = async () => {
-    if (!selectedCompany || !selectedDocType || !docFile) return
+    if (!selectedDocType || !docFile) return
     setSubmitError('')
     setAiMessage('')
     setSubmitting(true)
@@ -4748,10 +4745,9 @@ function CompanyVerifyScreen({
       return
     }
 
-    const optimisticCompany = selectedCompany
     companyAiFinalizePendingRef.current = false
     setSubmitted(true)
-    onVerified({ ...profile, company: optimisticCompany, verification_status: 'submitted' })
+    onVerified({ ...profile, verification_status: 'submitted' })
 
     /** 送出後立即顯示 5 秒倒數（AI 辨識與上傳在背景進行） */
     const isImageDoc = docFile.type.startsWith('image/')
@@ -4794,7 +4790,16 @@ function CompanyVerifyScreen({
       setCompanyReviewCountdown(0)
     }
 
-    if (aiResult.company) setSelectedCompany(aiResult.company)
+    const companyForSubmit = resolveEmploymentCompany(aiResult.company, profile.company)
+    if (!companyForSubmit) {
+      setSubmitError('AI 無法判定任職公司，請上傳含清楚公司名稱的圖片文件後再試。')
+      companyAiFinalizePendingRef.current = false
+      setSubmitted(false)
+      setCompanyReviewCountdown(0)
+      setSubmitting(false)
+      setAiMessage('')
+      return
+    }
 
     const res = await uploadProofDoc(userId, docFile)
     if (!res.ok) {
@@ -4809,7 +4814,7 @@ function CompanyVerifyScreen({
 
     const docResult = await submitVerificationDoc(
       userId,
-      aiResult.company ?? selectedCompany,
+      companyForSubmit,
       selectedDocType,
       res.path,
       aiResult,
@@ -4861,7 +4866,7 @@ function CompanyVerifyScreen({
       )
     }
 
-    onVerified({ ...profile, company: aiResult.company ?? selectedCompany, verification_status: 'submitted' })
+    onVerified({ ...profile, company: companyForSubmit, verification_status: 'submitted' })
     setSubmitting(false)
     if (reviewMode === 'ai_auto') {
       companyAiFinalizePendingRef.current = true
@@ -4899,7 +4904,7 @@ function CompanyVerifyScreen({
             <ShieldCheck className="w-6 h-6 text-emerald-500 flex-shrink-0" />
             <div>
               <p className="text-sm font-bold text-emerald-800">公司認證已通過</p>
-              <p className="text-xs text-emerald-600 mt-0.5">你的 {profile.company} 員工身份已驗證</p>
+              <p className="text-xs text-emerald-600 mt-0.5">你的員工身份已驗證</p>
             </div>
           </div>
         ) : isSubmitted || submitted ? (
@@ -4916,7 +4921,7 @@ function CompanyVerifyScreen({
           <div className="bg-blue-50 rounded-2xl p-4 ring-1 ring-blue-100">
             <p className="text-sm font-bold text-blue-800">上傳公司驗證文件</p>
             <p className="text-xs text-blue-600 mt-1 leading-relaxed">
-              上傳員工識別證、扣繳憑單或薪資單。AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
+              上傳員工識別證、扣繳憑單或薪資單；AI 會自動辨識任職公司。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
             </p>
           </div>
         )}
@@ -4924,27 +4929,6 @@ function CompanyVerifyScreen({
         {/* Upload form — hidden when already approved/submitted */}
         {!isApproved && !isSubmitted && !submitted && (
           <div className="bg-white rounded-2xl p-4 ring-1 ring-slate-100 shadow-sm space-y-4">
-            {/* Company select */}
-            <div>
-              <p className="text-xs font-semibold text-slate-600 mb-2">選擇公司</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(['TSMC', 'MediaTek'] as const).map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setSelectedCompany(c)}
-                    className={cn(
-                      'py-3 rounded-xl text-sm font-bold ring-1 transition-all',
-                      selectedCompany === c
-                        ? 'bg-slate-900 text-white ring-slate-900'
-                        : 'bg-white text-slate-700 ring-slate-200',
-                    )}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Doc type select */}
             <div>
               <p className="text-xs font-semibold text-slate-600 mb-2">文件類型</p>
@@ -5046,10 +5030,10 @@ function CompanyVerifyScreen({
 
             <button
               onClick={submit}
-              disabled={!selectedCompany || !selectedDocType || !docFile || submitting}
+              disabled={!selectedDocType || !docFile || submitting}
               className={cn(
                 'w-full py-3.5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all',
-                selectedCompany && selectedDocType && docFile && !submitting
+                selectedDocType && docFile && !submitting
                   ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
                   : 'bg-slate-100 text-slate-300',
               )}
@@ -5151,7 +5135,11 @@ function AppNotificationAlertPortal({
             <p id="app-notif-alert-title" className={cn('text-sm font-bold leading-snug', meta.titleClass)}>
               {notification.title}
             </p>
-            <p className={cn('mt-2 text-xs leading-relaxed', meta.bodyClass)}>{notification.body}</p>
+            <p className={cn('mt-2 text-xs leading-relaxed', meta.bodyClass)}>
+              {(notification.kind === 'verification_approved' || notification.kind === 'verification_rejected')
+                ? sanitizeVerificationUserMessage(notification.body)
+                : notification.body}
+            </p>
           </div>
         </div>
         <button
@@ -6332,12 +6320,7 @@ export default function MainScreen({
         const p = await getProfile(peerId)
         if (liveMatchThreadsLoadGenRef.current !== gen) return
         const display = p?.nickname?.trim() || p?.name?.trim() || '配對對象'
-        const subtitle =
-          p?.company && p?.job_title
-            ? `${p.company} · ${p.job_title}`
-            : p?.company
-              ? String(p.company)
-              : p?.job_title ?? '新配對'
+        const subtitle = formatProfileWorkLine(p?.company, p?.job_title)
         const initials = display.charAt(0) || '?'
         const rawUrls = (p?.photo_urls ?? []).filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)
         let photoUrl: string | undefined
