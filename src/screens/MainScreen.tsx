@@ -6,8 +6,7 @@ import {
   Sparkles, MapPin, CalendarDays, Flame,
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
-  Camera,
-  Plus, Smile, BellRing, AlertCircle, Gem,
+  BellRing, AlertCircle, Gem,
   FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Users, Star,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -42,7 +41,7 @@ import {
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
-  formatChatMessageFromRow, mergeUniqueChatMessages,
+  formatChatMessageFromRow, mergeUniqueChatMessages, patchChatMessageReadAt,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
   instantMatchLeaveQueueKeepalive,
@@ -2729,6 +2728,20 @@ function NotifEnablePrompt({
 
 // ─── Matches Tab ─────────────────────────────────────────────────────────────
 
+/** LINE 式未讀數角標（99+ 上限） */
+function MatchListUnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null
+  const label = count > 99 ? '99+' : String(count)
+  return (
+    <span
+      className="min-w-[20px] h-5 px-1.5 rounded-full bg-[#06C755] text-white text-[11px] font-bold leading-none flex items-center justify-center shrink-0 tabular-nums"
+      aria-label={`${count} 則未讀`}
+    >
+      {label}
+    </span>
+  )
+}
+
 // ── Shared Person type used by the "view partner profile" modal ──────────────
 interface PersonSummary {
   id: number
@@ -2824,7 +2837,7 @@ function MatchesTab({
                   animate={{ opacity: 1, y: 0 }}
                   className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3">
                     <button
                       type="button"
                       onClick={openPerson}
@@ -2835,18 +2848,24 @@ function MatchesTab({
                       {conv.initials}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5 min-w-0">
+                      <div className="flex items-baseline justify-between gap-2 mb-0.5">
                         <span className="font-semibold text-slate-900 text-sm truncate">{conv.name}</span>
-                        {unreadN > 0 && (
-                          <span
-                            className="h-2 w-2 shrink-0 rounded-full bg-rose-500 shadow-sm shadow-rose-500/40"
-                            aria-label={`${unreadN} 則未讀`}
-                          />
-                        )}
+                        {t ? (
+                          <span className="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap">{t}</span>
+                        ) : null}
                       </div>
-                      <p className="text-[11px] text-slate-500 truncate leading-snug">{previewLine}</p>
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <p
+                          className={cn(
+                            'text-[11px] truncate leading-snug flex-1 min-w-0',
+                            unreadN > 0 ? 'text-slate-900 font-semibold' : 'text-slate-500',
+                          )}
+                        >
+                          {previewLine}
+                        </p>
+                        <MatchListUnreadBadge count={unreadN} />
+                      </div>
                     </div>
-                    <span className="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap">{t}</span>
                   </div>
                   <div className="mt-3 flex gap-2">
                     <button
@@ -2870,14 +2889,18 @@ function MatchesTab({
             })
           )
         ) : (
-          MATCHES.map((match) => (
+          MATCHES.map((match) => {
+            const meta = MATCH_META[match.id]
+            const previewLine = meta?.lastMessage?.trim() ? meta.lastMessage : '尚無對話'
+            const unreadN = meta?.unread ?? match.unread ?? 0
+            return (
             <motion.div
               key={match.id}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100"
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => onOpenPerson({
@@ -2892,17 +2915,29 @@ function MatchesTab({
                   {match.initials}
                 </button>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-semibold text-slate-900 text-sm">{match.name}</span>
-                    {isVerifiedCompany(match.company) && (
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
-                        {companyBadgeLabel(match.company)}
-                      </span>
-                    )}
+                  <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-semibold text-slate-900 text-sm truncate">{match.name}</span>
+                      {isVerifiedCompany(match.company) && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 shrink-0">
+                          {companyBadgeLabel(match.company)}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap">{match.time}</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 truncate">{match.role}</p>
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <p
+                      className={cn(
+                        'text-[11px] truncate leading-snug flex-1 min-w-0',
+                        unreadN > 0 ? 'text-slate-900 font-semibold' : 'text-slate-400',
+                      )}
+                    >
+                      {previewLine}
+                    </p>
+                    <MatchListUnreadBadge count={unreadN} />
+                  </div>
                 </div>
-                <span className="text-[10px] text-slate-400 flex-shrink-0">{match.time}</span>
               </div>
               <div className="mt-3 flex gap-2">
                 <button
@@ -2919,19 +2954,15 @@ function MatchesTab({
                 <button
                   type="button"
                   onClick={() => onStartChat(match.id)}
-                  className="flex-[1.4] py-2 rounded-xl text-xs font-bold bg-slate-900 text-white flex items-center justify-center gap-1.5 active:bg-slate-800 transition-colors relative"
+                  className="flex-[1.4] py-2 rounded-xl text-xs font-bold bg-slate-900 text-white flex items-center justify-center gap-1.5 active:bg-slate-800 transition-colors"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
                   開始聊天
-                  {match.unread > 0 && (
-                    <span className="ml-1 min-w-[16px] h-[16px] px-1 bg-white text-slate-900 rounded-full text-[9px] font-black flex items-center justify-center">
-                      {match.unread}
-                    </span>
-                  )}
                 </button>
               </div>
             </motion.div>
-          ))
+            )
+          })
         )}
       </div>
     </div>
@@ -3341,12 +3372,16 @@ function ChatRoomView({
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [recentSendTimes, setRecentSendTimes] = useState<number[]>([])
   const [sendWarning, setSendWarning] = useState('')
+  const [sending, setSending] = useState(false)
   const [manualUnlockedTiles, setManualUnlockedTiles] = useState<number[]>([])
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false)
   /** Pushes composer + scroll area above the on-screen keyboard — chat shell only. */
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLInputElement>(null)
+  const sendInFlightRef = useRef(false)
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
   /** 避免因 sub-pixel vv 數值無限 setState → 捲動 → visualViewport 抖動／地震 */
   const lastInsetCommitRef = useRef<number | null>(null)
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
@@ -3401,17 +3436,23 @@ function ChatRoomView({
 
   useEffect(() => {
     if (!isLive || !conversation.matchId || !currentUserId) return
-    return subscribeToMatchMessages(conversation.matchId, (row) => {
-      const msg = formatChatMessageFromRow(row, currentUserId)
-      setMessages((prev) => mergeUniqueChatMessages(prev, msg))
-      const mid = conversation.matchId
-      if (!mid || !currentUserId) return
-      if (row.sender_id !== currentUserId) {
-        void markMatchIncomingMessagesRead(mid).then(() => {
-          onMatchIncomingMarkedRead?.()
-        })
-      }
-    })
+    return subscribeToMatchMessages(
+      conversation.matchId,
+      (row) => {
+        const msg = formatChatMessageFromRow(row, currentUserId)
+        setMessages((prev) => mergeUniqueChatMessages(prev, msg))
+        const mid = conversation.matchId
+        if (!mid || !currentUserId) return
+        if (row.sender_id !== currentUserId) {
+          void markMatchIncomingMessagesRead(mid).then(() => {
+            onMatchIncomingMarkedRead?.()
+          })
+        }
+      },
+      (row) => {
+        setMessages((prev) => patchChatMessageReadAt(prev, row, currentUserId))
+      },
+    )
   }, [
     isLive,
     conversation.matchId,
@@ -3420,6 +3461,32 @@ function ChatRoomView({
     physicalChannelResubscribeNonce,
     onMatchIncomingMarkedRead,
   ])
+
+  /** Realtime UPDATE 偶發漏接時（PWA 背景／WS 半開），補抓本人訊息 read_at。 */
+  useEffect(() => {
+    if (!isLive || !conversation.matchId || !currentUserId) return
+    const mid = conversation.matchId
+    const uid = currentUserId
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      const prev = messagesRef.current
+      if (!prev.some((m) => m.from === 'me' && !m.read)) return
+      void getMatchMessages(mid).then((rows) => {
+        if (!rows) return
+        setMessages((cur) => {
+          let next = cur
+          for (const row of rows) {
+            if (!row.read_at || row.sender_id !== uid) continue
+            const patched = patchChatMessageReadAt(next, row, uid)
+            if (patched !== next) next = patched
+          }
+          return next
+        })
+      })
+    }
+    const interval = window.setInterval(tick, 3000)
+    return () => clearInterval(interval)
+  }, [isLive, conversation.matchId, currentUserId])
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
@@ -3494,7 +3561,8 @@ function ChatRoomView({
   }, [])
 
   const send = async () => {
-    if (!input.trim()) return
+    const text = input.trim()
+    if (!text || sendInFlightRef.current) return
     const nowMs = Date.now()
     const recent = recentSendTimes.filter((time) => nowMs - time < 60_000)
     // 與 DB `send_match_message` 每分鐘上限一致，避免只擋一般聊天
@@ -3503,42 +3571,49 @@ function ChatRoomView({
       return
     }
 
-    if (isLive && conversation.matchId && currentUserId) {
-      const res = await sendMatchMessage(conversation.matchId, input.trim())
-      if (!res.ok) {
-        setSendWarning(res.error ?? '無法送出訊息')
+    sendInFlightRef.current = true
+    setSending(true)
+    setInput('')
+    setSendWarning('')
+
+    try {
+      if (isLive && conversation.matchId && currentUserId) {
+        const res = await sendMatchMessage(conversation.matchId, text)
+        if (!res.ok) {
+          setInput(text)
+          setSendWarning(res.error ?? '無法送出訊息')
+          return
+        }
+        if (res.message) {
+          const msg = formatChatMessageFromRow(res.message, currentUserId)
+          setMessages((prev) => mergeUniqueChatMessages(prev, msg))
+        }
+        setRecentSendTimes([...recent, nowMs])
+        onLiveMatchOutboundMessage?.()
         return
       }
-      if (res.message) {
-        const msg = formatChatMessageFromRow(res.message, currentUserId)
-        setMessages((prev) => mergeUniqueChatMessages(prev, msg))
-      }
-      setRecentSendTimes([...recent, nowMs])
-      setSendWarning('')
-      setInput('')
-      onLiveMatchOutboundMessage?.()
-      return
-    }
 
-    const now = new Date()
-    const hh = String(now.getHours()).padStart(2, '0')
-    const mm = String(now.getMinutes()).padStart(2, '0')
-    const iso = now.toISOString()
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `local-${nowMs}`,
-        text: input.trim(),
-        from: 'me',
-        time: `${hh}:${mm}`,
-        date: '今天',
-        read: false,
-        createdAt: iso,
-      },
-    ])
-    setRecentSendTimes([...recent, nowMs])
-    setSendWarning('')
-    setInput('')
+      const now = new Date()
+      const hh = String(now.getHours()).padStart(2, '0')
+      const mm = String(now.getMinutes()).padStart(2, '0')
+      const iso = now.toISOString()
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `local-${nowMs}`,
+          text,
+          from: 'me',
+          time: `${hh}:${mm}`,
+          date: '今天',
+          read: false,
+          createdAt: iso,
+        },
+      ])
+      setRecentSendTimes([...recent, nowMs])
+    } finally {
+      sendInFlightRef.current = false
+      setSending(false)
+    }
   }
 
   const simulateTheirReply = () => {
@@ -3727,12 +3802,23 @@ function ChatRoomView({
             <div key={`grp-${bi}`} className={cn('flex items-end gap-2', isMe ? 'justify-end' : 'justify-start')}>
               {/* Avatar column — only on their side, only on the LAST bubble of the group (bottom-aligned) */}
               {!isMe && (
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-[12px] flex-shrink-0"
-                  style={{ background: `linear-gradient(135deg, ${conversation.from}, ${conversation.to})` }}
-                >
-                  {conversation.initials}
-                </div>
+                conversation.photoUrl ? (
+                  <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80">
+                    <img
+                      src={conversation.photoUrl}
+                      alt=""
+                      className="h-full w-full scale-110 object-cover blur-[3px]"
+                      draggable={false}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
+                    style={{ background: `linear-gradient(135deg, ${conversation.from}, ${conversation.to})` }}
+                  >
+                    {conversation.initials}
+                  </div>
+                )
               )}
 
               <div className={cn('flex flex-col gap-1 max-w-[72%]', isMe ? 'items-end' : 'items-start')}>
@@ -3788,15 +3874,12 @@ function ChatRoomView({
             {sendWarning}
           </div>
         )}
-        <button className="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 active:bg-slate-100 flex-shrink-0">
-          <Plus className="w-5 h-5" />
-        </button>
-        <div className="flex-1 flex items-center bg-slate-100 rounded-full pl-4 pr-1 min-h-[38px]">
+        <div className="flex flex-1 items-center min-h-[38px] rounded-full bg-slate-100 px-4">
           <input
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); send() } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void send() } }}
             onFocus={() => {
               /** 交由 focusin + visualViewport resize 統一推算；此處只做鍵盤動畫後一次補捲避免與 vv 對打 */
               window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 280)
@@ -3809,24 +3892,20 @@ function ChatRoomView({
             style={{ fontSize: '16px' }}
             className="flex-1 bg-transparent outline-none text-slate-900 placeholder:text-slate-400 py-1"
           />
-          <button className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 flex-shrink-0">
-            <Smile className="w-[18px] h-[18px]" />
-          </button>
         </div>
         {input.trim() ? (
           <motion.button
+            type="button"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={send}
-            whileTap={{ scale: 0.9 }}
-            className="w-9 h-9 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0"
+            onClick={() => void send()}
+            disabled={sending}
+            whileTap={{ scale: sending ? 1 : 0.9 }}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 disabled:opacity-45"
+            aria-label="送出訊息"
           >
-            <Send className="w-4 h-4 text-white" />
+            <Send className="h-4 w-4 text-white" />
           </motion.button>
-        ) : (
-          <button className="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 active:bg-slate-100 flex-shrink-0">
-            <Camera className="w-5 h-5" />
-          </button>
-        )}
+        ) : null}
       </div>
       <AnimatePresence>
         {reportMessage && (
@@ -6613,7 +6692,10 @@ export default function MainScreen({
             subtitle: '繼續聊天累積進度',
           })
         }
-        onBack={() => setMatchesChatConversation(null)}
+        onBack={() => {
+          setMatchesChatConversation(null)
+          scheduleMatchTabUnreadRefresh()
+        }}
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         onLiveMatchOutboundMessage={scheduleMatchTabUnreadRefresh}

@@ -354,6 +354,7 @@ export default function InstantMatchTab({
   const [decideBusy, setDecideBusy] = useState(false)
   /** 等候 → in_session：全螢幕模糊照片過場，結束後才顯示聊天 UI */
   const [showMatchIntro, setShowMatchIntro] = useState(false)
+  const [sendBusy, setSendBusy] = useState(false)
 
   const instantInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -376,6 +377,7 @@ export default function InstantMatchTab({
   const assumeEnqueuePollIntentRef = useRef(assumeEnqueuePollIntent)
   assumeEnqueuePollIntentRef.current = assumeEnqueuePollIntent
   const prevPollStatusRef = useRef<InstantMatchPollResult['status'] | null>(null)
+  const sendInFlightRef = useRef(false)
   const introSeenSessionIdsRef = useRef<Set<string>>(new Set())
   const chainInstantMatchPoll = useCallback((enqueue: boolean): Promise<InstantMatchPollResponse> => {
     const next = pollChainTailRef.current.then(() => instantMatchPoll({ enqueue }))
@@ -443,11 +445,33 @@ export default function InstantMatchTab({
     const prev = prevPollStatusRef.current
     if (snapshot?.status === 'in_session') {
       const sid = snapshot.session_id
-      const fromWaiting = prev === 'waiting'
-      if (fromWaiting && !introSeenSessionIdsRef.current.has(sid)) {
+      const peerId = snapshot.peer_user_id
+      const enteringSession = prev !== 'in_session'
+      if (enteringSession && !introSeenSessionIdsRef.current.has(sid)) {
         introSeenSessionIdsRef.current.add(sid)
         persistIntroSeenToStorage(userId, introSeenSessionIdsRef.current)
-        setShowMatchIntro(true)
+        let cancelled = false
+        void (async () => {
+          if (peerId) {
+            const p = await getProfile(peerId)
+            if (!cancelled && p) {
+              setPeer(p)
+              const raw = (p.photo_urls ?? []).filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)
+              if (raw.length > 0) {
+                const urls = await resolvePhotoUrls(raw)
+                if (!cancelled) {
+                  const cleaned = urls.filter(Boolean)
+                  if (cleaned.length > 0) setResolvedPeerPhotoUrls(cleaned)
+                }
+              }
+            }
+          }
+          if (!cancelled) setShowMatchIntro(true)
+        })()
+        prevPollStatusRef.current = status
+        return () => {
+          cancelled = true
+        }
       }
     } else {
       setShowMatchIntro(false)
@@ -726,15 +750,25 @@ export default function InstantMatchTab({
 
   const handleSend = async () => {
     const t = input.trim()
-    if (!t || !sessionId || !inSession || inSession.phase !== 'chat') return
+    if (!t || !sessionId || !inSession || inSession.phase !== 'chat' || sendInFlightRef.current) return
+    sendInFlightRef.current = true
+    setSendBusy(true)
     setInput('')
-    const res = await sendInstantSessionMessage(sessionId, t)
-    if (!res.ok) {
-      setPollError(res.error ?? '送出失敗')
-      return
+    try {
+      const res = await sendInstantSessionMessage(sessionId, t)
+      if (!res.ok) {
+        setInput(t)
+        setPollError(res.error ?? '送出失敗')
+        return
+      }
+      await loadMsgs(sessionId)
+    } finally {
+      sendInFlightRef.current = false
+      setSendBusy(false)
     }
-    await loadMsgs(sessionId)
   }
+
+  const peerBlurPhotoUrl = resolvedPeerPhotoUrls[0] ?? null
 
   const confirmLeaveInstantChat = async () => {
     const sid = sessionId
@@ -988,8 +1022,28 @@ export default function InstantMatchTab({
               key={m.id}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              className={cn('flex', m.fromMe ? 'justify-end' : 'justify-start')}
+              className={cn('flex items-end gap-2', m.fromMe ? 'justify-end' : 'justify-start')}
             >
+              {!m.fromMe &&
+                (peerBlurPhotoUrl ? (
+                  <div className="h-7 w-7 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80">
+                    <img
+                      src={peerBlurPhotoUrl}
+                      alt=""
+                      className="h-full w-full scale-110 object-cover blur-[3px]"
+                      draggable={false}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                    style={{
+                      background: `linear-gradient(135deg, ${puzzleConversation?.from ?? '#64748b'}, ${puzzleConversation?.to ?? '#475569'})`,
+                    }}
+                  >
+                    {puzzleConversation?.initials ?? '?'}
+                  </div>
+                ))}
               <div
                 className={cn(
                   'max-w-[72%] rounded-2xl px-3.5 py-2 text-[14px] leading-[1.45] whitespace-pre-wrap break-words',
@@ -1035,7 +1089,7 @@ export default function InstantMatchTab({
           />
           <button
             type="button"
-            disabled={sess.phase !== 'chat'}
+            disabled={sess.phase !== 'chat' || sendBusy}
             onClick={() => void handleSend()}
             className={cn(
               'flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-35',

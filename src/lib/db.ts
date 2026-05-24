@@ -1460,6 +1460,21 @@ export function mergeUniqueChatMessages<T extends { id: string; createdAt?: stri
   return [...prev, incoming].sort(sortChatMessagesByTime)
 }
 
+/** Realtime UPDATE：對方標已讀後 patch 本人已送訊息的 read 旗標。 */
+export function patchChatMessageReadAt<
+  T extends { id: string; from: 'me' | 'them'; read?: boolean },
+>(prev: T[], row: Pick<MessageRow, 'id' | 'read_at' | 'sender_id'>, myUserId: string): T[] {
+  if (!row.read_at) return prev
+  const idx = prev.findIndex((m) => m.id === row.id)
+  if (idx === -1) return prev
+  const cur = prev[idx]
+  if (cur.from !== 'me' || cur.read) return prev
+  if (row.sender_id != null && row.sender_id !== myUserId) return prev
+  const next = [...prev]
+  next[idx] = { ...cur, read: true }
+  return next
+}
+
 /**
  * Subscribe to new rows in `public.messages` for one match. Requires
  * `messages` to be in publication `supabase_realtime` (see migration 012).
@@ -1467,9 +1482,10 @@ export function mergeUniqueChatMessages<T extends { id: string; createdAt?: stri
 export function subscribeToMatchMessages(
   matchId: string,
   onInsert: (row: MessageRow) => void,
+  onUpdate?: (row: MessageRow) => void,
 ): () => void {
-  return subscribePostgresChannelWithBackoff('messages', () =>
-    supabase.channel(`match-messages:${matchId}`).on(
+  return subscribePostgresChannelWithBackoff('messages', () => {
+    let ch = supabase.channel(`match-messages:${matchId}`).on(
       'postgres_changes',
       {
         event: 'INSERT',
@@ -1481,7 +1497,23 @@ export function subscribeToMatchMessages(
         onInsert(payload.new as MessageRow)
       },
     )
-  )
+    if (onUpdate) {
+      ch = ch.on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `match_id=eq.${matchId}`,
+        },
+        (payload) => {
+          const row = payload.new as MessageRow | null
+          if (row?.id) onUpdate(row)
+        },
+      )
+    }
+    return ch
+  })
 }
 
 /**

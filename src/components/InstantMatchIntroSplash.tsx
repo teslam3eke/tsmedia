@@ -53,7 +53,7 @@ export default function InstantMatchIntroSplash({
     if (prefetchedPhotoUrl) setPhotoUrl(prefetchedPhotoUrl)
     if (prefetchedDisplayName) setDisplayName(prefetchedDisplayName)
     if (!peerUserId) return
-    if (prefetchedPhotoUrl && prefetchedDisplayName) return
+    if (prefetchedPhotoUrl) return
 
     let cancelled = false
     ;(async () => {
