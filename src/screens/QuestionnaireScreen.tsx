@@ -1,13 +1,17 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, MessageSquare, Cpu } from 'lucide-react'
 import { getQuestionnaireQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
+import { getProfile } from '@/lib/db'
 import { cn } from '@/lib/utils'
 
 interface Props {
   onComplete: (answers: Record<number, string>, questions: Question[]) => void
   onSkip: () => void
   gender?: Gender
+  userId?: string
+  onBackToProfile?: () => void
+  onReturnToVerify?: () => void
 }
 
 const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot: string }> = {
@@ -18,10 +22,49 @@ const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot:
 
 const MIN_CHARS = 20
 
-export default function QuestionnaireScreen({ onComplete, onSkip, gender = 'male' }: Props) {
+export default function QuestionnaireScreen({
+  onComplete,
+  onSkip,
+  gender = 'male',
+  userId,
+  onBackToProfile,
+  onReturnToVerify,
+}: Props) {
   const questions = useMemo(() => getQuestionnaireQuestions(gender), [gender])
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
+  const [answersLoaded, setAnswersLoaded] = useState(!userId)
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    void (async () => {
+      const p = await getProfile(userId)
+      if (cancelled) return
+      const entries = p?.questionnaire
+      if (Array.isArray(entries) && entries.length > 0) {
+        const seeded: Record<number, string> = {}
+        for (const e of entries) {
+          if (typeof e.id === 'number' && typeof e.answer === 'string' && e.answer.trim()) {
+            seeded[e.id] = e.answer
+          }
+        }
+        if (Object.keys(seeded).length > 0) setAnswers(seeded)
+      }
+      setAnswersLoaded(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
+
+  if (!answersLoaded) {
+    return (
+      <div className="max-w-md mx-auto min-h-[40vh] flex items-center justify-center px-6">
+        <p className="text-sm text-slate-500">載入問卷…</p>
+      </div>
+    )
+  }
 
   const q: Question = questions[current]
   const answer = answers[q.id] ?? ''
@@ -48,6 +91,31 @@ export default function QuestionnaireScreen({ onComplete, onSkip, gender = 'male
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
       <div className="px-5 pt-safe pb-4">
+        {(onReturnToVerify || (current === 0 && onBackToProfile)) && (
+          <div className="flex items-center justify-between mb-3">
+            {current === 0 && onBackToProfile ? (
+              <button
+                type="button"
+                onClick={onBackToProfile}
+                className="w-8 h-8 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
+                aria-label="返回個人資料"
+              >
+                <ChevronLeft className="w-4 h-4 text-slate-600" />
+              </button>
+            ) : (
+              <span className="w-8" />
+            )}
+            {onReturnToVerify ? (
+              <button
+                type="button"
+                onClick={onReturnToVerify}
+                className="text-xs font-semibold text-slate-500 active:text-slate-800"
+              >
+                返回審核等待
+              </button>
+            ) : null}
+          </div>
+        )}
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}

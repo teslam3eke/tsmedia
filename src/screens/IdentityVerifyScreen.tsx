@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, FileText, Trash2, ChevronRight, ChevronLeft,
-  ShieldCheck, AlertCircle, Cpu, Upload, Gem, Sparkles,
+  ShieldCheck, AlertCircle, Cpu, Upload, Gem, Sparkles, LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -25,6 +25,10 @@ interface Props {
   gender?: 'male' | 'female'
   onComplete: () => void
   onSkip: () => void
+  /** 職業審核 submitted 等待時：可返回編輯資料／問卷或登出 */
+  onEditProfile?: () => void
+  onEditQuestionnaire?: () => void
+  onSignOut?: () => void
 }
 
 interface ProofItem {
@@ -44,7 +48,62 @@ const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
   { tier: 'gold',    range: '300萬+', desc: '金皇冠標章' },
   { tier: 'diamond', range: '400萬+', desc: '鑽石皇冠標章' },
 ]
-export default function IdentityVerifyScreen({ userId, claimedName, gender = 'male', onComplete, onSkip }: Props) {
+function VerifyWaitActions({
+  onEditProfile,
+  onEditQuestionnaire,
+  onSignOut,
+  className,
+}: {
+  onEditProfile?: () => void
+  onEditQuestionnaire?: () => void
+  onSignOut?: () => void
+  className?: string
+}) {
+  if (!onEditProfile && !onEditQuestionnaire && !onSignOut) return null
+  return (
+    <div className={cn('flex flex-col gap-2 w-full max-w-[300px]', className)}>
+      {onEditProfile ? (
+        <button
+          type="button"
+          onClick={onEditProfile}
+          className="w-full py-3 rounded-2xl text-sm font-bold bg-white text-slate-800 ring-1 ring-slate-200 shadow-sm active:bg-slate-50"
+        >
+          編輯個人資料
+        </button>
+      ) : null}
+      {onEditQuestionnaire ? (
+        <button
+          type="button"
+          onClick={onEditQuestionnaire}
+          className="w-full py-3 rounded-2xl text-sm font-bold bg-white text-slate-800 ring-1 ring-slate-200 shadow-sm active:bg-slate-50"
+        >
+          修改問卷答案
+        </button>
+      ) : null}
+      {onSignOut ? (
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="w-full py-2.5 rounded-2xl text-sm font-semibold text-slate-500 flex items-center justify-center gap-1.5 active:text-slate-700"
+        >
+          <LogOut className="w-4 h-4" />
+          登出
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+export default function IdentityVerifyScreen({
+  userId,
+  claimedName,
+  gender = 'male',
+  onComplete,
+  onSkip,
+  onEditProfile,
+  onEditQuestionnaire,
+  onSignOut,
+}: Props) {
   const steps = gender === 'female' ? STEPS_FEMALE : STEPS_MALE
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<LifePhotoSlot[]>([])
@@ -616,21 +675,32 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
 
   if (gender === 'male' && maleVerifyGate === 'submitted' && step === 0 && !employmentManualWait) {
     return (
-      <div className="max-w-md mx-auto min-h-[100dvh] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe text-center">
-        <ShieldCheck className="w-12 h-12 text-amber-500 mb-4" />
-        <h1 className="text-xl font-bold text-slate-900 mb-2">職業驗證審核中</h1>
-        <p className="text-sm text-slate-600 leading-relaxed mb-8 max-w-[300px]">
-          已收到你的證明文件。通過審核後即可使用探索、聊天等功能；若需人工複核，可能需要超過 12 小時。
-        </p>
-        {import.meta.env.DEV && (
-          <button
-            type="button"
-            onClick={onSkip}
-            className="text-xs text-slate-400 underline underline-offset-2"
-          >
-            略過（測試）
-          </button>
-        )}
+      <div className="max-w-md mx-auto min-h-[100dvh] bg-[#fafafa] flex flex-col px-6 pt-safe pb-safe">
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <ShieldCheck className="w-12 h-12 text-amber-500 mb-4" />
+          <h1 className="text-xl font-bold text-slate-900 mb-2">職業驗證審核中</h1>
+          <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
+            已收到你的證明文件。通過審核後即可使用探索、聊天等功能；若需人工複核，可能需要超過 12 小時。
+          </p>
+          <p className="text-xs text-slate-400 mt-4 max-w-[280px] leading-relaxed">
+            審核期間你仍可修改個人資料或問卷，或先登出稍後再回來。
+          </p>
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              onClick={onSkip}
+              className="mt-4 text-xs text-slate-400 underline underline-offset-2"
+            >
+              略過（測試）
+            </button>
+          )}
+        </div>
+        <VerifyWaitActions
+          onEditProfile={onEditProfile}
+          onEditQuestionnaire={onEditQuestionnaire}
+          onSignOut={onSignOut}
+          className="mx-auto pb-2"
+        />
       </div>
     )
   }
@@ -1086,18 +1156,26 @@ export default function IdentityVerifyScreen({ userId, claimedName, gender = 'ma
     </div>
     {employmentManualWait
       ? createPortal(
-          <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col items-center justify-center px-6 pt-safe pb-safe text-center">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-              className="mb-5"
-            >
-              <Cpu className="w-10 h-10 text-slate-400" />
-            </motion.div>
-            <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
-            <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-              審核完成後會自動進入下一步；若需人工複核，可能需要超過 12 小時。請稍候，不要關閉此頁面。
-            </p>
+          <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col px-6 pt-safe pb-safe">
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                className="mb-5"
+              >
+                <Cpu className="w-10 h-10 text-slate-400" />
+              </motion.div>
+              <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
+              <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
+                審核完成後會自動進入下一步；若需人工複核，可能需要超過 12 小時。
+              </p>
+            </div>
+            <VerifyWaitActions
+              onEditProfile={onEditProfile}
+              onEditQuestionnaire={onEditQuestionnaire}
+              onSignOut={onSignOut}
+              className="mx-auto pb-2"
+            />
           </div>,
           document.body,
         )

@@ -22,6 +22,7 @@ import {
   windowBlurWakeLikelyForResumeReload,
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
+import { signOut } from '@/lib/auth'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
@@ -111,6 +112,8 @@ export default function App() {
   const [connectionBannerMsg, setConnectionBannerMsg] = useState<string | null>(null)
   /** 進入主畫面時預設分頁：生活照未達標時強制「我的」以便上傳 */
   const [mainInitialTab, setMainInitialTab] = useState<MainScreenTab>('discover')
+  /** 職業 submitted 等待時從驗證頁返回編輯資料／問卷 */
+  const [verifyWaitRevisit, setVerifyWaitRevisit] = useState(false)
 
   const getActiveUser = async () => {
     if (user) return user
@@ -545,6 +548,13 @@ export default function App() {
     setScreen((prev) => { setPrev(prev); return next })
   }
 
+  const handleSignOut = async () => {
+    setVerifyWaitRevisit(false)
+    await signOut()
+    setUser(null)
+    go('landing')
+  }
+
   const direction = SCREEN_ORDER.indexOf(screen) >= SCREEN_ORDER.indexOf(prevScreen) ? 'forward' : 'back'
   const anim = SLIDE[direction]
   const isMainScreen = screen === 'main'
@@ -708,8 +718,11 @@ export default function App() {
 
         {screen === 'profile-setup' && (
           <ProfileSetupScreen
+            userId={user?.id}
             onComplete={handleProfileSetupComplete}
             onSkip={() => go('questionnaire')}
+            onBackToQuestionnaire={verifyWaitRevisit ? () => go('questionnaire') : undefined}
+            onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
           />
         )}
 
@@ -718,6 +731,9 @@ export default function App() {
             onComplete={handleQuestionnaireComplete}
             onSkip={() => go('identity-verify')}
             gender={userGender}
+            userId={user?.id}
+            onBackToProfile={verifyWaitRevisit ? () => go('profile-setup') : undefined}
+            onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
           />
         )}
 
@@ -727,6 +743,7 @@ export default function App() {
             claimedName={currentProfileName}
             gender={userGender}
             onComplete={async () => {
+              setVerifyWaitRevisit(false)
               const u = await getActiveUser()
               const profile = u ? await getProfile(u.id) : null
               launchMainFromProfile(profile)
@@ -734,10 +751,20 @@ export default function App() {
             onSkip={async () => {
               /** DEV 專用：略過男性須 approved 的職業驗證閘門 */
               if (!import.meta.env.DEV) return
+              setVerifyWaitRevisit(false)
               const u = await getActiveUser()
               const profile = u ? await getProfile(u.id) : null
               launchMainFromProfile(profile, { devBypassMaleVerify: true })
             }}
+            onEditProfile={() => {
+              setVerifyWaitRevisit(true)
+              go('profile-setup')
+            }}
+            onEditQuestionnaire={() => {
+              setVerifyWaitRevisit(true)
+              go('questionnaire')
+            }}
+            onSignOut={() => void handleSignOut()}
           />
         )}
       </motion.div>

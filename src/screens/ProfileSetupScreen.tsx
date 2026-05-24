@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ChevronRight, Cpu } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getProfile } from '@/lib/db'
 import { REGION_LABELS, type Region } from '@/lib/types'
 
 interface Props {
+  userId?: string
   onComplete: (data: ProfileSetupData) => void
   onSkip: () => void
+  onBackToQuestionnaire?: () => void
+  onReturnToVerify?: () => void
 }
 
 export interface ProfileSetupData {
@@ -38,7 +42,13 @@ const GENDER_OPTIONS = [
 const YEARS = Array.from({ length: 35 }, (_, i) => String(2005 - i))
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
 
-export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
+export default function ProfileSetupScreen({
+  userId,
+  onComplete,
+  onSkip,
+  onBackToQuestionnaire,
+  onReturnToVerify,
+}: Props) {
   const [form, setForm] = useState<ProfileSetupData>({
     name: '',
     nickname: '',
@@ -51,6 +61,37 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
     homeRegion: '',
     preferredRegion: '',
   })
+  const [profileLoaded, setProfileLoaded] = useState(!userId)
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    void (async () => {
+      const p = await getProfile(userId)
+      if (cancelled || !p) {
+        if (!cancelled) setProfileLoaded(true)
+        return
+      }
+      const approxBirthYear =
+        p.age != null && p.age > 0 ? String(new Date().getFullYear() - p.age) : ''
+      setForm({
+        name: p.name?.trim() ?? '',
+        nickname: p.nickname?.trim() ?? '',
+        gender: p.gender === 'female' ? 'female' : 'male',
+        birthYear: approxBirthYear,
+        birthMonth: '',
+        interests: p.interests ?? [],
+        bio: p.bio?.trim() ?? '',
+        workRegion: p.work_region ?? '',
+        homeRegion: p.home_region ?? '',
+        preferredRegion: p.preferred_region ?? '',
+      })
+      setProfileLoaded(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
 
   const set = <K extends keyof ProfileSetupData>(key: K, val: ProfileSetupData[K]) =>
     setForm((f) => ({ ...f, [key]: val }))
@@ -73,6 +114,14 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
     form.preferredRegion !== ''
 
   const REGIONS: Region[] = ['north', 'central', 'south', 'east']
+
+  if (!profileLoaded) {
+    return (
+      <div className="max-w-md mx-auto min-h-[40vh] flex items-center justify-center px-6">
+        <p className="text-sm text-slate-500">載入個人資料…</p>
+      </div>
+    )
+  }
 
   const RegionGrid = ({
     value,
@@ -104,6 +153,29 @@ export default function ProfileSetupScreen({ onComplete, onSkip }: Props) {
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
       <div className="px-5 pt-safe pb-6 border-b border-slate-100">
+        {(onBackToQuestionnaire || onReturnToVerify) && (
+          <div className="flex items-center gap-2 mb-3">
+            {onBackToQuestionnaire ? (
+              <button
+                type="button"
+                onClick={onBackToQuestionnaire}
+                className="w-8 h-8 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
+                aria-label="返回問卷"
+              >
+                <ChevronLeft className="w-4 h-4 text-slate-600" />
+              </button>
+            ) : null}
+            {onReturnToVerify ? (
+              <button
+                type="button"
+                onClick={onReturnToVerify}
+                className="text-xs font-semibold text-slate-500 active:text-slate-800"
+              >
+                返回審核等待
+              </button>
+            ) : null}
+          </div>
+        )}
         <div className="flex items-center gap-2 mb-1">
           <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
             <Cpu className="w-3.5 h-3.5 text-white" />
