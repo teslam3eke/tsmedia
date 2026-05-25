@@ -63,7 +63,7 @@ import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, 
 import { ensureQuestionnaireHasFixedSixth } from '@/utils/questions'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
-import { PublicProfilePhotoPreview } from '@/components/PublicProfilePhotoPreview'
+import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 import { uuidToGradients } from '@/lib/profileGradients'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
@@ -3732,8 +3732,6 @@ function EditProfileScreen({
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
-  const previewGradients = useMemo(() => uuidToGradients(userId), [userId])
-  const previewAlt = nickname.trim() || name.trim() || '會員'
 
   const [showIncomeBorder, setShowIncomeBorder] = useState<boolean>(profile.show_income_border ?? false)
   const [saving, setSaving] = useState(false)
@@ -4267,19 +4265,13 @@ function EditProfileScreen({
 
           {profile.income_tier ? (
             <div className="bg-white rounded-3xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3">
-              <div className="flex items-start gap-4">
-                <PublicProfilePhotoPreview
-                  profileKey={userId}
-                  photoUrls={previewPhotoUrls}
-                  alt={previewAlt}
-                  gradientFrom={previewGradients.from}
-                  gradientTo={previewGradients.to}
+              <div className="grid grid-cols-3 gap-2 items-center">
+                <LifePhotoPreviewTile
+                  photoUrl={previewPhotoUrls[0] ?? null}
                   incomeTier={profile.income_tier}
-                  showIncomeBorder={showIncomeBorder}
-                  widthPx={120}
-                  showIncomeRangeLabel={false}
+                  showCrown={showIncomeBorder}
                 />
-                <div className="flex-1 min-w-0">
+                <div className="col-span-2 min-w-0">
                   <p className="text-sm font-bold text-slate-900 leading-tight flex items-center gap-1.5">
                     <Gem className="w-4 h-4 text-slate-600" />
                     {INCOME_TIER_META[profile.income_tier].label}
@@ -4313,7 +4305,7 @@ function EditProfileScreen({
                 </div>
               </button>
               <p className="text-[11px] text-slate-400 leading-relaxed px-1">
-                啟用後，所有人看你的照片都會加上 {INCOME_TIER_META[profile.income_tier].short} 。左側預覽為他人於探索頁看到的霧化樣式（縮小版）。
+                啟用後，所有人看你的照片都會加上 {INCOME_TIER_META[profile.income_tier].short} 。左側預覽與生活照上傳區塊相同大小。
               </p>
             </div>
           ) : incomeStatus?.status === 'pending' ? (
@@ -5165,25 +5157,24 @@ function ProfileTab({
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
-  const [profilePhotoUrls, setProfilePhotoUrls] = useState<string[]>([])
+  const profilePhotoPathsKey = profile?.photo_urls?.join('|') ?? ''
+  const [profilePhotoPreviewUrl, setProfilePhotoPreviewUrl] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    const paths = profile?.photo_urls ?? []
-    if (paths.length === 0) {
-      setProfilePhotoUrls([])
+    const firstPath = profile?.photo_urls?.[0]
+    if (!firstPath) {
+      setProfilePhotoPreviewUrl(null)
       return
     }
-    void resolvePhotoUrls(paths).then((urls) => {
-      if (!cancelled) setProfilePhotoUrls(urls.map((u) => u.trim()).filter(Boolean))
+    void resolvePhotoUrls([firstPath]).then(([url]) => {
+      if (cancelled) return
+      const next = url?.trim() || null
+      setProfilePhotoPreviewUrl((prev) => (prev === next ? prev : next))
     })
     return () => { cancelled = true }
-  }, [profile?.photo_urls])
+  }, [profilePhotoPathsKey])
 
-  const profilePreviewGradients = useMemo(
-    () => (profile ? uuidToGradients(profile.id) : { from: '#64748b', to: '#475569' }),
-    [profile?.id],
-  )
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
@@ -5375,36 +5366,29 @@ function ProfileTab({
         </div>
 
         <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-start gap-3">
-              <PublicProfilePhotoPreview
-                profileKey={userId}
-                photoUrls={profilePhotoUrls}
-                alt={displayName}
-                gradientFrom={profilePreviewGradients.from}
-                gradientTo={profilePreviewGradients.to}
-                incomeTier={profile?.income_tier}
-                showIncomeBorder={Boolean(profile?.show_income_border && profile?.income_tier)}
-                widthPx={120}
-                showIncomeRangeLabel={false}
-              />
+          <div className="grid grid-cols-3 gap-2 items-start">
+            <LifePhotoPreviewTile
+              photoUrl={profilePhotoPreviewUrl}
+              incomeTier={profile?.income_tier}
+              showCrown={Boolean(profile?.show_income_border && profile?.income_tier)}
+            />
+            <div className="col-span-2 flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0 pt-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">個人檔案</p>
                 <h2 className="mt-0.5 truncate text-lg font-bold leading-tight text-slate-900">{displayName}</h2>
                 {profileSubtitle != null && profileSubtitle !== '' ? (
                   <p className="mt-0.5 text-xs text-slate-500">{profileSubtitle}</p>
                 ) : null}
-                <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">他人於探索頁看到的樣式（縮小版）</p>
               </div>
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setEditing(true)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 ring-1 ring-slate-200/80"
+                aria-label="編輯個人資料"
+              >
+                <Pencil className="h-4 w-4 text-slate-600" />
+              </motion.button>
             </div>
-            <motion.button
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setEditing(true)}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 ring-1 ring-slate-200/80"
-              aria-label="編輯個人資料"
-            >
-              <Pencil className="h-4 w-4 text-slate-600" />
-            </motion.button>
           </div>
         </div>
       </div>

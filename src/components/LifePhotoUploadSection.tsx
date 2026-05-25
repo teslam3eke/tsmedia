@@ -10,6 +10,7 @@ import {
 } from '@/lib/lifePhotoUpload'
 import { PROFILE_PHOTO_MAX, PROFILE_PHOTO_MIN } from '@/lib/types'
 import { resolvePhotoUrls } from '@/lib/db'
+import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 
 export type LifePhotoSlot = {
   id: string
@@ -179,21 +180,12 @@ export function LifePhotoUploadSection({
       {photos.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           {photos.map((photo) => (
-            <div key={photo.id} className="relative aspect-square rounded-2xl overflow-hidden bg-slate-100">
-              <img
-                src={photo.previewUrl}
-                alt=""
-                className="w-full h-full object-cover scale-110"
-                style={{ filter: 'blur(6px)' }}
-              />
-              <div className="absolute inset-0 bg-black/10" />
-              <div className="absolute left-2 right-2 bottom-2 rounded-xl bg-white/80 backdrop-blur-sm px-2.5 py-1.5">
-                <p className="text-[10px] font-semibold text-slate-700 text-center tracking-wide">已上傳</p>
-              </div>
+            <div key={photo.id} className="relative">
+              <LifePhotoPreviewTile photoUrl={photo.previewUrl} showUploadedBadge />
               <button
                 type="button"
                 onClick={() => removePhoto(photo.id)}
-                className="absolute top-1.5 right-1.5 w-6 h-6 bg-black/50 backdrop-blur rounded-full flex items-center justify-center"
+                className="absolute top-1.5 right-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 backdrop-blur"
               >
                 <Trash2 className="w-3 h-3 text-white" />
               </button>
