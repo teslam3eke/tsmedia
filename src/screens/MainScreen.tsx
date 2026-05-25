@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   BellRing, AlertCircle, Gem,
-  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Users, Star,
+  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Star,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -18,6 +18,13 @@ import {
   resolveEmploymentCompany,
   sanitizeVerificationUserMessage,
 } from '@/lib/companyDisplay'
+import {
+  buildVerificationApiFailureReason,
+  parseVerifyIdResponse,
+  resolveManualReviewReason,
+  verifyIdReasonFromBody,
+  VERIFICATION_MANUAL_REVIEW_TAIL,
+} from '@/lib/verificationAiUtils'
 import { signOut } from '@/lib/auth'
 import {
   wakeSupabaseAuthFromBackground,
@@ -74,7 +81,7 @@ import {
 import AdminScreen from '@/screens/AdminScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
-import { subscribeWebPushForCurrentUser, requestRemotePushSelfTest } from '@/lib/webPush'
+import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
 import { syncAppIconBadge, clearAppIconBadge } from '@/lib/appIconBadge'
 import {
@@ -542,13 +549,30 @@ function InfoChip({ icon: Icon, label }: { icon: React.ElementType; label: strin
 
 // ─── Notification Settings Modal ─────────────────────────────────────────────
 
-type NotifKey = 'newMatch' | 'messages' | 'newProfile' | 'weeklyDigest'
+type NotifKey = 'newMatch' | 'messages'
 
 interface NotifSettings {
   newMatch: boolean
   messages: boolean
-  newProfile: boolean
-  weeklyDigest: boolean
+}
+
+function readNotifSettings(): NotifSettings {
+  const defaults: NotifSettings = { newMatch: false, messages: false }
+  try {
+    const saved = localStorage.getItem('notif_settings')
+    if (!saved) return defaults
+    const parsed = JSON.parse(saved) as Partial<Record<string, boolean>>
+    return {
+      newMatch: parsed.newMatch === true,
+      messages: parsed.messages === true,
+    }
+  } catch {
+    return defaults
+  }
+}
+
+function writeNotifSettings(next: NotifSettings): void {
+  localStorage.setItem('notif_settings', JSON.stringify(next))
 }
 
 function NotificationModal({
@@ -558,21 +582,12 @@ function NotificationModal({
   onClose: () => void
   userId?: string | null
 }) {
-  const [settings, setSettings] = useState<NotifSettings>(() => {
-    const defaults: NotifSettings = { newMatch: false, messages: false, newProfile: false, weeklyDigest: false }
-    try {
-      const saved = localStorage.getItem('notif_settings')
-      return saved ? { ...defaults, ...JSON.parse(saved) } : defaults
-    } catch { return defaults }
-  })
+  const [settings, setSettings] = useState<NotifSettings>(() => readNotifSettings())
 
-  // ── Browser notification permission state & test helpers ──────────────
   const supported = typeof window !== 'undefined' && 'Notification' in window
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     supported ? Notification.permission : 'unsupported'
   )
-  const [testStatus, setTestStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
-  const [testError, setTestError] = useState<string>('')
 
   // Detect iOS Safari (not PWA) — Notification API exists only when installed to Home Screen on iOS
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : ''
@@ -597,57 +612,6 @@ function NotificationModal({
     }
   }
 
-  const fireTestNotification = async () => {
-    setTestStatus('sending')
-    setTestError('')
-    try {
-      if (!supported) {
-        setTestStatus('error')
-        setTestError(iosNeedsInstall
-          ? '請先把 tsMedia 加到主畫面後再試'
-          : '此瀏覽器不支援通知功能')
-        return
-      }
-      let perm = Notification.permission
-      if (perm === 'default') perm = await requestPerm() as NotificationPermission
-      if (perm !== 'granted') {
-        setTestStatus('error')
-        setTestError('通知權限未允許，請到裝置設定開啟')
-        return
-      }
-      const title = '測試通知（本機）'
-      const body  = '本機 Service Worker 正常。鎖屏後應再收到「遠端推播測試」。'
-      const options: NotificationOptions = {
-        body,
-        icon: '/icons/icon-192.png',
-        badge: '/icons/icon-192.png',
-        tag: 'tsmedia-test',
-      }
-      // Prefer service-worker notifications (required on iOS PWA & Android Chrome PWA)
-      if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready
-        await reg.showNotification(title, options)
-      } else {
-        new Notification(title, options)
-      }
-      if (userId) await subscribeWebPushForCurrentUser(userId)
-      const remote = userId ? await requestRemotePushSelfTest() : { ok: false as const, error: '未登入' }
-      if (!remote.ok) {
-        setTestStatus('error')
-        setTestError(
-          remote.error ??
-            '本機通知已發，但遠端推播失敗（聊天／10 點通知走這條路）。請關 App 再開或重新允許通知。',
-        )
-        return
-      }
-      setTestStatus('sent')
-      setTimeout(() => setTestStatus('idle'), 2500)
-    } catch (e) {
-      setTestStatus('error')
-      setTestError(e instanceof Error ? e.message : '發送失敗')
-    }
-  }
-
   const toggle = async (key: NotifKey) => {
     // Turning a toggle ON → ask for permission if we haven't yet
     if (!settings[key] && supported && Notification.permission === 'default') {
@@ -655,18 +619,16 @@ function NotificationModal({
     }
     setSettings((prev) => {
       const next = { ...prev, [key]: !prev[key] }
-      localStorage.setItem('notif_settings', JSON.stringify(next))
+      writeNotifSettings(next)
       return next
     })
   }
 
-  const allOff = !Object.values(settings).some(Boolean)
+  const allOff = !settings.newMatch && !settings.messages
 
   const items: { key: NotifKey; icon: React.ElementType; label: string; desc: string }[] = [
-    { key: 'newMatch',      icon: Heart,    label: '新配對通知',   desc: '配對成功時通知你（含 App 內音效）' },
-    { key: 'messages',      icon: MessageCircle, label: '新訊息通知', desc: '收到新訊息時通知你（含 App 內音效）' },
-    { key: 'newProfile',    icon: Users,    label: '新推薦通知',   desc: '有新的高契合度對象時通知你' },
-    { key: 'weeklyDigest',  icon: Star,     label: '每週精選摘要', desc: '每週一匯總你的配對概況' },
+    { key: 'newMatch', icon: Heart, label: '新配對通知', desc: '配對成功時通知你（含 App 內音效）' },
+    { key: 'messages', icon: MessageCircle, label: '新訊息通知', desc: '收到新訊息時通知你（含 App 內音效）' },
   ]
 
   return createPortal(
@@ -720,7 +682,7 @@ function NotificationModal({
           <div className="flex-1 min-w-0 text-[12px] leading-relaxed">
             {permission === 'granted' && <span className="text-emerald-800">已取得通知權限，你可以收到推播</span>}
             {permission === 'denied'  && <span className="text-red-700">通知被封鎖，請到裝置設定 → tsMedia → 通知 開啟</span>}
-            {permission === 'default' && <span className="text-amber-800">尚未取得通知權限，開啟任一項目或點下方按鈕以授權</span>}
+            {permission === 'default' && <span className="text-amber-800">尚未取得通知權限，開啟任一項目以授權</span>}
             {permission === 'unsupported' && (
               <span className="text-amber-800">
                 {iosNeedsInstall
@@ -730,25 +692,6 @@ function NotificationModal({
             )}
           </div>
         </div>
-
-        {/* Test notification button */}
-        <button
-          onClick={fireTestNotification}
-          disabled={testStatus === 'sending'}
-          className={cn(
-            'w-full mb-5 py-3 rounded-2xl font-semibold text-sm transition-all flex items-center justify-center gap-2',
-            testStatus === 'sent'
-              ? 'bg-emerald-500 text-white'
-              : testStatus === 'error'
-              ? 'bg-red-500 text-white'
-              : 'bg-slate-900 text-white active:scale-[0.98]',
-          )}
-        >
-          {testStatus === 'idle'    && <><BellRing className="w-4 h-4" /> 測試本機＋遠端推播</>}
-          {testStatus === 'sending' && <>發送中</>}
-          {testStatus === 'sent'    && <><Check className="w-4 h-4" /> 本機與此裝置遠端推播正常</>}
-          {testStatus === 'error'   && <><AlertCircle className="w-4 h-4" /> {testError || '發送失敗'}</>}
-        </button>
 
         {/* Items */}
         <div className="space-y-3">
@@ -2652,10 +2595,8 @@ function NotifEnablePrompt({
       if (perm === 'granted') {
         // Enable the core toggles by default once user grants permission
         try {
-          const defaults = { newMatch: true, messages: true, newProfile: false, weeklyDigest: false }
-          const saved = localStorage.getItem('notif_settings')
-          const merged = saved ? { ...JSON.parse(saved), newMatch: true, messages: true } : defaults
-          localStorage.setItem('notif_settings', JSON.stringify(merged))
+          const prev = readNotifSettings()
+          writeNotifSettings({ ...prev, newMatch: true, messages: true })
         } catch { /* noop */ }
         // Fire a welcome ping so the user immediately sees it works
         try {
@@ -3947,6 +3888,15 @@ interface LocalPhoto {
 
 const REGION_OPTIONS: Region[] = ['north', 'central', 'south', 'east']
 
+/** 與 {@link ProfileSetupScreen} 一致，供「我的 → 編輯個人資訊」選興趣。 */
+const PROFILE_INTEREST_TAGS = [
+  '精品咖啡', '登山', '底片攝影', '日本文學', '爵士吉他',
+  '手沖咖啡', '電影', '重訓', '單車', '台式料理',
+  '紀錄片', '城市規劃', '義式料理', '閱讀', '天文觀測',
+  '黑膠唱片', '清酒', '植物', '烘焙', '游泳',
+  '登山健行', '桌遊', '投資理財', '料理', '潛水',
+] as const
+
 function EditRegionGrid({
   value,
   onChange,
@@ -3989,6 +3939,7 @@ function EditProfileScreen({
   const [name, setName]     = useState(profile.name ?? '')
   const [nickname, setNickname] = useState(profile.nickname ?? '')
   const [bio, setBio]       = useState(profile.bio ?? '')
+  const [interests, setInterests] = useState<string[]>(() => (profile.interests ?? []).filter(Boolean))
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
@@ -4165,12 +4116,15 @@ function EditProfileScreen({
         }),
         signal: controller.signal,
       })
-      const data = await response.json() as {
-        ok: boolean
-        confidence?: string
-        suggestedIncomeTier?: string | null
-        message: string
-        reason?: string
+      const { data, failureReason } = await parseVerifyIdResponse(response)
+      if (failureReason || !data) {
+        return {
+          passed: false,
+          company: null,
+          confidence: null,
+          suggestedIncomeTier: null,
+          reason: failureReason ?? buildVerificationApiFailureReason(new Error('empty response')),
+        }
       }
       const confidence: AiConfidence | null =
         data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low'
@@ -4181,7 +4135,7 @@ function EditProfileScreen({
         company: null,
         confidence,
         suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
-        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
+        reason: verifyIdReasonFromBody(data),
       }
     } finally {
       window.clearTimeout(timeout)
@@ -4207,7 +4161,13 @@ function EditProfileScreen({
     incomeAiFinalizePendingRef.current = false
     setIncomeStatus({ status: 'pending', claimed: optimisticIncomeTier })
     setIncomeReviewCountdown(0)
-    setIncomeSubmitMsg('正在上傳並送審⋯')
+    setIncomeSubmitMsg('正在儲存並送審⋯')
+
+    if (!(await save(undefined, { silent: true }))) {
+      setIncomeSubmitMsg('請先完成必填資料（姓名、暱稱、生活照、興趣）後再送審。')
+      setUploadingIncome(false)
+      return
+    }
 
     let aiResult: Awaited<ReturnType<typeof reviewIncomeWithAI>>
     let reviewMode: 'ai_auto' | 'manual' = 'manual'
@@ -4217,19 +4177,21 @@ function EditProfileScreen({
       if (aiResult.passed) {
         reviewMode = 'ai_auto'
       } else {
-        manualReason = aiResult.reason || 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
+        manualReason = resolveManualReviewReason(aiResult.reason)
         setIncomeSubmitMsg(manualReason)
       }
-    } catch {
+    } catch (err) {
+      console.error('[EditProfile] reviewIncomeWithAI failed:', err)
+      const reason = buildVerificationApiFailureReason(err)
       aiResult = {
         passed: false,
         company: null,
         confidence: null,
         suggestedIncomeTier: null,
-        reason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+        reason,
       }
-      manualReason = aiResult.reason
-      setIncomeSubmitMsg(manualReason)
+      manualReason = reason
+      setIncomeSubmitMsg(reason)
     }
 
     const res = await uploadProofDoc(userId, incomeUploadFile)
@@ -4255,16 +4217,37 @@ function EditProfileScreen({
     setQa((prev) => prev.map((q, i) => i === index ? { ...q, answer } : q))
   }
 
-  const save = async (photoOverride?: LocalPhoto[]) => {
-    if (!name.trim()) return
+  const toggleInterest = (tag: string) => {
+    setInterests((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+    )
+  }
+
+  const save = async (photoOverride?: LocalPhoto[], opts?: { silent?: boolean }): Promise<boolean> => {
+    if (!name.trim() || !nickname.trim()) {
+      if (!opts?.silent) {
+        setSaveMsg('請填寫姓名與暱稱')
+        setTimeout(() => setSaveMsg(''), 3200)
+      }
+      return false
+    }
     const photoList = photoOverride ?? photos
     if (photoList.length < PROFILE_PHOTO_MIN) {
-      setSaveMsg(`請至少上傳 ${PROFILE_PHOTO_MIN} 張生活照`)
-      setTimeout(() => setSaveMsg(''), 3200)
-      return
+      if (!opts?.silent) {
+        setSaveMsg(`請至少上傳 ${PROFILE_PHOTO_MIN} 張生活照`)
+        setTimeout(() => setSaveMsg(''), 3200)
+      }
+      return false
+    }
+    if (interests.length < 3) {
+      if (!opts?.silent) {
+        setSaveMsg('請至少選擇 3 個興趣標籤')
+        setTimeout(() => setSaveMsg(''), 3200)
+      }
+      return false
     }
     setSaving(true)
-    setSaveMsg('')
+    if (!opts?.silent) setSaveMsg('')
 
     const uploadedPaths = photoList.map((p) => p.storagePath)
 
@@ -4273,6 +4256,7 @@ function EditProfileScreen({
       name: name.trim(),
       nickname: nickname.trim(),
       bio: bio.trim(),
+      interests,
       questionnaire: qa.length > 0 ? qa : undefined,
       photoUrls: uploadedPaths.length > 0 ? uploadedPaths : undefined,
       workRegion:      workRegion      === '' ? null : workRegion,
@@ -4283,18 +4267,23 @@ function EditProfileScreen({
 
     setSaving(false)
     if (!result.ok) {
-      setSaveMsg('儲存失敗，請稍後再試')
-      setTimeout(() => setSaveMsg(''), 3000)
-      return
+      if (!opts?.silent) {
+        setSaveMsg('儲存失敗，請稍後再試')
+        setTimeout(() => setSaveMsg(''), 3000)
+      }
+      return false
     }
-    setSaveMsg('已儲存 ✓')
-    setTimeout(() => setSaveMsg(''), 1800)
+    if (!opts?.silent) {
+      setSaveMsg('已儲存 ✓')
+      setTimeout(() => setSaveMsg(''), 1800)
+    }
 
     const updated: ProfileRow = {
       ...profile,
       name: name.trim(),
       nickname: nickname.trim(),
       bio: bio.trim(),
+      interests,
       questionnaire: qa.length > 0 ? qa : profile.questionnaire,
       photo_urls: uploadedPaths.length > 0 ? uploadedPaths : profile.photo_urls,
       work_region:      workRegion      === '' ? null : workRegion,
@@ -4303,6 +4292,7 @@ function EditProfileScreen({
       show_income_border: showIncomeBorder,
     }
     onSaved(updated)
+    return true
   }
 
   const handleLifePhotoUploadSuccess = async (next: LifePhotoSlot[]) => {
@@ -4335,10 +4325,10 @@ function EditProfileScreen({
         <motion.button
           whileTap={{ scale: 0.95 }}
           onClick={() => void save()}
-          disabled={!name.trim() || !nickname.trim() || saving || uploadedPhotoCount < PROFILE_PHOTO_MIN}
+          disabled={!name.trim() || !nickname.trim() || saving || uploadedPhotoCount < PROFILE_PHOTO_MIN || interests.length < 3}
           className={cn(
             'flex items-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-bold transition-all',
-            name.trim() && nickname.trim() && !saving && uploadedPhotoCount >= PROFILE_PHOTO_MIN
+            name.trim() && nickname.trim() && !saving && uploadedPhotoCount >= PROFILE_PHOTO_MIN && interests.length >= 3
               ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
               : 'bg-slate-100 text-slate-300',
           )}
@@ -4390,6 +4380,43 @@ function EditProfileScreen({
                 rows={4}
                 className="field-input resize-none leading-relaxed"
               />
+            </div>
+          </div>
+        </section>
+
+        {/* ── 興趣 ───────────────────────────────────── */}
+        <section>
+          <SectionHeading label="興趣" hint="至少 3 個" />
+          <div className="flex items-center justify-between mb-2 px-0.5">
+            <span className="text-[11px] text-slate-400">探索頁會顯示你的興趣標籤</span>
+            <span
+              className={cn(
+                'text-xs font-semibold transition-colors',
+                interests.length >= 3 ? 'text-emerald-500' : 'text-slate-400',
+              )}
+            >
+              {interests.length >= 3
+                ? `已選 ${interests.length} 個`
+                : `至少 3 個（已選 ${interests.length}）`}
+            </span>
+          </div>
+          <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
+            <div className="flex flex-wrap gap-2">
+              {PROFILE_INTEREST_TAGS.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleInterest(tag)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full text-xs font-semibold border transition-all',
+                    interests.includes(tag)
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-600 border-slate-200',
+                  )}
+                >
+                  {tag}
+                </button>
+              ))}
             </div>
           </div>
         </section>
@@ -4777,13 +4804,15 @@ function CompanyVerifyScreen({
         }),
         signal: controller.signal,
       })
-      const data = await response.json() as {
-        ok: boolean
-        company?: string
-        confidence?: string
-        suggestedIncomeTier?: string | null
-        message: string
-        reason?: string
+      const { data, failureReason } = await parseVerifyIdResponse(response)
+      if (failureReason || !data) {
+        return {
+          passed: false,
+          company: null,
+          confidence: null,
+          suggestedIncomeTier: null,
+          reason: failureReason ?? buildVerificationApiFailureReason(new Error('empty response')),
+        }
       }
 
       const aiCompany = parseCompany(data.company)
@@ -4796,7 +4825,7 @@ function CompanyVerifyScreen({
         company: aiCompany,
         confidence: aiConfidence,
         suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
-        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
+        reason: verifyIdReasonFromBody(data),
       }
     } finally {
       window.clearTimeout(timeout)
@@ -4830,12 +4859,15 @@ function CompanyVerifyScreen({
         }),
         signal: controller.signal,
       })
-      const data = await response.json() as {
-        ok: boolean
-        confidence?: string
-        suggestedIncomeTier?: string | null
-        message: string
-        reason?: string
+      const { data, failureReason } = await parseVerifyIdResponse(response)
+      if (failureReason || !data) {
+        return {
+          passed: false,
+          company: null,
+          confidence: null,
+          suggestedIncomeTier: null,
+          reason: failureReason ?? buildVerificationApiFailureReason(new Error('empty response')),
+        }
       }
       const aiConfidence: AiConfidence | null = data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low'
         ? data.confidence
@@ -4845,7 +4877,7 @@ function CompanyVerifyScreen({
         company: null,
         confidence: aiConfidence,
         suggestedIncomeTier: toIncomeTier(data.suggestedIncomeTier),
-        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
+        reason: verifyIdReasonFromBody(data),
       }
     } finally {
       window.clearTimeout(timeout)
@@ -4884,18 +4916,23 @@ function CompanyVerifyScreen({
     let manualReason = ''
     try {
       aiResult = await verifyCompanyDocWithAI(docFile)
-    } catch {
+    } catch (err) {
+      console.error('[CompanyVerify] verifyCompanyDocWithAI failed:', err)
+      const reason = buildVerificationApiFailureReason(err)
       aiResult = {
         passed: false,
         company: null,
         confidence: null,
         suggestedIncomeTier: null,
-        reason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+        reason,
       }
     }
 
     if (!aiResult.passed) {
-      manualReason = aiResult.reason || 'AI 初審未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
+      manualReason = resolveManualReviewReason(
+        aiResult.reason,
+        `AI 初審未通過，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
+      )
       setAiMessage(manualReason)
       companyAiFinalizePendingRef.current = false
       setCompanyReviewCountdown(0)
@@ -4903,7 +4940,7 @@ function CompanyVerifyScreen({
       reviewMode = 'ai_auto'
     } else {
       reviewMode = 'manual'
-      manualReason = 'AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。人工審核時間可能大於 12 小時。'
+      manualReason = `AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。${VERIFICATION_MANUAL_REVIEW_TAIL}`
       setAiMessage(manualReason)
       companyAiFinalizePendingRef.current = false
       setCompanyReviewCountdown(0)
@@ -4960,19 +4997,21 @@ function CompanyVerifyScreen({
       let incomeManualReason = ''
       try {
         incomeAiResult = await verifyLinkedIncomeWithAI(docFile, autoIncomeTier)
-      } catch {
+      } catch (err) {
+        console.error('[CompanyVerify] verifyLinkedIncomeWithAI failed:', err)
+        const reason = buildVerificationApiFailureReason(err)
         incomeAiResult = {
           passed: false,
           company: null,
           confidence: null,
           suggestedIncomeTier: null,
-          reason: 'AI 暫時無法完成收入審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+          reason,
         }
       }
       if (incomeAiResult.passed) {
         incomeReviewMode = 'ai_auto'
       } else {
-        incomeManualReason = incomeAiResult.reason || 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'
+        incomeManualReason = resolveManualReviewReason(incomeAiResult.reason)
       }
       await submitIncomeVerification(
         userId,

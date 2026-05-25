@@ -13,6 +13,13 @@ import {
   type AiResult,
 } from '@/lib/db'
 import { parseCompany, resolveEmploymentCompany, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
+import {
+  buildVerificationApiFailureReason,
+  parseVerifyIdResponse,
+  resolveManualReviewReason,
+  verifyIdReasonFromBody,
+  VERIFICATION_MANUAL_REVIEW_TAIL,
+} from '@/lib/verificationAiUtils'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type IncomeTier, type VerificationStatus } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
@@ -283,23 +290,37 @@ export default function IdentityVerifyScreen({
           docType: docTypeHint,
         }),
       })
-      const data = await res.json() as { ok: boolean; company?: string; confidence?: string; message: string; reason?: string }
+      const { data, failureReason } = await parseVerifyIdResponse(res)
+      if (failureReason || !data) {
+        const reason = failureReason ?? buildVerificationApiFailureReason(new Error('empty response'))
+        employmentAiOutcomeRef.current = {
+          passed: false,
+          message: reason,
+          company: null,
+          confidence: null,
+          reason,
+        }
+        return
+      }
       const aiCompany = parseCompany(data.company)
       const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low') ? data.confidence : null
+      const reason = verifyIdReasonFromBody(data)
       employmentAiOutcomeRef.current = {
         passed: data.ok,
-        message: sanitizeVerificationUserMessage(data.message),
+        message: sanitizeVerificationUserMessage(data.message ?? reason),
         company: aiCompany,
         confidence: aiConf,
-        reason: data.reason ? sanitizeVerificationUserMessage(data.reason) : null,
+        reason: data.ok ? (data.reason ? sanitizeVerificationUserMessage(data.reason) : null) : reason,
       }
-    } catch {
+    } catch (err) {
+      console.error('[IdentityVerify] employment verify-id failed:', err)
+      const reason = buildVerificationApiFailureReason(err)
       employmentAiOutcomeRef.current = {
         passed: false,
-        message: 'AI 暫時無法完成審核，已轉人工審核。',
+        message: reason,
         company: null,
         confidence: null,
-        reason: 'AI 暫時無法完成審核，已轉人工審核。',
+        reason,
       }
     }
   }
@@ -319,7 +340,21 @@ export default function IdentityVerifyScreen({
           docType: 'other',
         }),
       })
-      const data = await res.json() as { ok: boolean; confidence?: string; message: string; reason?: string }
+      const { data, failureReason } = await parseVerifyIdResponse(res)
+      if (failureReason || !data) {
+        const reason = failureReason ?? buildVerificationApiFailureReason(new Error('empty response'))
+        incomeAiOutcomeRef.current = {
+          aiResult: {
+            passed: false,
+            company: null,
+            confidence: null,
+            reason,
+          },
+          reviewMode: 'manual',
+          manualReason: reason,
+        }
+        return
+      }
       const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low')
         ? data.confidence
         : null
@@ -327,23 +362,25 @@ export default function IdentityVerifyScreen({
         passed: data.ok,
         company: null,
         confidence: aiConf,
-        reason: sanitizeVerificationUserMessage(data.reason ?? data.message),
+        reason: verifyIdReasonFromBody(data),
       }
       incomeAiOutcomeRef.current = {
         aiResult,
         reviewMode: data.ok ? 'ai_auto' : 'manual',
-        manualReason: data.ok ? '' : (aiResult.reason ?? 'AI 未通過，已轉人工審核。人工審核時間可能大於 12 小時。'),
+        manualReason: data.ok ? '' : resolveManualReviewReason(aiResult.reason),
       }
-    } catch {
+    } catch (err) {
+      console.error('[IdentityVerify] income verify-id failed:', err)
+      const reason = buildVerificationApiFailureReason(err)
       incomeAiOutcomeRef.current = {
         aiResult: {
           passed: false,
           company: null,
           confidence: null,
-          reason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+          reason,
         },
         reviewMode: 'manual',
-        manualReason: 'AI 暫時無法完成審核，已轉人工審核。人工審核時間可能大於 12 小時。',
+        manualReason: reason,
       }
     }
   }
@@ -529,7 +566,7 @@ export default function IdentityVerifyScreen({
       proofResult.path,
       aiForSubmit ?? undefined,
       aiForSubmit?.passed ? 'ai_auto' : 'manual',
-      aiForSubmit?.passed ? undefined : 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。',
+      aiForSubmit?.passed ? undefined : resolveManualReviewReason(aiForSubmit?.reason),
     )
     if (!submitResult.ok) {
       return { ok: false, error: submitResult.error ?? '送審失敗，請稍後再試。' }
@@ -603,7 +640,7 @@ export default function IdentityVerifyScreen({
 
         let extraAi: AiResult | undefined
         let reviewMode: 'ai_auto' | 'manual' = 'manual'
-        let manualReason = '收入文件由人工審核。人工審核時間可能大於 12 小時。'
+        let manualReason = `收入文件由人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
 
         if (incomeDoc.file.type.startsWith('image/')) {
           incomeAiOutcomeRef.current = null
@@ -641,7 +678,7 @@ export default function IdentityVerifyScreen({
           extraAi,
           reviewMode,
           reviewMode === 'manual'
-            ? (manualReason || 'AI 未通過或逾時，已轉人工審核。人工審核時間可能大於 12 小時。')
+            ? resolveManualReviewReason(extraAi?.reason, manualReason)
             : undefined,
         )
         if (!incomeSubmit.ok) {

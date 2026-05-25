@@ -368,7 +368,9 @@ function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
   const aiTone = doc.ai_passed ? 'pass' : needsManualReview ? 'review' : 'fail'
   const aiReasonLines = [
     doc.ai_reason && `AI 判斷：${sanitizeVerificationUserMessage(doc.ai_reason)}`,
-    doc.manual_review_reason && `人工覆核原因：${sanitizeVerificationUserMessage(doc.manual_review_reason)}`,
+    doc.manual_review_reason
+      && doc.manual_review_reason !== doc.ai_reason
+      && `人工覆核原因：${sanitizeVerificationUserMessage(doc.manual_review_reason)}`,
     doc.ai_confidence && `AI 信心度：${CONFIDENCE_LABEL[doc.ai_confidence]}`,
     doc.doc_type && `文件類型：${doc.doc_type === 'employee_id' ? '員工證 / 識別證' : doc.doc_type === 'tax_return' ? '扣繳憑單' : doc.doc_type === 'payslip' ? '薪資單' : doc.doc_type}`,
     needsManualReview && '處理方式：此案件不會自動通過，需要管理員人工確認後核准或拒絕。',
