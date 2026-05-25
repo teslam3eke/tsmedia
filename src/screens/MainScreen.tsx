@@ -62,6 +62,9 @@ import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { ensureQuestionnaireHasFixedSixth } from '@/utils/questions'
 import { IncomeBorder } from '@/components/IncomeBorder'
+import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
+import { PublicProfilePhotoPreview } from '@/components/PublicProfilePhotoPreview'
+import { uuidToGradients } from '@/lib/profileGradients'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
@@ -333,13 +336,7 @@ function hashFromUuid(uuid: string): number {
   return Math.abs(h)
 }
 
-function uuidToGradients(uuid: string): { from: string; to: string } {
-  const h = hashFromUuid(uuid)
-  return {
-    from: `hsl(${h % 360} 62% 42%)`,
-    to: `hsl(${(h + 42) % 360} 58% 36%)`,
-  }
-}
+/** @see uuidToGradients in `@/lib/profileGradients` */
 
 /** 與 QuestionnaireScreen（隨機 5 題 + 固定第 6 題）一致；卡片／詳情最多呈現幾組問答 */
 const QUESTIONNAIRE_QA_CARD_LIMIT = 6
@@ -1157,214 +1154,6 @@ function persistDemoPuzzleClearedSlots(map: Record<number, number[]>) {
   } catch {
     /* ignore */
   }
-}
-
-/** 探索／個人檔案頂部：多張生活照左右滑或點圓點切換（單張時與原先相同） */
-function BlurredProfilePhotoSlideshow({
-  profileKey,
-  photoUrls,
-  alt,
-  gradientFrom,
-  gradientTo,
-  variant,
-  compatScore,
-  onReportClick,
-  unblockedIndices,
-  /** 探索：前 N 張 slide 使用 `fetchPriority="high"`（搭配 `preloadDiscoverImageUrls`）。 */
-  highFetchPrioritySlideCount = 0,
-}: {
-  profileKey: string | number
-  photoUrls: string[]
-  alt: string
-  gradientFrom: string
-  gradientTo: string
-  variant: 'discover' | 'detail'
-  compatScore?: number
-  onReportClick: () => void
-  /** 在聊天中已完整解鎖的相片的索引（0-based），不套用模糊。 */
-  unblockedIndices?: ReadonlySet<number> | number[]
-  highFetchPrioritySlideCount?: number
-}) {
-  const [index, setIndex] = useState(0)
-  const [photoLoadState, setPhotoLoadState] = useState<Record<number, 'loading' | 'loaded' | 'error'>>({})
-  const touchStartX = useRef<number | null>(null)
-  const n = photoUrls.length
-  const clearSet =
-    unblockedIndices instanceof Set
-      ? unblockedIndices
-      : new Set(unblockedIndices ?? [])
-
-  const gradientBg = `linear-gradient(160deg, ${gradientFrom}, ${gradientTo})`
-
-  useEffect(() => {
-    setIndex(0)
-    setPhotoLoadState({})
-  }, [profileKey, photoUrls.join('|')])
-
-  const markPhotoLoaded = (i: number) => {
-    setPhotoLoadState((prev) => (prev[i] === 'loaded' ? prev : { ...prev, [i]: 'loaded' }))
-  }
-
-  const markPhotoError = (i: number) => {
-    setPhotoLoadState((prev) => (prev[i] === 'error' ? prev : { ...prev, [i]: 'error' }))
-  }
-
-  const bindPhotoRef = (el: HTMLImageElement | null, i: number) => {
-    if (!el) return
-    if (el.complete && el.naturalWidth > 0) markPhotoLoaded(i)
-  }
-
-  const currentPhotoState = n > 0 ? (photoLoadState[index] ?? 'loading') : 'loaded'
-  const showPhotoLoading = n > 0 && currentPhotoState !== 'loaded'
-
-  const step = (delta: number) => {
-    if (n <= 1) return
-    setIndex((i) => (i + delta + n) % n)
-  }
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
-  }
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current == null || n <= 1) return
-    const dx = e.changedTouches[0].clientX - touchStartX.current
-    touchStartX.current = null
-    if (dx < -56) step(1)
-    else if (dx > 56) step(-1)
-  }
-
-  const showPrivacy = n > 0 && currentPhotoState === 'loaded'
-  const privacyClass =
-    variant === 'discover'
-      ? 'absolute z-[25] flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5'
-      : 'absolute top-4 left-4 z-[25] flex items-center gap-1.5 bg-black/30 backdrop-blur-md rounded-full px-3 py-1.5'
-  const privacyStyle = variant === 'discover' ? { left: '1rem', bottom: '1rem' } : undefined
-
-  return (
-    <div
-      className="relative w-full flex-shrink-0 overflow-hidden rounded-[0.8rem]"
-      style={{ paddingBottom: '150%' }}
-    >
-      <div
-        className="absolute inset-0 overflow-hidden rounded-[0.8rem]"
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-      >
-        <div
-          className="absolute inset-0 z-0"
-          style={{ background: gradientBg }}
-        />
-
-        {n > 0 &&
-          photoUrls.map((src, i) => {
-            const loaded = photoLoadState[i] === 'loaded'
-            return (
-              <img
-                key={`${profileKey}-ph-${i}`}
-                ref={(el) => bindPhotoRef(el, i)}
-                src={src}
-                alt=""
-                fetchPriority={
-                  variant === 'discover' && highFetchPrioritySlideCount > 0 && i < highFetchPrioritySlideCount
-                    ? 'high'
-                    : undefined
-                }
-                className={cn(
-                  'absolute inset-0 h-full w-full object-cover scale-[1.04] transition-opacity duration-200',
-                  i === index ? 'z-[1]' : 'z-0 pointer-events-none',
-                  loaded && i === index ? 'opacity-100' : 'opacity-0',
-                )}
-                style={clearSet.has(i) ? undefined : { filter: 'blur(6px)' }}
-                draggable={false}
-                onLoad={() => markPhotoLoaded(i)}
-                onError={() => markPhotoError(i)}
-              />
-            )
-          })}
-
-        {showPhotoLoading && (
-          <div
-            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-slate-100/95"
-            aria-live="polite"
-            aria-busy="true"
-          >
-            <div className="h-8 w-8 rounded-full border-2 border-slate-200 border-t-slate-500 animate-spin" aria-hidden />
-            <p className="text-sm font-semibold text-slate-500">
-              {currentPhotoState === 'error' ? '無法載入圖片' : '圖片載入中'}
-            </p>
-          </div>
-        )}
-
-        <div className="pointer-events-none absolute inset-0 z-[5] bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-
-        {n > 1 && (
-          <>
-            <button
-              type="button"
-              onClick={() => step(-1)}
-              className="absolute left-1 top-1/2 z-[22] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm active:bg-black/50"
-              aria-label="上一張"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => step(1)}
-              className="absolute right-1 top-1/2 z-[22] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/35 text-white backdrop-blur-sm active:bg-black/50"
-              aria-label="下一張"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-            <div className="pointer-events-none absolute bottom-3 left-0 right-0 z-[22] flex flex-col items-center gap-1">
-              <div className="pointer-events-auto flex items-center gap-1 rounded-full bg-black/35 px-2 py-1 backdrop-blur-md">
-                {photoUrls.map((_, i) => (
-                  <button
-                    key={`dot-${profileKey}-${i}`}
-                    type="button"
-                    onClick={() => setIndex(i)}
-                    className={cn(
-                      'h-1.5 rounded-full transition-all',
-                      i === index ? 'w-4 bg-white' : 'w-1.5 bg-white/45',
-                    )}
-                    aria-label={`第 ${i + 1} 張，共 ${n} 張`}
-                  />
-                ))}
-              </div>
-              <span className="text-[10px] font-bold tabular-nums text-white/90 drop-shadow">
-                {index + 1} / {n}
-              </span>
-            </div>
-          </>
-        )}
-
-        {showPrivacy && (
-          <div className={privacyClass} style={privacyStyle}>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            <span className="text-[10px] font-semibold text-white/90">隱私保護中</span>
-          </div>
-        )}
-
-        {variant === 'discover' && (
-          <button
-            type="button"
-            onClick={onReportClick}
-            className="absolute left-4 top-4 z-[30] flex items-center gap-1.5 rounded-full bg-black/30 px-3 py-1.5 text-[10px] font-semibold text-white/85 backdrop-blur-md active:bg-black/45"
-          >
-            <Flag className="h-3.5 w-3.5" />
-            檢舉
-          </button>
-        )}
-
-        {variant === 'detail' && compatScore != null && (
-          <div className="absolute bottom-4 right-4 z-[25] flex items-center gap-1.5 rounded-full bg-black/30 px-3 py-1.5 backdrop-blur-md">
-            <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-            <span className="text-sm font-bold text-white">{compatScore}% 契合</span>
-          </div>
-        )}
-      </div>
-      <span className="sr-only">{alt}</span>
-    </div>
-  )
 }
 
 /** 探索卡片 UI（目前第幾張、是否看完、是否已捲過說明）：切開分頁時 DiscoverTab 會卸載，用此還原避免每次都回到第一張。 */
@@ -3943,6 +3732,9 @@ function EditProfileScreen({
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
+  const previewGradients = useMemo(() => uuidToGradients(userId), [userId])
+  const previewAlt = nickname.trim() || name.trim() || '會員'
+
   const [showIncomeBorder, setShowIncomeBorder] = useState<boolean>(profile.show_income_border ?? false)
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
@@ -3950,6 +3742,10 @@ function EditProfileScreen({
   // Photos（僅已上傳至 Storage 的列；新照由 LifePhotoUploadSection 審核後寫入）
   const [photos, setPhotos] = useState<LocalPhoto[]>(() =>
     (profile.photo_urls ?? []).map((p, i) => ({ id: `existing-${i}`, previewUrl: p, storagePath: p })),
+  )
+  const previewPhotoUrls = useMemo(
+    () => photos.map((p) => p.previewUrl).filter(Boolean),
+    [photos],
   )
 
   useEffect(() => {
@@ -4471,18 +4267,18 @@ function EditProfileScreen({
 
           {profile.income_tier ? (
             <div className="bg-white rounded-3xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3">
-              {/* Preview with/without border */}
-              <div className="flex items-center gap-4">
-                <IncomeBorder
-                  tier={showIncomeBorder ? profile.income_tier : null}
-                  radius="0.75rem"
-                  thickness={6}
-                  crownCompact
-                >
-                  <div className="w-20 h-20 bg-slate-100 flex items-center justify-center text-slate-400 font-black text-xl">
-                    {(profile.name ?? '?').charAt(0)}
-                  </div>
-                </IncomeBorder>
+              <div className="flex items-start gap-4">
+                <PublicProfilePhotoPreview
+                  profileKey={userId}
+                  photoUrls={previewPhotoUrls}
+                  alt={previewAlt}
+                  gradientFrom={previewGradients.from}
+                  gradientTo={previewGradients.to}
+                  incomeTier={profile.income_tier}
+                  showIncomeBorder={showIncomeBorder}
+                  widthPx={120}
+                  showIncomeRangeLabel={false}
+                />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-slate-900 leading-tight flex items-center gap-1.5">
                     <Gem className="w-4 h-4 text-slate-600" />
@@ -4517,7 +4313,7 @@ function EditProfileScreen({
                 </div>
               </button>
               <p className="text-[11px] text-slate-400 leading-relaxed px-1">
-                啟用後，所有人看你的照片都會加上 {INCOME_TIER_META[profile.income_tier].short} 。
+                啟用後，所有人看你的照片都會加上 {INCOME_TIER_META[profile.income_tier].short} 。左側預覽為他人於探索頁看到的霧化樣式（縮小版）。
               </p>
             </div>
           ) : incomeStatus?.status === 'pending' ? (
@@ -5369,6 +5165,25 @@ function ProfileTab({
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
+  const [profilePhotoUrls, setProfilePhotoUrls] = useState<string[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const paths = profile?.photo_urls ?? []
+    if (paths.length === 0) {
+      setProfilePhotoUrls([])
+      return
+    }
+    void resolvePhotoUrls(paths).then((urls) => {
+      if (!cancelled) setProfilePhotoUrls(urls.map((u) => u.trim()).filter(Boolean))
+    })
+    return () => { cancelled = true }
+  }, [profile?.photo_urls])
+
+  const profilePreviewGradients = useMemo(
+    () => (profile ? uuidToGradients(profile.id) : { from: '#64748b', to: '#475569' }),
+    [profile?.id],
+  )
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
@@ -5560,17 +5375,26 @@ function ProfileTab({
         </div>
 
         <div className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100 ring-1 ring-slate-200/90">
-                <User className="h-7 w-7 text-slate-400" strokeWidth={1.75} aria-hidden />
-              </div>
-              <div className="min-w-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-start gap-3">
+              <PublicProfilePhotoPreview
+                profileKey={userId}
+                photoUrls={profilePhotoUrls}
+                alt={displayName}
+                gradientFrom={profilePreviewGradients.from}
+                gradientTo={profilePreviewGradients.to}
+                incomeTier={profile?.income_tier}
+                showIncomeBorder={Boolean(profile?.show_income_border && profile?.income_tier)}
+                widthPx={120}
+                showIncomeRangeLabel={false}
+              />
+              <div className="min-w-0 pt-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">個人檔案</p>
                 <h2 className="mt-0.5 truncate text-lg font-bold leading-tight text-slate-900">{displayName}</h2>
                 {profileSubtitle != null && profileSubtitle !== '' ? (
                   <p className="mt-0.5 text-xs text-slate-500">{profileSubtitle}</p>
                 ) : null}
+                <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">他人於探索頁看到的樣式（縮小版）</p>
               </div>
             </div>
             <motion.button
