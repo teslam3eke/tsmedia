@@ -30,8 +30,8 @@ export function serializeDiscoverProfileForCache<T extends DiscoverPhotoProfile>
   return {
     ...rest,
     photoStoragePaths: paths,
-    photoUrls: [],
-  } as T
+    photoUrls: [] as string[],
+  } as unknown as T
 }
 
 /** 讀取快取後：不還原 signed URL，等即時簽章 */
@@ -40,7 +40,7 @@ export function normalizeDiscoverProfileFromCache<T extends DiscoverPhotoProfile
   return {
     ...raw,
     photoStoragePaths: paths,
-    photoUrls: [],
+    photoUrls: [] as string[],
   }
 }
 
