@@ -1624,7 +1624,7 @@ export async function simulatePartnerMatchMessage(matchId: string, body?: string
 // ─── 即時配對（7 分鐘房） ─────────────────────────────────────────────────────
 
 export type InstantMatchPollResult =
-  | { status: 'idle'; hint?: string }
+  | { status: 'idle'; hint?: string; instant_hours_closed?: boolean }
   | { status: 'waiting'; hint?: string }
   | {
       status: 'in_session'

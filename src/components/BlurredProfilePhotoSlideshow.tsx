@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Flag, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
 
 export function BlurredProfilePhotoSlideshow({
   profileKey,
@@ -51,12 +52,19 @@ export function BlurredProfilePhotoSlideshow({
     setPhotoLoadState((prev) => (prev[i] === 'error' ? prev : { ...prev, [i]: 'error' }))
   }
 
-  const bindPhotoRef = (el: HTMLImageElement | null, i: number) => {
-    if (!el) return
+  const bindPhotoRef = (el: HTMLImageElement | null, i: number, src: string) => {
+    if (!el || !isDisplayablePhotoUrl(src)) return
     if (el.complete && el.naturalWidth > 0) markPhotoLoaded(i)
   }
 
-  const currentPhotoState = n > 0 ? (photoLoadState[index] ?? 'loading') : 'loaded'
+  const srcAt = (i: number) => photoUrls[i]?.trim() ?? ''
+  const currentSrc = n > 0 ? srcAt(index) : ''
+  const currentSrcDisplayable = isDisplayablePhotoUrl(currentSrc)
+  const currentPhotoState = n > 0
+    ? (!currentSrcDisplayable
+        ? 'loading'
+        : (photoLoadState[index] ?? 'loading'))
+    : 'loaded'
   const showPhotoLoading = n > 0 && currentPhotoState !== 'loaded'
 
   const step = (delta: number) => {
@@ -99,13 +107,15 @@ export function BlurredProfilePhotoSlideshow({
 
         {n > 0 &&
           photoUrls.map((src, i) => {
+            const trimmed = src.trim()
+            if (!isDisplayablePhotoUrl(trimmed)) return null
             const loaded = photoLoadState[i] === 'loaded'
             const visibleIndex = isPreview ? 0 : index
             return (
               <img
                 key={`${profileKey}-ph-${i}`}
-                ref={(el) => bindPhotoRef(el, i)}
-                src={src}
+                ref={(el) => bindPhotoRef(el, i, trimmed)}
+                src={trimmed}
                 alt=""
                 fetchPriority={
                   variant === 'discover' && highFetchPrioritySlideCount > 0 && i < highFetchPrioritySlideCount

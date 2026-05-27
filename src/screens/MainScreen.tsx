@@ -61,7 +61,7 @@ import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, 
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { ensureQuestionnaireHasFixedSixth } from '@/utils/questions'
-import { IncomeBorder } from '@/components/IncomeBorder'
+import { IncomeBorder, IncomeCrownBadge } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
 import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 import { uuidToGradients } from '@/lib/profileGradients'
@@ -94,6 +94,13 @@ import {
   TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
 } from '@/lib/appDeepLinkEvents'
 import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
+import {
+  isDisplayablePhotoUrl,
+  mergeSignedDiscoverPhotosIntoDeck,
+  normalizeDiscoverProfileFromCache,
+  serializeDiscoverProfileForCache,
+  signDiscoverProfilePhotosBatch,
+} from '@/lib/discoverDeckProfilePhotos'
 import {
   markSkipInstantMatchLeaveOnNextFullUnload,
   peekSkipInstantMatchLeaveOnFullUnload,
@@ -156,6 +163,8 @@ interface Profile {
   photoUrl?: string
   /** 多張生活照（URL 或 storage path，與 photoUrl 二選一或並存；有則以本陣列為主） */
   photoUrls?: string[]
+  /** Supabase storage paths；探索快取只存此欄，顯示前再簽章 */
+  photoStoragePaths?: string[]
   qa: QA[]
   workRegion: Region | null
   homeRegion: Region | null
@@ -397,6 +406,7 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
     gradientTo: g.to,
     compatScore: 82 + (h % 14),
     photoUrls: signed,
+    photoStoragePaths: (row.photo_urls ?? []).map((p) => String(p).trim()).filter(Boolean),
     qa: rpcQuestionnaireToQa(row.questionnaire ?? null),
     workRegion: wr,
     homeRegion: hr,
@@ -1047,7 +1057,7 @@ function collectProfilePhotoUrls(p: Profile): string[] {
   return []
 }
 
-const DISCOVER_DECK_PROFILE_CACHE_VERSION = 3 as const
+const DISCOVER_DECK_PROFILE_CACHE_VERSION = 4 as const
 
 function readDiscoverDeckProfileCache(uid: string, dayKey: string): Profile[] {
   if (typeof window === 'undefined') return []
@@ -1056,7 +1066,8 @@ function readDiscoverDeckProfileCache(uid: string, dayKey: string): Profile[] {
     if (!raw) return []
     const o = JSON.parse(raw) as { v?: number; profiles?: unknown }
     if (o.v !== DISCOVER_DECK_PROFILE_CACHE_VERSION || !Array.isArray(o.profiles)) return []
-    return o.profiles as Profile[]
+    return o.profiles
+      .map((p) => normalizeDiscoverProfileFromCache(p as Profile))
   } catch {
     return []
   }
@@ -1070,7 +1081,7 @@ function writeDiscoverDeckProfileCache(uid: string, dayKey: string, profiles: Pr
       JSON.stringify({
         v: DISCOVER_DECK_PROFILE_CACHE_VERSION,
         t: Date.now(),
-        profiles,
+        profiles: profiles.map(serializeDiscoverProfileForCache),
       }),
     )
   } catch {
@@ -1084,7 +1095,7 @@ function collectTopDiscoverPhotoUrls(profiles: Profile[], max = 3): string[] {
   outer: for (const p of profiles) {
     for (const u of collectProfilePhotoUrls(p)) {
       const s = String(u).trim()
-      if (s) out.push(s)
+      if (s && isDisplayablePhotoUrl(s)) out.push(s)
       if (out.length >= max) break outer
     }
   }
@@ -1273,6 +1284,8 @@ function DiscoverTab({
   const deckLoadEpochRef = useRef(0)
   /** 中止「上一輪仍在 await 的探索 RPC」——僅 bump epoch 無法解 WebKit 卡住中的 fetch。 */
   const discoverDeckRpcFlightRef = useRef<AbortController | null>(null)
+  /** 快取 path 背景簽章；RPC 開始時遞增以略過 stale 合併 */
+  const cachePhotoHydrateEpochRef = useRef(0)
   const discoverUiSnap = userId ? takeDiscoverUiSnapshot(userId, discoverDeckDayKey, deckRefresh) : null
   const [celebrateDeck, setCelebrateDeck] = useState(false)
   const prevRolloverTickRef = useRef(0)
@@ -1295,7 +1308,7 @@ function DiscoverTab({
     [currentUserGender, preferredRegion],
   )
 
-  /** 換帳號／換日：從 localStorage 拉回上一輪成功的名單，避免進探索先看到全螢幕轉圈（與 RPC 並行 SWR）。 */
+  /** 換帳號／換日：從 localStorage 拉回上一輪成功的名單（只含 storage path），再背景簽章相片。 */
   useLayoutEffect(() => {
     if (!userId) {
       setLiveDeck([])
@@ -1305,6 +1318,14 @@ function DiscoverTab({
     const cached = readDiscoverDeckProfileCache(userId, discoverDeckDayKey)
     setLiveDeck(cached)
     setLiveDeckStatus(cached.length > 0 ? 'ready' : 'idle')
+
+    if (cached.length === 0) return
+
+    const hydrateEpoch = ++cachePhotoHydrateEpochRef.current
+    void signDiscoverProfilePhotosBatch(cached).then((signed) => {
+      if (cachePhotoHydrateEpochRef.current !== hydrateEpoch) return
+      setLiveDeck((prev) => mergeSignedDiscoverPhotosIntoDeck(prev, signed))
+    })
   }, [userId, discoverDeckDayKey])
 
   const baseList = userId ? liveDeck : demoBase
@@ -1469,6 +1490,7 @@ function DiscoverTab({
         }
 
         const myEpoch = ++deckLoadEpochRef.current
+        cachePhotoHydrateEpochRef.current += 1
 
         actionTrace('discover.deck', 'effect:開始', {
           uid: shortId(userId),
@@ -4272,14 +4294,19 @@ function EditProfileScreen({
                   showCrown={showIncomeBorder}
                 />
                 <div className="col-span-2 min-w-0">
-                  <p className="text-sm font-bold text-slate-900 leading-tight flex items-center gap-1.5">
-                    <Gem className="w-4 h-4 text-slate-600" />
+                  <p className="text-sm font-bold text-slate-900 leading-tight flex items-center gap-2">
+                    <IncomeCrownBadge tier={profile.income_tier} compact className="h-8 w-16 shrink-0" />
                     {INCOME_TIER_META[profile.income_tier].label}
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     {INCOME_TIER_META[profile.income_tier].range}
                   </p>
-                  <p className="text-[11px] text-emerald-500 mt-0.5 font-semibold">✓ 已通過審核</p>
+                  <p className="text-[11px] text-emerald-500 mt-0.5 font-semibold flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span>✓ 已通過審核</span>
+                    {!showIncomeBorder ? (
+                      <span className="text-red-500">尚未開啟皇冠特效</span>
+                    ) : null}
+                  </p>
                 </div>
               </div>
 
@@ -5288,11 +5315,9 @@ function ProfileTab({
   const verStatus = profile?.verification_status ?? 'pending'
   const isFemale = profile?.gender === 'female'
   /** 女生不強制職業驗證：無收入等級時不顯示待驗證／審核中／已驗證（職業）字樣 */
-  const profileSubtitle =
+  const profileStatusLine =
     profile?.income_tier
-      ? profile.show_income_border
-        ? `⋄ ${INCOME_TIER_META[profile.income_tier].short}`
-        : INCOME_TIER_META[profile.income_tier].label
+      ? null
       : isFemale
         ? null
         : verStatus === 'approved'
@@ -5376,8 +5401,24 @@ function ProfileTab({
               <div className="min-w-0 pt-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">個人檔案</p>
                 <h2 className="mt-0.5 truncate text-lg font-bold leading-tight text-slate-900">{displayName}</h2>
-                {profileSubtitle != null && profileSubtitle !== '' ? (
-                  <p className="mt-0.5 text-xs text-slate-500">{profileSubtitle}</p>
+                {profile?.income_tier ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="inline-flex items-center gap-1.5">
+                      <IncomeCrownBadge
+                        tier={profile.income_tier}
+                        compact
+                        className="h-8 w-16 shrink-0"
+                      />
+                      <span className="text-xs font-semibold text-slate-600">
+                        {INCOME_TIER_META[profile.income_tier].short}
+                      </span>
+                    </span>
+                    {!profile.show_income_border ? (
+                      <span className="text-xs font-semibold text-red-500">尚未開啟皇冠特效</span>
+                    ) : null}
+                  </div>
+                ) : profileStatusLine ? (
+                  <p className="mt-0.5 text-xs text-slate-500">{profileStatusLine}</p>
                 ) : null}
               </div>
               <motion.button

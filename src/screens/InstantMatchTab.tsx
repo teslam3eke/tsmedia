@@ -47,6 +47,13 @@ import {
 } from '@/lib/instantMatchUnloadGuard'
 import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
 import InstantMatchIntroSplash from '@/components/InstantMatchIntroSplash'
+import {
+  formatMsUntilInstantMatchOpens,
+  INSTANT_MATCH_CLOSED_HINT,
+  INSTANT_MATCH_HOURS_LABEL,
+  isInstantMatchOpenNow,
+  msUntilInstantMatchOpens,
+} from '@/lib/instantMatchHours'
 
 type Props = {
   userId: string
@@ -156,12 +163,43 @@ function InstantCard({ children, className }: { children: ReactNode; className?:
   )
 }
 
-function InstantHeading({ subtitle }: { subtitle: string }) {
+function InstantHeading({ lines }: { lines: readonly string[] }) {
   return (
-    <header className="px-5 pb-2 pt-2">
+    <header className="px-5 pb-3 pt-2">
       <h1 className="text-[22px] font-black tracking-tight text-slate-900">即時配對</h1>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500">{subtitle}</p>
+      <ul className="mt-2.5 space-y-1.5">
+        {lines.map((line) => (
+          <li key={line} className="flex gap-2.5 text-[13px] leading-snug text-slate-600">
+            <span className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-slate-400" aria-hidden />
+            <span>{line}</span>
+          </li>
+        ))}
+      </ul>
     </header>
+  )
+}
+
+const INSTANT_IDLE_GUIDE_LINES = [
+  `開放時段：${INSTANT_MATCH_HOURS_LABEL}。`,
+  '七分鐘匿名聊天，照片以拼圖方式解鎖。',
+  '時間結束後，雙方都選加好友才會開通正式配對。',
+] as const
+
+const INSTANT_WAITING_GUIDE_LINES = [
+  '離開此分頁、切換 App 或關閉程式會退出排隊。',
+  '請保持 App 開啟，配對成功後會自動進入聊天室。',
+] as const
+
+function InstantHoursClosedNotice({ msUntil }: { msUntil: number }) {
+  return (
+    <div className="rounded-2xl bg-amber-50 px-4 py-3 ring-1 ring-amber-100">
+      <p className="text-xs font-bold leading-relaxed text-amber-900">{INSTANT_MATCH_CLOSED_HINT}</p>
+      {msUntil > 0 ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-amber-800/90">
+          距離下次開放約 {formatMsUntilInstantMatchOpens(msUntil)}
+        </p>
+      ) : null}
+    </div>
   )
 }
 
@@ -189,9 +227,8 @@ function MatchingPulseVisual() {
           <Users className="h-8 w-8" strokeWidth={2} />
         </motion.div>
       </div>
-      <p className="mt-4 flex items-center justify-center gap-0.5 text-sm font-bold text-slate-800">
-        尋找另一位使用者
-        <WaitingDots />
+      <p className="mt-4 text-sm font-bold text-slate-800">
+        尋找另一位使用者…
       </p>
       <div className="relative mt-5 h-2 w-full max-w-[220px] overflow-hidden rounded-full bg-slate-200">
         <motion.div
@@ -202,21 +239,6 @@ function MatchingPulseVisual() {
         />
       </div>
     </div>
-  )
-}
-
-function WaitingDots() {
-  return (
-    <span className="inline-flex gap-0.5 pl-0.5" aria-hidden>
-      {[0, 1, 2].map((i) => (
-        <motion.span
-          key={i}
-          className="inline-block h-1 w-1 rounded-full bg-slate-800"
-          animate={{ opacity: [0.2, 1, 0.2], y: [0, -3, 0] }}
-          transition={{ duration: 1.55, repeat: Infinity, delay: i * 0.35 }}
-        />
-      ))}
-    </span>
   )
 }
 
@@ -717,6 +739,10 @@ export default function InstantMatchTab({
   }, [inSession, userId])
 
   const startQueue = async () => {
+    if (!isInstantMatchOpenNow(new Date(nowTick))) {
+      setPollError(INSTANT_MATCH_CLOSED_HINT)
+      return
+    }
     busyRef.current = true
     setBusy(true)
     setPollError(null)
@@ -798,6 +824,9 @@ export default function InstantMatchTab({
 
   const peerDisplay = peer?.nickname?.trim() || peer?.name?.trim() || '神秘對象'
 
+  const instantOpenNow = isInstantMatchOpenNow(new Date(nowTick))
+  const msUntilInstantOpen = instantOpenNow ? 0 : msUntilInstantMatchOpens(new Date(nowTick))
+
   const pageShellClass = cn('flex min-h-0 flex-1 flex-col', snapshot?.status === 'waiting' && 'bg-slate-50')
 
   if (!pollReady) {
@@ -814,25 +843,28 @@ export default function InstantMatchTab({
   if (!snapshot || snapshot.status === 'idle') {
     return (
       <div className={pageShellClass}>
-        <InstantHeading subtitle="七分鐘隨機匿名聊天——時間到後雙方都按「加為好友」才會開通一般聊聊與完整拼圖。" />
+        <InstantHeading lines={INSTANT_IDLE_GUIDE_LINES} />
         <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-6">
-          <InstantCard>
+          <InstantCard className="text-left">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-white">
               <Users className="h-8 w-8" strokeWidth={2} aria-hidden />
             </div>
             <p className="text-sm font-semibold leading-relaxed text-slate-800">
-              {(snapshot?.status === 'idle' ? snapshot.hint : undefined) ??
-                '請按下方「開始配對」加入等候（不會自動幫你排隊）；需另一位使用者同時在等待才會進房。'}
+              按下「開始配對」加入等候
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              需另一位使用者同時在等候才會進房，不會自動幫你排隊。
             </p>
           </InstantCard>
+          {!instantOpenNow ? <InstantHoursClosedNotice msUntil={msUntilInstantOpen} /> : null}
           {pollError && <p className="text-center text-xs font-medium text-red-600">{pollError}</p>}
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || !instantOpenNow}
             onClick={() => void startQueue()}
             className="w-full rounded-2xl bg-slate-900 py-3.5 font-bold text-white disabled:opacity-50"
           >
-            {busy ? '處理中…' : '開始配對'}
+            {!instantOpenNow ? '非開放時段' : busy ? '處理中…' : '開始配對'}
           </button>
         </div>
       </div>
@@ -842,13 +874,10 @@ export default function InstantMatchTab({
   if (snapshot.status === 'waiting') {
     return (
       <div className={pageShellClass}>
-        <InstantHeading subtitle="你已加入等候；離開本分頁、切換 App 或關閉程式會自動退出排隊並取消等候。" />
+        <InstantHeading lines={INSTANT_WAITING_GUIDE_LINES} />
         <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-6">
           <InstantCard className="overflow-hidden py-8">
             <MatchingPulseVisual />
-            <p className="mt-6 text-xs font-medium leading-relaxed text-slate-600">
-              {snapshot.hint ?? '佇列中，配對成功後會自動進入聊天室。'}
-            </p>
           </InstantCard>
           {pollError && <p className="text-center text-xs font-medium text-red-600">{pollError}</p>}
           <button
@@ -901,9 +930,9 @@ export default function InstantMatchTab({
           </h2>
           <p className="mb-8 max-w-[18rem] text-sm leading-relaxed text-slate-600">
             {snapshot.mutual_friend
-              ? '對方也想當好友——已為你們建立正式配對，快到「配對」分頁開始聊天吧。'
+              ? '對方也想當好友，已為你們建立正式配對。快到「配對」分頁開始聊天吧。'
               : decisionClosed
-                ? '聊天結束後須在 2 分鐘內雙方都按「加為好友」才能繼續；已逾時或未達成。'
+                ? '聊天結束後須在 2 分鐘內雙方都選加好友才能繼續，已逾時或未達成。'
                 : peerEnd
                   ? '對方已關閉或離開聊天。此場即時對話已結束，你仍可隨時再次加入等候。'
                   : selfEnd
@@ -1001,7 +1030,7 @@ export default function InstantMatchTab({
           liveUseDbTilesOnly={false}
           onSpendUnlock={() => {
             setPollError(
-              '即時匿名僅能用「互傳訊息」解鎖拼圖；道具「隨機解 1 片」請在雙方加好友後，於「配對」聊天使用。',
+              '即時匿名僅能用互傳訊息解鎖拼圖。道具「隨機解 1 片」請在雙方加好友後，於「配對」聊天使用。',
             )
           }}
         />

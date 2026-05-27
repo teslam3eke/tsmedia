@@ -1,8 +1,8 @@
 /**
- * 探索名單 SWR：`MainScreen` DiscoverTab 將上一輪成功的 Profile 列表存於 localStorage，
+ * 探索名單 SWR：localStorage 只存 profile 中繼資料與 `photoStoragePaths`（不存 signed URL）。
  * 冷啟／回頁可先畫卡片再背景重抓 RPC。登出請與 TanStack cache 一併清掉。
  */
-export const DISCOVER_DECK_LS_PREFIX = 'tsmedia-discover-deck-v3:' as const
+export const DISCOVER_DECK_LS_PREFIX = 'tsmedia-discover-deck-v4:' as const
 
 export function discoverDeckLocalStorageKey(uid: string, dayKey: string): string {
   return `${DISCOVER_DECK_LS_PREFIX}${uid}:${dayKey}`
