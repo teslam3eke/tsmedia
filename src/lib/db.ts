@@ -1594,10 +1594,14 @@ export async function getPhotoUnlockState(matchId: string): Promise<PhotoUnlockS
   return data as PhotoUnlockStateRow
 }
 
-export async function spendBlurUnlockTile(matchId: string): Promise<{ ok: boolean; state?: PhotoUnlockStateRow; error?: string }> {
+export async function spendBlurUnlockTile(
+  matchId: string,
+  tile: number,
+): Promise<{ ok: boolean; state?: PhotoUnlockStateRow; error?: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('spend_blur_unlock_tile', {
     p_match_id: matchId,
+    p_tile: tile,
   })
 
   if (error) {

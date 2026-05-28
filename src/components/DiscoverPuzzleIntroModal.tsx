@@ -9,6 +9,7 @@ import {
 } from '@/lib/discoverDemoPhotoUrls'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
+import { pickPuzzleTilesLocalBatch } from '@/lib/puzzleUnlockPick'
 
 /** 對話／解鎖腳本總長（前半段）；完成後另停頓 {@link POST_COMPLETE_PAUSE_MS} 再接確認鈕 */
 const SCRIPT_TOTAL_MS = 6_850
@@ -22,9 +23,6 @@ const ROUND_SLOT_MS = Math.floor(SCRIPT_TOTAL_MS / ROUND_COUNT)
 const ROUND_LEAD_MS = 32
 const PEER_TO_ME_MS = 400
 const ME_TO_UNLOCK_MS = 330
-
-/** 對齊 {@link PuzzlePhotoUnlock}：單張圖格子拆片順序 */
-const TILE_UNLOCK_SEQUENCE = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15] as const
 
 const PUZZLE_TILES = Array.from({ length: 16 }, (_, i) => i)
 
@@ -172,15 +170,7 @@ export default function DiscoverPuzzleIntroModal({
     /** DOM `setTimeout` 為數字 handle；標成 `Timeout[]` 會在 `tsc -b` 與實際回傳不符。 */
     const timers: number[] = []
     let msgSerial = 0
-
-    function pickNextTiles(prev: Set<number>, need: number): number[] {
-      const add: number[] = []
-      for (const ti of TILE_UNLOCK_SEQUENCE) {
-        if (!prev.has(ti)) add.push(ti)
-        if (add.length >= need) break
-      }
-      return add
-    }
+    let unlockBatch = 0
 
     for (const ev of timeline) {
       timers.push(
@@ -203,8 +193,10 @@ export default function DiscoverPuzzleIntroModal({
             return
           }
           const add = ev.add
+          const batchIndex = unlockBatch
+          unlockBatch += 1
           setDemoUnlocked((prev) => {
-            const pick = pickNextTiles(prev, add)
+            const pick = pickPuzzleTilesLocalBatch(prev, add, 'discover-puzzle-intro', batchIndex)
             if (pick.length === 0) return prev
             const lastPulse = pick[pick.length - 1] ?? null
             if (lastPulse != null) {

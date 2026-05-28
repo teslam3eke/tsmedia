@@ -5,6 +5,12 @@ import { cn } from '@/lib/utils'
 import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  clampPuzzlePhotoSlots,
+  computeChatUnlockedGlobalTiles,
+  puzzleCountPerSlot,
+  puzzleSlotIsComplete,
+} from '@/lib/puzzleUnlockPick'
 
 export type PuzzleChatMessage = {
   id: string
@@ -51,98 +57,12 @@ export function puzzleRecentMatchBoostEnabled(
 const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
 
 
-const PUZZLE_UNLOCK_ORDER = [5, 6, 9, 10, 1, 2, 4, 7, 8, 11, 13, 14, 0, 3, 12, 15]
-
 /** 無對方照片 URL 時仍渲染 16 格（解鎖與右側計數一致）；勿用大號首字遮住拼圖 */
 const PUZZLE_TILE_FALLBACK_HREF =
   'data:image/svg+xml,' +
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#475569"/><stop offset="1" stop-color="#0f172a"/></linearGradient></defs><rect width="400" height="600" fill="url(#g)"/></svg>',
   )
-
-function pickOneSpreadPuzzleTileInSlot(occupied: Set<number>, slot: number, rng: () => number): number | null {
-  const base = slot * 16
-  const occupiedLocal = new Set<number>()
-  for (const g of occupied) {
-    if (g >= base && g < base + 16) occupiedLocal.add(g - base)
-  }
-  const pick = pickOneSpreadPuzzleTile(occupiedLocal, rng)
-  if (pick === null) return null
-  return base + pick
-}
-
-function puzzleSlotIsComplete(globalSet: Set<number>, slot: number): boolean {
-  const base = slot * 16
-  for (let l = 0; l < 16; l += 1) {
-    if (!globalSet.has(base + l)) return false
-  }
-  return true
-}
-
-function puzzleCountPerSlot(globalSet: Set<number>, slot: number): number {
-  const base = slot * 16
-  let n = 0
-  for (let l = 0; l < 16; l += 1) {
-    if (globalSet.has(base + l)) n += 1
-  }
-  return n
-}
-
-function puzzleTileManhattan(a: number, b: number): number {
-  const ra = Math.floor(a / 4)
-  const ca = a % 4
-  const rb = Math.floor(b / 4)
-  const cb = b % 4
-  return Math.abs(ra - rb) + Math.abs(ca - cb)
-}
-
-function puzzleMinDistToOccupied(tile: number, occupied: Set<number>): number {
-  let d = Infinity
-  for (const t of occupied) {
-    d = Math.min(d, puzzleTileManhattan(tile, t))
-  }
-  return d
-}
-
-/** Prefer tiles far from everything already unlocked; random tie-break so bonus grids vary but stay stable per seed. */
-function pickOneSpreadPuzzleTile(occupied: Set<number>, rng: () => number): number | null {
-  const candidates: number[] = []
-  for (let t = 0; t < 16; t += 1) {
-    if (!occupied.has(t)) candidates.push(t)
-  }
-  if (candidates.length === 0) return null
-  let best = -1
-  const pool: number[] = []
-  for (const t of candidates) {
-    const md = puzzleMinDistToOccupied(t, occupied)
-    if (md > best) {
-      best = md
-      pool.length = 0
-      pool.push(t)
-    } else if (md === best) {
-      pool.push(t)
-    }
-  }
-  return pool[Math.floor(rng() * pool.length)] ?? null
-}
-
-function puzzleHashSeed(s: string): number {
-  let h = 2166136261
-  for (let i = 0; i < s.length; i += 1) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return h >>> 0
-}
-
-function puzzleMulberry32(seed: number): () => number {
-  return () => {
-    let t = (seed += 0x6d2b79f5)
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 function formatPuzzleBoostCountdown(ms: number) {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000))
@@ -161,7 +81,7 @@ export function getPuzzleProgress(
   liveUseDbTilesOnly = false,
   recentMatchBoostEnabled = true,
 ) {
-  const slots = Math.max(1, Math.min(PUZZLE_MAX_PHOTO_SLOTS, photoSlotCount))
+  const slots = clampPuzzlePhotoSlots(photoSlotCount)
   const maxGlobal = slots * 16
 
   const meCount = messages.filter((message) => message.from === 'me').length
@@ -173,39 +93,19 @@ export function getPuzzleProgress(
   const mult = boostActive ? 2 : 1
   const chatUnlocks = round * mult
 
-  const rng = puzzleMulberry32(puzzleHashSeed(`${puzzleSeedKey}|puzzle|${matchedAt ?? 0}`))
-
   let globalSorted: number[]
-  const chatTiles: number[] = []
 
   if (liveUseDbTilesOnly) {
     globalSorted = Array.from(new Set(manualUnlockedTiles.filter((t) => t >= 0 && t < maxGlobal))).sort((a, b) => a - b)
   } else {
-    const occupied = new Set<number>(manualUnlockedTiles)
-    for (let r = 1; r <= round; r += 1) {
-      const slot = Math.floor((r - 1) / 16)
-      if (slot >= slots) break
-      const idxInSlot = (r - 1) % 16
-      const primaryLocal = PUZZLE_UNLOCK_ORDER[idxInSlot]
-      const globalPrimary = slot * 16 + primaryLocal
-      if (!occupied.has(globalPrimary)) {
-        chatTiles.push(globalPrimary)
-        occupied.add(globalPrimary)
-      } else {
-        const fallback = pickOneSpreadPuzzleTileInSlot(occupied, slot, rng)
-        if (fallback !== null) {
-          chatTiles.push(fallback)
-          occupied.add(fallback)
-        }
-      }
-      if (mult === 2) {
-        const spread = pickOneSpreadPuzzleTileInSlot(occupied, slot, rng)
-        if (spread !== null) {
-          chatTiles.push(spread)
-          occupied.add(spread)
-        }
-      }
-    }
+    const chatTiles = computeChatUnlockedGlobalTiles({
+      round,
+      mult,
+      slots,
+      manualUnlockedTiles,
+      puzzleSeedKey,
+      matchedAt,
+    })
     globalSorted = Array.from(new Set([...chatTiles, ...manualUnlockedTiles]))
       .filter((t) => t >= 0 && t < maxGlobal)
       .sort((a, b) => a - b)

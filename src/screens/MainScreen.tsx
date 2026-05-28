@@ -77,6 +77,10 @@ import {
   DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
 } from '@/lib/discoverDemoPhotoUrls'
 import {
+  computeChatUnlockedGlobalTiles,
+  pickNextBlurUnlockGlobalTile,
+} from '@/lib/puzzleUnlockPick'
+import {
   PuzzlePhotoUnlock,
   collectConversationPhotoUrls,
   getPuzzleProgress,
@@ -3401,14 +3405,16 @@ function ChatRoomView({
       Math.max(1, collectConversationPhotoUrls(conversation).length),
     )
     const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
+    const puzzleSeedKey = conversation.instantCarrySessionId
+      ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
+      : String(conversation.id)
+    const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
     const progress = getPuzzleProgress(
       messages,
       manualUnlockedTiles,
-      conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt,
+      matchedAtForPuzzle,
       Date.now(),
-      conversation.instantCarrySessionId
-        ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
-        : String(conversation.id),
+      puzzleSeedKey,
       photoSlots,
       false,
       recentMatchBoostEnabled,
@@ -3418,9 +3424,29 @@ function ChatRoomView({
       onNeedSubscription()
       return
     }
+    const meCount = messages.filter((m) => m.from === 'me').length
+    const themCount = messages.filter((m) => m.from === 'them').length
+    const round = Math.floor(Math.min(meCount, themCount) / 3)
+    const mult = progress.boostActive ? 2 : 1
+    const chatTiles = computeChatUnlockedGlobalTiles({
+      round,
+      mult,
+      slots: photoSlots,
+      manualUnlockedTiles,
+      puzzleSeedKey,
+      matchedAt: matchedAtForPuzzle,
+    })
+    const nextGlobal = pickNextBlurUnlockGlobalTile({
+      chatTilesOrdered: chatTiles,
+      manualUnlockedTiles,
+      activePhotoIndex: progress.activePhotoIndex,
+      puzzleSeedKey,
+      matchedAt: matchedAtForPuzzle,
+    })
+    if (nextGlobal == null) return
     if (isLive && conversation.matchId) {
       const prevLen = manualUnlockedTiles.length
-      const res = await spendBlurUnlockTile(conversation.matchId)
+      const res = await spendBlurUnlockTile(conversation.matchId, nextGlobal)
       await refreshCredits()
       if (!res.ok) {
         if ((res.error ?? '').toLowerCase().includes('insufficient')) {
@@ -3430,20 +3456,13 @@ function ChatRoomView({
         }
         return
       }
-      if (res.state?.unlocked_tiles) {
-        setManualUnlockedTiles(res.state.unlocked_tiles)
-        if (res.state.unlocked_tiles.length > prevLen) {
-          onBlurUnlockSpent?.()
-        }
+      setManualUnlockedTiles((tiles) => [...tiles, nextGlobal])
+      if (manualUnlockedTiles.length + 1 > prevLen) {
+        onBlurUnlockSpent?.()
       }
       setSendWarning('')
       return
     }
-    const unlockedLocal = new Set(progress.unlockedTiles)
-    const lockedTiles = Array.from({ length: 16 }, (_, tile) => tile).filter((tile) => !unlockedLocal.has(tile))
-    const nextLocal = lockedTiles[Math.floor(Math.random() * lockedTiles.length)]
-    if (nextLocal == null) return
-    const nextGlobal = progress.activePhotoIndex * 16 + nextLocal
     setManualUnlockedTiles((tiles) => [...tiles, nextGlobal])
     onDemoBlurSpent()
     onBlurUnlockSpent?.()
