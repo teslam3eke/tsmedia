@@ -47,6 +47,7 @@ import {
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
+  getPhotoUnlockState,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages, patchChatMessageReadAt,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
@@ -56,7 +57,9 @@ import {
 } from '@/lib/db'
 import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
-import SubscriptionScreen from '@/screens/SubscriptionScreen'
+import MembershipManagementScreen, {
+  type MembershipUpdateEvent,
+} from '@/screens/MembershipManagementScreen'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
@@ -3249,8 +3252,15 @@ function ChatRoomView({
 
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
-    /** 064：即時升格 DB 刻意空列；一般配對（含 super like）亦改由訊息推導，勿灌入 sync 線性 0..n */
-    setManualUnlockedTiles([])
+    let cancelled = false
+    ;(async () => {
+      const state = await getPhotoUnlockState(conversation.matchId!)
+      if (cancelled) return
+      setManualUnlockedTiles(Array.isArray(state?.unlocked_tiles) ? state!.unlocked_tiles : [])
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [isLive, conversation.matchId])
 
   useEffect(() => {
@@ -3436,33 +3446,50 @@ function ChatRoomView({
       puzzleSeedKey,
       matchedAt: matchedAtForPuzzle,
     })
-    const nextGlobal = pickNextBlurUnlockGlobalTile({
-      chatTilesOrdered: chatTiles,
-      manualUnlockedTiles,
-      activePhotoIndex: progress.activePhotoIndex,
-      puzzleSeedKey,
-      matchedAt: matchedAtForPuzzle,
-    })
-    if (nextGlobal == null) return
-    if (isLive && conversation.matchId) {
+    const rejectedTiles = new Set<number>()
+    let nextGlobal: number | null = null
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      nextGlobal = pickNextBlurUnlockGlobalTile({
+        chatTilesOrdered: chatTiles,
+        manualUnlockedTiles,
+        activePhotoIndex: progress.activePhotoIndex,
+        puzzleSeedKey,
+        matchedAt: matchedAtForPuzzle,
+        spendIndex: manualUnlockedTiles.length + attempt,
+        extraOccupiedGlobal: rejectedTiles,
+      })
+      if (nextGlobal == null) break
+      if (!isLive || !conversation.matchId) break
       const prevLen = manualUnlockedTiles.length
       const res = await spendBlurUnlockTile(conversation.matchId, nextGlobal)
       await refreshCredits()
-      if (!res.ok) {
-        if ((res.error ?? '').toLowerCase().includes('insufficient')) {
-          onNeedSubscription()
-        } else {
-          setSendWarning(res.error ?? '解鎖失敗')
+      if (res.ok) {
+        setManualUnlockedTiles((tiles) => [...tiles, nextGlobal!])
+        if (manualUnlockedTiles.length + 1 > prevLen) {
+          onBlurUnlockSpent?.()
         }
+        setSendWarning('')
         return
       }
-      setManualUnlockedTiles((tiles) => [...tiles, nextGlobal])
-      if (manualUnlockedTiles.length + 1 > prevLen) {
-        onBlurUnlockSpent?.()
+      if ((res.error ?? '').toLowerCase().includes('already unlocked')) {
+        rejectedTiles.add(nextGlobal)
+        setManualUnlockedTiles((tiles) =>
+          tiles.includes(nextGlobal!) ? tiles : [...tiles, nextGlobal!],
+        )
+        continue
       }
-      setSendWarning('')
+      if ((res.error ?? '').toLowerCase().includes('insufficient')) {
+        onNeedSubscription()
+      } else {
+        setSendWarning(res.error ?? '解鎖失敗')
+      }
       return
     }
+    if (isLive && conversation.matchId) {
+      setSendWarning(nextGlobal == null ? '目前沒有可解鎖的拼圖格' : '解鎖失敗，請稍後再試')
+      return
+    }
+    if (nextGlobal == null) return
     setManualUnlockedTiles((tiles) => [...tiles, nextGlobal])
     onDemoBlurSpent()
     onBlurUnlockSpent?.()
@@ -5504,7 +5531,7 @@ function ProfileTab({
           className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-amber-900 border-b border-slate-50 bg-amber-50/50"
         >
           <Star className="w-4 h-4 text-amber-500" />
-          <span className="font-bold">會員訂閱</span>
+          <span className="font-bold">會員管理</span>
           <ChevronRight className="w-4 h-4 text-amber-400 ml-auto" />
         </motion.button>
         <motion.button
@@ -6845,7 +6872,7 @@ export default function MainScreen({
       </AnimatePresence>
 
       <AnimatePresence>
-        {showSubscription && (
+        {showSubscription && user?.id && (
           <motion.div
             key="subscription-overlay"
             initial={{ opacity: 0 }}
@@ -6853,31 +6880,48 @@ export default function MainScreen({
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[400] flex flex-col bg-white"
           >
-            <SubscriptionScreen
+            <MembershipManagementScreen
+              userId={user.id}
               gender={currentUserGender}
               userEmail={user?.email ?? ''}
               onBack={() => setShowSubscription(false)}
-              onSubscribed={async () => {
+              onUpdated={async (event: MembershipUpdateEvent) => {
                 setShowSubscription(false)
-                const beforeSnap = preSubscriptionCreditsRef.current
                 await refreshCredits()
-                preSubscriptionCreditsRef.current = null
-                if (!user?.id) return
-                const after = await getCreditBalance(user.id)
-                const parts: string[] = []
-                if (beforeSnap) {
-                  if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
-                  if (after.super_like > beforeSnap.super_like) {
-                    parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)
+                if (event.type === 'membership') {
+                  const beforeSnap = preSubscriptionCreditsRef.current
+                  preSubscriptionCreditsRef.current = null
+                  if (!user?.id) return
+                  const after = await getCreditBalance(user.id)
+                  const parts: string[] = []
+                  if (beforeSnap) {
+                    if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
+                    if (after.super_like > beforeSnap.super_like) {
+                      parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)
+                    }
+                    if (after.blur_unlock > beforeSnap.blur_unlock) {
+                      parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
+                    }
                   }
-                  if (after.blur_unlock > beforeSnap.blur_unlock) {
-                    parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
-                  }
+                  setRewardFlash({
+                    variant: 'grant',
+                    title: parts.length > 0 ? '訂閱獎勵已入帳' : '訂閱成功',
+                    subtitle: parts.length > 0 ? parts.join(' · ') : '會員權益已啟用',
+                  })
+                  return
+                }
+                if (event.type === 'pack') {
+                  setRewardFlash({
+                    variant: 'grant',
+                    title: '購買成功',
+                    subtitle: event.subtitle,
+                  })
+                  return
                 }
                 setRewardFlash({
                   variant: 'grant',
-                  title: parts.length > 0 ? '訂閱獎勵已入帳' : '訂閱成功',
-                  subtitle: parts.length > 0 ? parts.join(' · ') : '會員權益已啟用',
+                  title: '已取消會員訂閱',
+                  subtitle: '會員權益已結束，道具次數仍可使用',
                 })
               }}
             />

@@ -168,6 +168,7 @@ export function pickNextBlurUnlockGlobalTile(params: {
   puzzleSeedKey: string
   matchedAt?: number
   spendIndex?: number
+  extraOccupiedGlobal?: ReadonlySet<number>
 }): number | null {
   const {
     chatTilesOrdered,
@@ -176,12 +177,16 @@ export function pickNextBlurUnlockGlobalTile(params: {
     puzzleSeedKey,
     matchedAt,
     spendIndex = manualUnlockedTiles.length,
+    extraOccupiedGlobal,
   } = params
   const slot = activePhotoIndex
   const occupiedGlobal = new Set<number>([...chatTilesOrdered, ...manualUnlockedTiles])
+  if (extraOccupiedGlobal) {
+    for (const g of extraOccupiedGlobal) occupiedGlobal.add(g)
+  }
   const avoidLocal = getLastUnlockedLocalInSlot(chatTilesOrdered, manualUnlockedTiles, slot)
   const rng = puzzleMulberry32(
-    puzzleHashSeed(`${puzzleSeedKey}|blur|${matchedAt ?? 0}|${spendIndex}`),
+    puzzleHashSeed(`${puzzleSeedKey}|blur|${matchedAt ?? 0}|${spendIndex}|${extraOccupiedGlobal?.size ?? 0}`),
   )
   return pickOnePuzzleTileGlobalInSlot(occupiedGlobal, slot, avoidLocal, rng)
 }

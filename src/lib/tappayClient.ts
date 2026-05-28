@@ -55,13 +55,19 @@ export function loadTapPaySdk(): Promise<TPDirectAPI> {
   })
 }
 
-export function initTapPayCardFields(tp: TPDirectAPI, appId: number, appKey: string, serverType: 'sandbox' | 'production') {
+export function initTapPayCardFields(
+  tp: TPDirectAPI,
+  appId: number,
+  appKey: string,
+  serverType: 'sandbox' | 'production',
+  fieldPrefix = 'tappay-card',
+) {
   tp.setupSDK(appId, appKey, serverType)
   tp.card.setup({
     fields: {
-      number: { element: '#tappay-card-number', placeholder: '**** **** **** ****' },
-      expirationDate: { element: '#tappay-card-expiration', placeholder: 'MM / YY' },
-      ccv: { element: '#tappay-card-ccv', placeholder: 'CVC' },
+      number: { element: `#${fieldPrefix}-number`, placeholder: '**** **** **** ****' },
+      expirationDate: { element: `#${fieldPrefix}-expiration`, placeholder: 'MM / YY' },
+      ccv: { element: `#${fieldPrefix}-ccv`, placeholder: 'CVC' },
     },
     styles: {
       input: { 'font-size': '16px', color: '#0f172a' },

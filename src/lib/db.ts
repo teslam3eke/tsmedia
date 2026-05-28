@@ -979,6 +979,39 @@ export async function completeMonthlyMembership(): Promise<{
   }
 }
 
+export async function cancelMembershipSubscription(): Promise<{ ok: boolean; reason?: string; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('cancel_membership_subscription')
+
+  if (error) {
+    console.error('[db] cancelMembershipSubscription error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as { ok?: boolean; reason?: string } | null
+  if (!row?.ok) {
+    return { ok: false, reason: row?.reason ?? 'unknown' }
+  }
+  return { ok: true }
+}
+
+export async function purchaseCreditPackMock(
+  packKey: 'super_like_5' | 'blur_unlock_16',
+): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('purchase_credit_pack', {
+    p_pack_key: packKey,
+  })
+
+  if (error) {
+    console.error('[db] purchaseCreditPackMock error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  if (!data || (data as { ok?: boolean }).ok !== true) {
+    return { ok: false, error: 'purchase failed' }
+  }
+  return { ok: true }
+}
+
 export async function claimDailyMemberHearts(): Promise<{
   ok: boolean
   reason?: string
