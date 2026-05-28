@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Flag, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
-import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  PROFILE_PHOTO_PRIVACY_BLUR_SCALE,
+  profilePhotoPrivacyBlurStyle,
+} from '@/lib/profilePhotoPrivacyBlur'
 
 export function BlurredProfilePhotoSlideshow({
   profileKey,
@@ -121,9 +124,20 @@ export function BlurredProfilePhotoSlideshow({
             if (!isDisplayablePhotoUrl(trimmed)) return null
             const loaded = photoLoadState[i] === 'loaded'
             const visibleIndex = isPreview ? 0 : index
-            return (
+            const visible = i === visibleIndex
+            const shouldBlur = !clearSet.has(i)
+            const layerClass = cn(
+              'absolute inset-0 transition-opacity duration-200',
+              visible ? 'z-[1]' : 'z-0 pointer-events-none',
+              loaded && visible ? 'opacity-100' : 'opacity-0',
+            )
+            const imgClass = cn(
+              'h-full w-full object-cover',
+              shouldBlur ? undefined : 'scale-[1.04]',
+            )
+            const imgStyle = shouldBlur ? { transform: `scale(${PROFILE_PHOTO_PRIVACY_BLUR_SCALE})` } : undefined
+            const imgEl = (
               <img
-                key={`${profileKey}-ph-${i}`}
                 ref={(el) => bindPhotoRef(el, i, trimmed)}
                 src={trimmed}
                 alt=""
@@ -132,16 +146,30 @@ export function BlurredProfilePhotoSlideshow({
                     ? 'high'
                     : undefined
                 }
-                className={cn(
-                  'absolute inset-0 h-full w-full object-cover scale-[1.04] transition-opacity duration-200',
-                  i === visibleIndex ? 'z-[1]' : 'z-0 pointer-events-none',
-                  loaded && i === visibleIndex ? 'opacity-100' : 'opacity-0',
-                )}
-                style={clearSet.has(i) ? undefined : { filter: profilePhotoPrivacyBlurFilter() }}
+                className={imgClass}
+                style={imgStyle}
                 draggable={false}
                 onLoad={() => markPhotoLoaded(i)}
                 onError={() => markPhotoError(i)}
               />
+            )
+
+            if (shouldBlur) {
+              return (
+                <div
+                  key={`${profileKey}-ph-${i}`}
+                  className={cn(layerClass, '-inset-3')}
+                  style={profilePhotoPrivacyBlurStyle()}
+                >
+                  {imgEl}
+                </div>
+              )
+            }
+
+            return (
+              <div key={`${profileKey}-ph-${i}`} className={layerClass}>
+                {imgEl}
+              </div>
             )
           })}
 
