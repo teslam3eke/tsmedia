@@ -46,6 +46,7 @@ import {
   clearSkipInstantMatchLeaveOnFullUnload,
 } from '@/lib/instantMatchUnloadGuard'
 import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
 import InstantMatchIntroSplash from '@/components/InstantMatchIntroSplash'
 import {
   formatMsUntilInstantMatchOpens,
@@ -1059,7 +1060,8 @@ export default function InstantMatchTab({
                     <img
                       src={peerBlurPhotoUrl}
                       alt=""
-                      className="h-full w-full scale-110 object-cover blur-[3px]"
+                      style={{ filter: profilePhotoPrivacyBlurFilter() }}
+                      className="h-full w-full scale-110 object-cover"
                       draggable={false}
                     />
                   </div>
@@ -1153,14 +1155,18 @@ export default function InstantMatchTab({
                 aria-modal="true"
                 aria-labelledby="instant-decide-title"
               >
-                <p id="instant-decide-title" className="mb-1 text-center text-base font-black text-slate-900">
+                <p id="instant-decide-title" className="mb-2 text-center text-base font-black text-slate-900">
                   時間結束，下一步？
                 </p>
-                <p className="mb-3 text-center text-[11px] font-semibold tabular-nums text-amber-800">
-                  決定時間剩餘 {decMm}:{decSs}（逾時視同未互加）
+                <p className="mb-1 text-center text-[11px] font-semibold tabular-nums text-amber-800">
+                  決定時間剩餘 {decMm}:{decSs}
                 </p>
-                <p className="mb-5 text-center text-xs leading-relaxed text-slate-500">
-                  只有雙方都選「加為好友」，才會出現在彼此的配對名單裡繼續聊天。
+                <p className="mb-4 text-center text-[11px] text-amber-800/85">
+                  逾時視同未互加好友
+                </p>
+                <p className="mb-5 space-y-1 text-center text-xs leading-relaxed text-slate-500">
+                  <span className="block">雙方都選「加為好友」</span>
+                  <span className="block">才會出現在配對名單並繼續聊天</span>
                 </p>
                 {myDecision !== 'pending' ? (
                   <div className="space-y-3 py-2 text-center">
@@ -1169,8 +1175,9 @@ export default function InstantMatchTab({
                       aria-hidden
                     />
                     <p className="text-sm font-bold text-slate-800">等待對方決定中</p>
-                    <p className="text-xs leading-relaxed text-slate-500">
-                      已送出你的選擇。對方選完或倒數結束後會自動更新，請稍候。
+                    <p className="space-y-1 text-xs leading-relaxed text-slate-500">
+                      <span className="block">已送出你的選擇</span>
+                      <span className="block">對方選完或倒數結束後會自動更新</span>
                     </p>
                   </div>
                 ) : (

@@ -8,6 +8,7 @@ import {
   DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
 } from '@/lib/discoverDemoPhotoUrls'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
+import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
 
 /** 對話／解鎖腳本總長（前半段）；完成後另停頓 {@link POST_COMPLETE_PAUSE_MS} 再接確認鈕 */
 const SCRIPT_TOTAL_MS = 6_850
@@ -325,7 +326,7 @@ export default function DiscoverPuzzleIntroModal({
                         <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
                           <defs>
                             <filter id={`${svgId}-blur`}>
-                              <feGaussianBlur stdDeviation="8" />
+                              <feGaussianBlur stdDeviation={PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD} />
                             </filter>
                             {PUZZLE_TILES.map((tile) => (
                               <clipPath key={tile} id={`${svgId}-clip-${tile}`} clipPathUnits="userSpaceOnUse">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Flag, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
 
 export function BlurredProfilePhotoSlideshow({
   profileKey,
@@ -14,6 +15,7 @@ export function BlurredProfilePhotoSlideshow({
   onReportClick,
   unblockedIndices,
   highFetchPrioritySlideCount = 0,
+  awaitingPhotoUrls = false,
 }: {
   profileKey: string | number
   photoUrls: string[]
@@ -25,6 +27,8 @@ export function BlurredProfilePhotoSlideshow({
   onReportClick?: () => void
   unblockedIndices?: ReadonlySet<number> | number[]
   highFetchPrioritySlideCount?: number
+  /** 已有 path／尚待簽章 URL：勿顯示漸層佔位，改顯示載入中 */
+  awaitingPhotoUrls?: boolean
 }) {
   const [index, setIndex] = useState(0)
   const [photoLoadState, setPhotoLoadState] = useState<Record<number, 'loading' | 'loaded' | 'error'>>({})
@@ -64,8 +68,10 @@ export function BlurredProfilePhotoSlideshow({
     ? (!currentSrcDisplayable
         ? 'loading'
         : (photoLoadState[index] ?? 'loading'))
-    : 'loaded'
-  const showPhotoLoading = n > 0 && currentPhotoState !== 'loaded'
+    : awaitingPhotoUrls
+      ? 'loading'
+      : 'loaded'
+  const showPhotoLoading = awaitingPhotoUrls || (n > 0 && currentPhotoState !== 'loaded')
 
   const step = (delta: number) => {
     if (n <= 1 || isPreview) return
@@ -100,10 +106,14 @@ export function BlurredProfilePhotoSlideshow({
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <div
-          className="absolute inset-0 z-0"
-          style={{ background: gradientBg }}
-        />
+        {!showPhotoLoading ? (
+          <div
+            className="absolute inset-0 z-0"
+            style={{ background: gradientBg }}
+          />
+        ) : (
+          <div className="absolute inset-0 z-0 bg-slate-100" aria-hidden />
+        )}
 
         {n > 0 &&
           photoUrls.map((src, i) => {
@@ -127,7 +137,7 @@ export function BlurredProfilePhotoSlideshow({
                   i === visibleIndex ? 'z-[1]' : 'z-0 pointer-events-none',
                   loaded && i === visibleIndex ? 'opacity-100' : 'opacity-0',
                 )}
-                style={clearSet.has(i) ? undefined : { filter: 'blur(6px)' }}
+                style={clearSet.has(i) ? undefined : { filter: profilePhotoPrivacyBlurFilter() }}
                 draggable={false}
                 onLoad={() => markPhotoLoaded(i)}
                 onError={() => markPhotoError(i)}
@@ -137,7 +147,7 @@ export function BlurredProfilePhotoSlideshow({
 
         {showPhotoLoading && (
           <div
-            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-slate-100/95"
+            className="absolute inset-0 z-[2] flex flex-col items-center justify-center gap-2 bg-slate-100"
             aria-live="polite"
             aria-busy="true"
           >

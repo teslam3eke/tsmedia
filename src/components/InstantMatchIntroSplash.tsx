@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
 import { getProfile, resolvePhotoUrls } from '@/lib/db'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
 
 const AUTO_ENTER_MS = 2800
 const PREVIEW_PHOTO_SLOTS = 3
@@ -123,13 +124,14 @@ export default function InstantMatchIntroSplash({
                   transition={{ duration: 2.2, repeat: Infinity, delay: i * 1.1, ease: 'easeOut' }}
                 />
               ))}
-              <div className="relative flex h-32 w-32 items-center justify-center overflow-hidden rounded-full bg-slate-900 p-[3px] shadow-2xl shadow-black/40 ring-2 ring-white/15">
+              <div className="relative flex h-40 w-40 items-center justify-center overflow-hidden rounded-full bg-slate-900 p-[3px] shadow-2xl shadow-black/40 ring-2 ring-white/15">
                 <div className="h-full w-full overflow-hidden rounded-full bg-slate-800">
                   {photoUrl ? (
                     <motion.img
                       src={photoUrl}
                       alt=""
-                      className="h-full w-full scale-[1.2] object-cover blur-2xl"
+                      style={{ filter: profilePhotoPrivacyBlurFilter() }}
+                      className="h-full w-full scale-110 object-cover"
                       initial={{ opacity: 0.6 }}
                       animate={{ opacity: [0.6, 0.85, 0.7] }}
                       transition={{ duration: 2.8, ease: 'easeInOut' }}

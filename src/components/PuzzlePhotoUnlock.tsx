@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
+import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
 
 export type PuzzleChatMessage = {
   id: string
@@ -542,7 +543,7 @@ export function PuzzlePhotoUnlock({
               <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
                 <defs>
                   <filter id={`${puzzleSvgId}-blur`}>
-                    <feGaussianBlur stdDeviation="8" />
+                    <feGaussianBlur stdDeviation={PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD} />
                   </filter>
                   {puzzleTiles.map((tile) => (
                     <clipPath key={tile} id={`${puzzleSvgId}-clip-${tile}`} clipPathUnits="userSpaceOnUse">

@@ -65,6 +65,7 @@ import { IncomeBorder, IncomeCrownBadge } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
 import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 import { uuidToGradients } from '@/lib/profileGradients'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
@@ -95,6 +96,7 @@ import {
 } from '@/lib/appDeepLinkEvents'
 import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
 import {
+  discoverProfileAwaitingPhotoUrls,
   isDisplayablePhotoUrl,
   mergeSignedDiscoverPhotosIntoDeck,
   normalizeDiscoverProfileFromCache,
@@ -2123,6 +2125,7 @@ function DiscoverTab({
                 <BlurredProfilePhotoSlideshow
                   profileKey={profile.profileKey}
                   photoUrls={collectProfilePhotoUrls(profile)}
+                  awaitingPhotoUrls={discoverProfileAwaitingPhotoUrls(profile)}
                   alt={getPublicName(profile)}
                   gradientFrom={profile.gradientFrom}
                   gradientTo={profile.gradientTo}
@@ -3559,7 +3562,8 @@ function ChatRoomView({
                     <img
                       src={conversation.photoUrl}
                       alt=""
-                      className="h-full w-full scale-110 object-cover blur-[3px]"
+                      style={{ filter: profilePhotoPrivacyBlurFilter() }}
+                      className="h-full w-full scale-110 object-cover"
                       draggable={false}
                     />
                   </div>

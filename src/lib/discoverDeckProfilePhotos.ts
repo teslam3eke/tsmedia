@@ -81,3 +81,9 @@ export function mergeSignedDiscoverPhotosIntoDeck<T extends DiscoverPhotoProfile
     return next
   })
 }
+
+/** 有 storage path 但尚未簽出可顯示 URL（探索快取 SWR 首屏） */
+export function discoverProfileAwaitingPhotoUrls(p: DiscoverPhotoProfile): boolean {
+  if (storagePathsFromDiscoverProfile(p).length === 0) return false
+  return (p.photoUrls ?? []).filter(isDisplayablePhotoUrl).length === 0
+}
