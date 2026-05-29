@@ -4346,7 +4346,14 @@ function EditProfileScreen({
                 />
                 <div className="col-span-2 min-w-0">
                   <p className="text-sm font-bold text-slate-900 leading-tight flex items-center gap-2">
-                    <IncomeCrownBadge tier={profile.income_tier} compact className="h-8 w-16 shrink-0" />
+                    <IncomeCrownBadge
+                      tier={profile.income_tier}
+                      compact
+                      className={cn(
+                        'h-8 shrink-0',
+                        profile.income_tier === 'diamond' ? 'w-16' : 'w-[3.2rem]',
+                      )}
+                    />
                     {INCOME_TIER_META[profile.income_tier].label}
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
@@ -5458,7 +5465,10 @@ function ProfileTab({
                       <IncomeCrownBadge
                         tier={profile.income_tier}
                         compact
-                        className="h-8 w-16 shrink-0"
+                        className={cn(
+                          'h-8 shrink-0',
+                          profile.income_tier === 'diamond' ? 'w-16' : 'w-[3.2rem]',
+                        )}
                       />
                       <span className="text-xs font-semibold text-slate-600">
                         {INCOME_TIER_META[profile.income_tier].short}

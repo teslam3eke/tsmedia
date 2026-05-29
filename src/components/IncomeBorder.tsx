@@ -49,7 +49,7 @@ export function IncomeCrownBadge({
             : 'drop-shadow-[0_14px_26px_rgba(100,116,139,0.30)]',
         tier === 'diamond'
           ? compact ? 'h-10 w-20' : 'h-20 w-36'
-          : compact ? 'h-10 w-24' : 'h-20 w-48',
+          : compact ? 'h-10 w-[4.8rem]' : 'h-20 w-[9.6rem]',
         className,
       )}
       draggable={false}
