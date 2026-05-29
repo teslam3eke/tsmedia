@@ -63,29 +63,29 @@ export function IncomeCrownBadge({
 
 const incomeRangeMetallicClass: Record<IncomeTier, string> = {
   gold: cn(
-    'ring-1 ring-amber-400/35',
-    'bg-gradient-to-br from-amber-950/88 via-amber-900/82 to-amber-950/90',
-    'text-amber-50',
-    'shadow-[0_8px_24px_rgba(146,64,14,0.28)]',
+    'ring-1 ring-amber-300/45',
+    'bg-gradient-to-br from-amber-900/52 via-amber-800/48 to-amber-900/55',
+    'text-amber-50/90',
+    'shadow-[0_6px_18px_rgba(146,64,14,0.16)]',
   ),
   silver: cn(
-    'ring-1 ring-slate-300/40',
-    'bg-gradient-to-br from-slate-900/88 via-slate-800/82 to-slate-900/90',
-    'text-slate-50',
-    'shadow-[0_8px_24px_rgba(51,65,85,0.28)]',
+    'ring-1 ring-slate-200/50',
+    'bg-gradient-to-br from-slate-800/52 via-slate-700/48 to-slate-800/55',
+    'text-slate-50/90',
+    'shadow-[0_6px_18px_rgba(51,65,85,0.16)]',
   ),
   diamond: cn(
-    'ring-1 ring-violet-400/40',
-    'bg-gradient-to-br from-violet-950/90 via-indigo-900/84 to-violet-950/90',
-    'text-violet-50',
-    'shadow-[0_8px_24px_rgba(99,102,241,0.32)]',
+    'ring-1 ring-violet-300/45',
+    'bg-gradient-to-br from-violet-900/55 via-indigo-800/50 to-violet-900/55',
+    'text-violet-50/90',
+    'shadow-[0_6px_18px_rgba(99,102,241,0.18)]',
   ),
 }
 
 const incomeRangeAccentClass: Record<IncomeTier, string> = {
-  silver: 'text-slate-300',
-  gold: 'text-amber-300',
-  diamond: 'text-violet-300',
+  silver: 'text-slate-200/85',
+  gold: 'text-amber-200/90',
+  diamond: 'text-violet-200/90',
 }
 
 /** 探索／卡片：照片右上角完整收入認證說明（等級名稱 + 年收區間） */
@@ -100,7 +100,7 @@ export function IncomeVerificationBadge({
   return (
     <div
       className={cn(
-        'pointer-events-none z-40 max-w-[min(46%,10.5rem)] rounded-xl px-2.5 py-1.5 text-left backdrop-blur-md sm:max-w-[11rem] sm:px-3 sm:py-2',
+        'pointer-events-none z-40 max-w-[min(46%,10.5rem)] rounded-xl px-2.5 py-1.5 text-left backdrop-blur-sm sm:max-w-[11rem] sm:px-3 sm:py-2',
         incomeRangeMetallicClass[tier],
         className,
       )}
@@ -108,7 +108,7 @@ export function IncomeVerificationBadge({
       <p className={cn('text-[9px] font-bold tracking-[0.04em] sm:text-[10px]', incomeRangeAccentClass[tier])}>
         {meta.label}
       </p>
-      <p className="mt-0.5 text-[11px] font-black leading-tight text-white sm:text-[12px]">
+      <p className="mt-0.5 text-[11px] font-black leading-tight text-white/90 sm:text-[12px]">
         年收 {meta.range}
       </p>
     </div>

@@ -2279,11 +2279,11 @@ function DiscoverTab({
                     <motion.button
                       whileTap={{ scale: 0.88 }}
                       onClick={handleSuperLike}
-                      className="relative ml-2 h-[68px] w-[68px] rounded-full border border-fuchsia-200/80 bg-gradient-to-br from-fuchsia-400 via-pink-500 to-fuchsia-600 flex items-center justify-center shadow-xl shadow-fuchsia-400/35 ring-4 ring-fuchsia-100/80"
+                      className="relative ml-2 h-[68px] w-[68px] rounded-full border border-fuchsia-200/70 bg-gradient-to-br from-fuchsia-300/90 via-pink-300/85 to-fuchsia-400/90 flex items-center justify-center shadow-lg shadow-fuchsia-300/25 ring-4 ring-fuchsia-50/90"
                       aria-label="超級喜歡"
                     >
-                      <Sparkles className="h-8 w-8 text-white drop-shadow-[0_2px_5px_rgba(192,38,211,0.45)]" strokeWidth={2.7} />
-                      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-fuchsia-500">
+                      <Sparkles className="h-8 w-8 text-white/95 drop-shadow-[0_2px_4px_rgba(192,38,211,0.28)]" strokeWidth={2.7} />
+                      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-fuchsia-400/90">
                         超級喜歡
                       </span>
                     </motion.button>
