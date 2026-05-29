@@ -11,7 +11,7 @@ export interface IncomeBorderProps {
   fill?: boolean
   showVerifyMark?: boolean
   crownCompact?: boolean
-  /** 在皇冠下方顯示完整收入認證說明（等級 + 年收區間） */
+  /** 在照片右上角顯示完整收入認證說明（等級 + 年收區間） */
   showIncomeRangeLabel?: boolean
   children: ReactNode
 }
@@ -88,7 +88,7 @@ const incomeRangeAccentClass: Record<IncomeTier, string> = {
   diamond: 'text-violet-300',
 }
 
-/** 探索／卡片：皇冠下方完整收入認證說明（等級名稱 + 年收區間） */
+/** 探索／卡片：照片右上角完整收入認證說明（等級名稱 + 年收區間） */
 export function IncomeVerificationBadge({
   tier,
   className,
@@ -100,15 +100,15 @@ export function IncomeVerificationBadge({
   return (
     <div
       className={cn(
-        'pointer-events-none z-10 max-w-[min(100%,13.5rem)] rounded-xl px-3 py-2 text-center backdrop-blur-md',
+        'pointer-events-none z-40 max-w-[min(46%,10.5rem)] rounded-xl px-2.5 py-1.5 text-left backdrop-blur-md sm:max-w-[11rem] sm:px-3 sm:py-2',
         incomeRangeMetallicClass[tier],
         className,
       )}
     >
-      <p className={cn('text-[10px] font-bold tracking-[0.06em]', incomeRangeAccentClass[tier])}>
+      <p className={cn('text-[9px] font-bold tracking-[0.04em] sm:text-[10px]', incomeRangeAccentClass[tier])}>
         {meta.label}
       </p>
-      <p className="mt-0.5 text-[12px] font-black leading-tight text-white">
+      <p className="mt-0.5 text-[11px] font-black leading-tight text-white sm:text-[12px]">
         年收 {meta.range}
       </p>
     </div>
@@ -136,15 +136,18 @@ export function IncomeBorder({
       {children}
       <div
         className={cn(
-          'absolute left-1/2 top-0 z-40 flex -translate-x-1/2 flex-col items-center',
+          'absolute left-1/2 top-0 z-40 -translate-x-1/2',
           tier === 'diamond' ? '-translate-y-2' : '-translate-y-1',
         )}
       >
         <IncomeCrownBadge tier={tier} compact={crownCompact} />
-        {showIncomeRangeLabel && (
-          <IncomeVerificationBadge tier={tier} className="mt-1.5 w-max" />
-        )}
       </div>
+      {showIncomeRangeLabel && (
+        <IncomeVerificationBadge
+          tier={tier}
+          className="absolute right-2 top-2 sm:right-3 sm:top-3"
+        />
+      )}
     </div>
   )
 }
