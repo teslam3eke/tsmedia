@@ -1,30 +1,26 @@
 /**
- * App 「新的一天」：每晚 22:00（Asia/Taipei）切換，與 DB `app_day_key_now()` 對齊。
+ * App 「新的一天」：固定晚上 22:00（本地時區）切換。
+ * 與 DB `app_day_key_now()`（Asia/Taipei）對齊時，請將使用者裝置設為台北時區或確保行為一致。
  */
-const APP_DAY_TZ = 'Asia/Taipei'
-const APP_DAY_ROLLOVER_HOURS = 22
-
-function formatTaipeiCalendarDay(date: Date): string {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: APP_DAY_TZ,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
-}
-
-/** 與 `app_day_key_now()` 相同：`(台北現在 − 22h)` 的曆日。 */
 export function getAppDayKey(date = new Date()): string {
-  const shifted = new Date(date.getTime() - APP_DAY_ROLLOVER_HOURS * 60 * 60 * 1000)
-  return formatTaipeiCalendarDay(shifted)
+  const shifted = new Date(date.getTime() - 22 * 60 * 60 * 1000)
+  const y = shifted.getFullYear()
+  const m = shifted.getMonth() + 1
+  const d = shifted.getDate()
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
 }
 
 /** 台北曆日 yyyy-mm-dd（與換日推播 `tag` 後綴對齊）。 */
 export function taipeiWallCalendarKey(d = new Date()): string {
-  return formatTaipeiCalendarDay(d)
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
 }
 
-/** 離「app 日」切換（台北 22:00 邊界）還剩幾 ms；上限內無變化則回退 60s（避免異常鎖死）。 */
+/** 離「app 日」切換（本地 22:00 邊界）還剩幾 ms；上限內無變化則回退 60s（避免異常鎖死）。 */
 export function msUntilNextAppDayKeyChange(now = new Date(), capMs = 25 * 60 * 60 * 1000): number {
   const k0 = getAppDayKey(now)
   const step = 1000
@@ -55,7 +51,6 @@ export async function showDiscoverDeckRolloverNotification(dayKey: string): Prom
     badge: '/icons/icon-192.png',
     tag: `tsm-discover-deck-day-${taipeiWallCalendarKey()}`,
     renotify: true,
-    data: { url: '/?tab=discover&fromPush=1' },
   }
   try {
     if ('serviceWorker' in navigator) {
