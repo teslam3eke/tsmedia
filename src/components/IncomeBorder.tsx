@@ -61,6 +61,13 @@ export function IncomeCrownBadge({
 
 // ─── Income range label (metallic chip next to crown) ───────────────────────
 
+const incomeRangeSilverChipClass = cn(
+  'ring-1 ring-slate-200/50',
+  'bg-gradient-to-br from-slate-800/52 via-slate-700/48 to-slate-800/55',
+  'text-slate-50/90',
+  'shadow-[0_6px_18px_rgba(51,65,85,0.16)]',
+)
+
 const incomeRangeMetallicClass: Record<IncomeTier, string> = {
   gold: cn(
     'ring-1 ring-amber-300/45',
@@ -68,24 +75,14 @@ const incomeRangeMetallicClass: Record<IncomeTier, string> = {
     'text-amber-50/90',
     'shadow-[0_6px_18px_rgba(146,64,14,0.16)]',
   ),
-  silver: cn(
-    'ring-1 ring-slate-200/50',
-    'bg-gradient-to-br from-slate-800/52 via-slate-700/48 to-slate-800/55',
-    'text-slate-50/90',
-    'shadow-[0_6px_18px_rgba(51,65,85,0.16)]',
-  ),
-  diamond: cn(
-    'ring-1 ring-violet-300/45',
-    'bg-gradient-to-br from-violet-900/55 via-indigo-800/50 to-violet-900/55',
-    'text-violet-50/90',
-    'shadow-[0_6px_18px_rgba(99,102,241,0.18)]',
-  ),
+  silver: incomeRangeSilverChipClass,
+  diamond: incomeRangeSilverChipClass,
 }
 
 const incomeRangeAccentClass: Record<IncomeTier, string> = {
   silver: 'text-slate-200/85',
   gold: 'text-amber-200/90',
-  diamond: 'text-violet-200/90',
+  diamond: 'text-slate-200/85',
 }
 
 /** 探索／卡片：照片右上角完整收入認證說明（等級名稱 + 年收區間） */
