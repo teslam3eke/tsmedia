@@ -208,24 +208,24 @@ function InstantHoursClosedNotice({ msUntil }: { msUntil: number }) {
 function MatchingPulseVisual() {
   return (
     <div className="flex flex-col items-center">
-      <div className="relative flex h-[5.25rem] w-[5.25rem] items-center justify-center">
+      <div className="relative flex h-[7.5rem] w-[7.5rem] items-center justify-center">
         {[0, 1, 2].map((i) => (
           <motion.div
             key={i}
             className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-800/40"
-            style={{ width: 84, height: 84 }}
+            style={{ width: 56, height: 56 }}
             initial={{ opacity: 0.5 }}
             animate={{ scale: [1, 2.85], opacity: [0.5, 0] }}
             transition={{ duration: 4.6, repeat: Infinity, delay: i * 1.45, ease: 'easeOut' }}
           />
         ))}
         <motion.div
-          className="relative z-[1] flex h-[5.25rem] w-[5.25rem] items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md"
+          className="relative z-[1] flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md"
           animate={{ scale: [1, 1.05, 1] }}
           transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
           aria-hidden
         >
-          <Users className="h-12 w-12" strokeWidth={2} />
+          <Users className="h-8 w-8" strokeWidth={2} />
         </motion.div>
       </div>
       <p className="mt-4 text-sm font-bold text-slate-800">
@@ -846,12 +846,15 @@ export default function InstantMatchTab({
       <div className={pageShellClass}>
         <InstantHeading lines={INSTANT_IDLE_GUIDE_LINES} />
         <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-6">
-          <InstantCard className="text-center">
-            <div className="mx-auto mb-4 flex h-[5.25rem] w-[5.25rem] items-center justify-center rounded-2xl bg-slate-900 text-white">
-              <Users className="h-12 w-12" strokeWidth={2} aria-hidden />
+          <InstantCard className="text-left">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-white">
+              <Users className="h-8 w-8" strokeWidth={2} aria-hidden />
             </div>
             <p className="text-sm font-semibold leading-relaxed text-slate-800">
               按下「開始配對」加入等候
+            </p>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              需另一位使用者同時在等候才會進房，不會自動幫你排隊。
             </p>
           </InstantCard>
           {!instantOpenNow ? <InstantHoursClosedNotice msUntil={msUntilInstantOpen} /> : null}

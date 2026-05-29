@@ -2269,8 +2269,8 @@ function DiscoverTab({
                   )}
 
                   {superLocked ? (
-                    <div className="relative flex h-16 w-16 flex-col items-center justify-center rounded-full border-2 border-slate-200 bg-slate-100">
-                      <Sparkles className="h-6 w-6 text-slate-300" strokeWidth={2.4} aria-hidden />
+                    <div className="relative ml-2 flex h-[68px] w-[68px] flex-col items-center justify-center rounded-full border border-slate-200 bg-slate-100 ring-4 ring-slate-100/80">
+                      <Sparkles className="h-7 w-7 text-slate-300" strokeWidth={2.4} aria-hidden />
                       <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-bold text-slate-400">
                         已送出超級喜歡
                       </span>
@@ -2279,11 +2279,11 @@ function DiscoverTab({
                     <motion.button
                       whileTap={{ scale: 0.88 }}
                       onClick={handleSuperLike}
-                      className="relative h-16 w-16 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center shadow-md shadow-slate-900/10"
+                      className="relative ml-2 h-[68px] w-[68px] rounded-full border border-fuchsia-200/70 bg-gradient-to-br from-fuchsia-300/90 via-pink-300/85 to-fuchsia-400/90 flex items-center justify-center shadow-lg shadow-fuchsia-300/25 ring-4 ring-fuchsia-50/90"
                       aria-label="超級喜歡"
                     >
-                      <Sparkles className="h-7 w-7 text-slate-700" strokeWidth={2.4} />
-                      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-semibold text-slate-500">
+                      <Sparkles className="h-8 w-8 text-white/95 drop-shadow-[0_2px_4px_rgba(192,38,211,0.28)]" strokeWidth={2.7} />
+                      <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black text-fuchsia-400/90">
                         超級喜歡
                       </span>
                     </motion.button>
