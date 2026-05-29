@@ -19,18 +19,6 @@ export function getAppDayKey(date = new Date()): string {
   return formatTaipeiCalendarDay(shifted)
 }
 
-/**
- * 舊版（裝置本地時區取曆日）— 僅供 localStorage 探索快取 key 遷移。
- * 升級台北對齊後若只改 key 會快取 miss，冷啟被迫 await ensure（~5.5s）才打 RPC。
- */
-export function getAppDayKeyLegacyLocal(date = new Date()): string {
-  const shifted = new Date(date.getTime() - APP_DAY_ROLLOVER_HOURS * 60 * 60 * 1000)
-  const y = shifted.getFullYear()
-  const m = shifted.getMonth() + 1
-  const d = shifted.getDate()
-  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-}
-
 /** 台北曆日 yyyy-mm-dd（與換日推播 `tag` 後綴對齊）。 */
 export function taipeiWallCalendarKey(d = new Date()): string {
   return formatTaipeiCalendarDay(d)
