@@ -678,7 +678,6 @@ export default function App() {
         {screen === 'landing' && (
           <LandingScreen
             onStart={() => go('auth')}
-            onSkip={() => launchMainFromProfile(null)}
           />
         )}
 

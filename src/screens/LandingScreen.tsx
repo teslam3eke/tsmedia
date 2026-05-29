@@ -3,7 +3,6 @@ import { ChevronRight, Cpu, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
 
 interface Props {
   onStart: () => void
-  onSkip: () => void
 }
 
 const FEATURES = [
@@ -27,7 +26,7 @@ const FEATURES = [
   },
 ]
 
-export default function LandingScreen({ onStart, onSkip }: Props) {
+export default function LandingScreen({ onStart }: Props) {
   return (
     <div className="min-h-dvh flex flex-col bg-white">
 
@@ -240,9 +239,6 @@ export default function LandingScreen({ onStart, onSkip }: Props) {
           申請加入菁英社群
           <ChevronRight className="w-5 h-5" />
         </motion.button>
-        <button onClick={onSkip} className="w-full text-slate-300 text-sm py-3 mt-1">
-          跳過（測試模式）
-        </button>
       </motion.div>
 
     </div>
