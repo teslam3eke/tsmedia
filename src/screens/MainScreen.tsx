@@ -55,7 +55,7 @@ import {
   instantMatchLeaveQueueKeepalive,
   subscribeToMyAppNotifications,
 } from '@/lib/db'
-import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
+import { getAppDayKey, getAppDayKeyLegacyLocal, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
@@ -1070,16 +1070,24 @@ const DISCOVER_DECK_PROFILE_CACHE_VERSION = 4 as const
 
 function readDiscoverDeckProfileCache(uid: string, dayKey: string): Profile[] {
   if (typeof window === 'undefined') return []
-  try {
-    const raw = window.localStorage.getItem(discoverDeckLocalStorageKey(uid, dayKey))
-    if (!raw) return []
-    const o = JSON.parse(raw) as { v?: number; profiles?: unknown }
-    if (o.v !== DISCOVER_DECK_PROFILE_CACHE_VERSION || !Array.isArray(o.profiles)) return []
-    return o.profiles
-      .map((p) => normalizeDiscoverProfileFromCache(p as Profile))
-  } catch {
-    return []
+  const readOne = (dk: string): Profile[] => {
+    try {
+      const raw = window.localStorage.getItem(discoverDeckLocalStorageKey(uid, dk))
+      if (!raw) return []
+      const o = JSON.parse(raw) as { v?: number; profiles?: unknown }
+      if (o.v !== DISCOVER_DECK_PROFILE_CACHE_VERSION || !Array.isArray(o.profiles)) return []
+      return o.profiles.map((p) => normalizeDiscoverProfileFromCache(p as Profile))
+    } catch {
+      return []
+    }
   }
+  const primary = readOne(dayKey)
+  if (primary.length > 0) return primary
+  const legacyDay = getAppDayKeyLegacyLocal()
+  if (legacyDay === dayKey) return []
+  const legacy = readOne(legacyDay)
+  if (legacy.length > 0) writeDiscoverDeckProfileCache(uid, dayKey, legacy)
+  return legacy
 }
 
 function writeDiscoverDeckProfileCache(uid: string, dayKey: string, profiles: Profile[]) {
@@ -1523,8 +1531,9 @@ function DiscoverTab({
               const perfNow = () =>
                 typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
               actionTrace('discover.deck', 'work:進入', { phase: 'pre-ensure', myEpoch })
+              /** 觸發 ensure 但不 await；RPC 有 skipWake + 重試，避免冷啟快取 miss 時卡 ~5.5s。 */
               if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-                await ensureConnectionWithBudget()
+                void ensureConnectionWithBudget()
               }
               /** SWR 背景層：靜默觸發 PostgREST（與 RPC 並行，不阻塞 UI）。 */
               if (userId) {
@@ -6267,7 +6276,9 @@ export default function MainScreen({
     const k = getAppDayKey()
     try {
       const prev = localStorage.getItem(LS)
-      if (prev != null && prev !== k) void showDiscoverDeckRolloverNotification(k)
+      const legacyK = getAppDayKeyLegacyLocal()
+      const sameAppDayAsBefore = prev === k || prev === legacyK
+      if (prev != null && !sameAppDayAsBefore) void showDiscoverDeckRolloverNotification(k)
       localStorage.setItem(LS, k)
     } catch {
       /* private mode — 不中斷 */
