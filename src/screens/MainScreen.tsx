@@ -2813,6 +2813,7 @@ function PersonDetailView({
               radius="1.4rem"
               thickness={8}
               showVerifyMark={false}
+              showIncomeRangeLabel
               className="m-3"
             >
               <BlurredProfilePhotoSlideshow

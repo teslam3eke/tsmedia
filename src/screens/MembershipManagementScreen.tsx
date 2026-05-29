@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ChevronLeft, Crown, Heart, Sparkles, Eye, Check, LayoutGrid } from 'lucide-react'
+import { ChevronLeft, Crown, Heart, Sparkles, Eye, LayoutGrid } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   cancelMembershipSubscription,
@@ -265,7 +265,7 @@ export default function MembershipManagementScreen({
               {formatMembershipExpiryZhTw(subscriptionExpiresAt)}
             </p>
             <p className="mt-1 text-xs font-semibold text-slate-400">
-              {memberActive ? '會員權益使用中' : '訂閱後可領每日愛心與開通禮'}
+              {memberActive ? 'VIP 權益使用中' : '購買 30 天 VIP 月卡後可領每日愛心與開通禮'}
             </p>
           </div>
 
@@ -306,26 +306,24 @@ export default function MembershipManagementScreen({
           </section>
 
           <section>
-            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">月費會員</p>
+            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">30 天 VIP 月卡</p>
             <div className="flex justify-center">
               <div className="rounded-full bg-gradient-to-br from-amber-400 to-orange-600 p-3 shadow-lg shadow-amber-900/40">
                 <Crown className="h-8 w-8 text-white" />
               </div>
             </div>
             <p className="mt-3 text-center text-xl font-black tracking-tight">
-              每月 <span className="text-amber-400">{monthlyPrice}</span> 元
+              <span className="text-amber-400">{monthlyPrice}</span> 元／30 天
             </p>
             <p className="mt-1 text-center text-xs font-semibold text-slate-400">
-              {gender === 'male' ? '男性會員' : '女性會員'} ·{' '}
-              {tapConfigured ? '信用卡付款（TapPay）' : '尚未設定 TapPay，現為模擬開通'}
+              {gender === 'male' ? '男性 VIP' : '女性 VIP'} · 單次購買，到期需再購買（非自動續扣）
             </p>
 
             <ul className="mt-5 space-y-2.5">
               {[
                 { icon: Heart, text: '開通即贈 3 顆愛心 + 1 次超級喜歡' },
                 { icon: Eye, text: '開通即贈 10 次解除拼圖模糊' },
-                { icon: Sparkles, text: '會員每日登入送 2 顆愛心（每晚 10 點換日）' },
-                { icon: Check, text: '探索滑卡消耗愛心／超級喜歡（略過不扣）' },
+                { icon: Sparkles, text: 'VIP 每日登入送 2 顆愛心（每晚 10 點換日）' },
               ].map(({ icon: Icon, text }) => (
                 <li
                   key={text}
@@ -419,7 +417,7 @@ export default function MembershipManagementScreen({
                 : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-900/30',
             )}
           >
-            {busy ? '付款處理中⋯' : `訂閱會員 ${monthlyPrice} 元／月`}
+            {busy ? '付款處理中⋯' : `購買 30 天 VIP 月卡 ${monthlyPrice} 元`}
           </button>
         ) : (
           <button
@@ -433,7 +431,7 @@ export default function MembershipManagementScreen({
                 : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-900/30',
             )}
           >
-            {busy ? '處理中⋯' : `訂閱會員 ${monthlyPrice} 元／月（模擬付款）`}
+            {busy ? '處理中⋯' : `購買 30 天 VIP 月卡 ${monthlyPrice} 元（模擬）`}
           </button>
         )}
         <p className="mt-3 mx-auto max-w-sm text-center text-[11px] leading-relaxed text-slate-500">

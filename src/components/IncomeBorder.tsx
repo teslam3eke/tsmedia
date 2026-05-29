@@ -11,7 +11,7 @@ export interface IncomeBorderProps {
   fill?: boolean
   showVerifyMark?: boolean
   crownCompact?: boolean
-  /** 在皇冠右側顯示對應年收（如「300萬+」） */
+  /** 在皇冠下方顯示完整收入認證說明（等級 + 年收區間） */
   showIncomeRangeLabel?: boolean
   children: ReactNode
 }
@@ -63,48 +63,62 @@ export function IncomeCrownBadge({
 
 const incomeRangeMetallicClass: Record<IncomeTier, string> = {
   gold: cn(
-    'border border-amber-300/90',
-    'bg-gradient-to-b from-amber-50 via-yellow-200 to-amber-400',
-    'text-amber-950',
-    'shadow-[inset_0_1px_0_rgba(255,255,255,0.75),inset_0_-1px_0_rgba(180,83,9,0.15),0_2px_10px_rgba(146,64,14,0.35)]',
-    '[text-shadow:0_0.5px_0_rgba(255,255,255,0.9)]',
+    'ring-1 ring-amber-400/35',
+    'bg-gradient-to-br from-amber-950/88 via-amber-900/82 to-amber-950/90',
+    'text-amber-50',
+    'shadow-[0_8px_24px_rgba(146,64,14,0.28)]',
   ),
   silver: cn(
-    'border border-slate-300/90',
-    'bg-gradient-to-b from-slate-100 via-slate-200 to-slate-400',
-    'text-slate-900',
-    'shadow-[inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-1px_0_rgba(15,23,42,0.12),0_2px_10px_rgba(51,65,85,0.3)]',
-    '[text-shadow:0_0.5px_0_rgba(255,255,255,0.85)]',
+    'ring-1 ring-slate-300/40',
+    'bg-gradient-to-br from-slate-900/88 via-slate-800/82 to-slate-900/90',
+    'text-slate-50',
+    'shadow-[0_8px_24px_rgba(51,65,85,0.28)]',
   ),
   diamond: cn(
-    'border border-violet-300/80',
-    'bg-gradient-to-b from-violet-100 via-indigo-200 to-violet-400',
-    'text-violet-950',
-    'shadow-[inset_0_1px_0_rgba(255,255,255,0.7),inset_0_-1px_0_rgba(67,56,202,0.2),0_2px_12px_rgba(99,102,241,0.35)]',
-    '[text-shadow:0_0.5px_0_rgba(255,255,255,0.85)]',
+    'ring-1 ring-violet-400/40',
+    'bg-gradient-to-br from-violet-950/90 via-indigo-900/84 to-violet-950/90',
+    'text-violet-50',
+    'shadow-[0_8px_24px_rgba(99,102,241,0.32)]',
   ),
 }
 
-function IncomeRangeMetallicLabel({ tier, className }: { tier: IncomeTier; className?: string }) {
-  const text = INCOME_TIER_META[tier].range
+const incomeRangeAccentClass: Record<IncomeTier, string> = {
+  silver: 'text-slate-300',
+  gold: 'text-amber-300',
+  diamond: 'text-violet-300',
+}
+
+/** 探索／卡片：皇冠下方完整收入認證說明（等級名稱 + 年收區間） */
+export function IncomeVerificationBadge({
+  tier,
+  className,
+}: {
+  tier: IncomeTier
+  className?: string
+}) {
+  const meta = INCOME_TIER_META[tier]
   return (
-    <span
+    <div
       className={cn(
-        'pointer-events-none z-10 shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5',
-        'text-[11px] font-semibold tracking-[0.02em] sm:text-xs sm:font-bold',
+        'pointer-events-none z-10 max-w-[min(100%,13.5rem)] rounded-xl px-3 py-2 text-center backdrop-blur-md',
         incomeRangeMetallicClass[tier],
         className,
       )}
     >
-      {text}
-    </span>
+      <p className={cn('text-[10px] font-bold tracking-[0.06em]', incomeRangeAccentClass[tier])}>
+        {meta.label}
+      </p>
+      <p className="mt-0.5 text-[12px] font-black leading-tight text-white">
+        年收 {meta.range}
+      </p>
+    </div>
   )
 }
 
 export function IncomeBorder({
   tier,
   className,
-  fill      = false,
+  fill = false,
   crownCompact = false,
   showIncomeRangeLabel = false,
   children,
@@ -115,31 +129,21 @@ export function IncomeBorder({
     <div
       className={cn(
         'relative',
-        'pt-0',
         fill && 'h-full w-full',
         className,
       )}
     >
       {children}
-      {/*
-        皇冠置中邏輯與舊版一致：外層以畫面左右中線為基準，內層寬度＝皇冠寬度（年收為 absolute 不參與寬度），
-        故 -translate-x-1/2 置中的是「皇冠」本體，不會因加字而左移。年收只貼在皇冠右緣外側。
-      */}
       <div
         className={cn(
-          'absolute left-1/2 top-0 z-40 -translate-x-1/2',
+          'absolute left-1/2 top-0 z-40 flex -translate-x-1/2 flex-col items-center',
           tier === 'diamond' ? '-translate-y-2' : '-translate-y-1',
         )}
       >
-        <div className="relative inline-block leading-none">
-          <IncomeCrownBadge tier={tier} compact={crownCompact} />
-          {showIncomeRangeLabel && (
-            <IncomeRangeMetallicLabel
-              tier={tier}
-              className="absolute left-full top-1/2 ml-1.5 -translate-y-1/2 sm:ml-2"
-            />
-          )}
-        </div>
+        <IncomeCrownBadge tier={tier} compact={crownCompact} />
+        {showIncomeRangeLabel && (
+          <IncomeVerificationBadge tier={tier} className="mt-1.5 w-max" />
+        )}
       </div>
     </div>
   )
