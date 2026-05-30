@@ -23,6 +23,7 @@ import {
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import { signOut } from '@/lib/auth'
+import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
@@ -198,10 +199,14 @@ export default function App() {
     launchMainFromProfile(profile)
   }
 
-  // 首次登入仍走安全頁；同一裝置同一帳號看過一次後改走 routeAfterSecurityCheck，避免重整／推播冷啟反覆卡住。
+  // 首次登入仍走安全頁；iOS Safari 分頁每次皆須封裝引導；其餘裝置看過一次後略過。
   const routeByProfile = (profile: import('@/lib/types').ProfileRow | null, userId: string) => {
     if (profile?.gender) setUserGender(profile.gender)
     if (profile?.name) setCurrentProfileName(profile.name)
+    if (needsPwaEncapsulationGate()) {
+      go('security-check')
+      return
+    }
     if (readSecurityOnboardingDone(userId)) {
       routeAfterSecurityCheck(profile)
       return
@@ -696,10 +701,13 @@ export default function App() {
 
         {screen === 'security-check' && (
           <SecurityCheckScreen
+            userId={user?.id}
             onContinue={async () => {
               const activeUser = await getActiveUser()
               if (!activeUser) return go('profile-setup')
-              writeSecurityOnboardingDone(activeUser.id)
+              if (readPwaStandaloneMode()) {
+                writeSecurityOnboardingDone(activeUser.id)
+              }
               const profile = await getProfile(activeUser.id)
               routeAfterSecurityCheck(profile)
             }}

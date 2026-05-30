@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Shield, Lock, Wifi, Eye, AlertTriangle, CheckCircle2,
-  ChevronRight, Cpu,
+  ChevronRight, Cpu, BellRing,
 } from 'lucide-react'
 import PWAInstallGuide from '@/components/PWAInstallGuide'
-import { hasUsedPwaStandaloneBefore, markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
+import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
+import { readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
+import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 
 interface Check {
   id: string
@@ -49,6 +51,7 @@ const CHECKS: Omit<Check, 'status'>[] = [
 
 interface Props {
   onContinue: () => void
+  userId?: string | null
 }
 
 /** 正常動畫最後一步約 2330ms；WebKit resume 會凍計時器，`allDone` 永不到 → 卡住本頁。 */
@@ -57,52 +60,25 @@ const MIN_MS_BEFORE_RESUME_FORCE_FINISH = 2_650
 const SECURITY_CHECK_WATCHDOG_MS = 12_000
 
 function readStandaloneMode(): boolean {
-  try {
-    return (
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-    )
-  } catch {
-    return false
-  }
+  return readPwaStandaloneMode()
 }
 
-export default function SecurityCheckScreen({ onContinue }: Props) {
+export default function SecurityCheckScreen({ onContinue, userId }: Props) {
   const [checks, setChecks] = useState<Check[]>(
     CHECKS.map((c) => ({ ...c, status: 'pending' })),
   )
   const [showPWA, setShowPWA] = useState(false)
   const [allDone, setAllDone] = useState(false)
   const [pwaSkipped, setPwaSkipped] = useState(false)
+  const [notifBusy, setNotifBusy] = useState(false)
+  const [notifDismissed, setNotifDismissed] = useState(false)
 
   const allDoneRef = useRef(allDone)
   const forceFinalizeRef = useRef(false)
-  const onContinueRef = useRef(onContinue)
-  const autoContinueAfterPwaMarkerRef = useRef(false)
-  onContinueRef.current = onContinue
 
   useEffect(() => {
     markPwaStandaloneSeenIfNeeded()
-    if (!readStandaloneMode() && hasUsedPwaStandaloneBefore()) {
-      autoContinueAfterPwaMarkerRef.current = true
-      setPwaSkipped(true)
-      setShowPWA(false)
-    }
   }, [])
-
-  /**
-   * ① 已由主畫面封裝開啟（standalone）；
-   * ② 或非 standalone 但因曾開過封裝版而帶 tm_pwa_standalone_used（重載／回前景再度進此頁）——
-   * 自動執行 onContinue，並隱藏「環境驗證完成，繼續」區塊。
-   */
-  useEffect(() => {
-    if (!allDone) return
-    if (!readStandaloneMode() && !autoContinueAfterPwaMarkerRef.current) return
-    const t = window.setTimeout(() => {
-      void onContinueRef.current()
-    }, 380)
-    return () => window.clearTimeout(t)
-  }, [allDone])
 
   useEffect(() => {
     allDoneRef.current = allDone
@@ -126,6 +102,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
       timeouts.push(
         window.setTimeout(() => {
           setAllDone(true)
+          if (!standalone) setShowPWA(true)
         }, 0),
       )
     }
@@ -171,7 +148,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
               window.setTimeout(() => {
                 if (forceFinalizeRef.current) return
                 setAllDone(true)
-                if (!isStandalone && !hasUsedPwaStandaloneBefore()) {
+                if (!isStandalone) {
                   setShowPWA(true)
                 }
               }, 600),
@@ -189,14 +166,38 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
   }, [])
 
   const isStandaloneMode = readStandaloneMode()
+  const notifSupported = typeof window !== 'undefined' && 'Notification' in window
+  const notifGranted = notifSupported && Notification.permission === 'granted'
+  const showNotifStep =
+    allDone &&
+    isStandaloneMode &&
+    notifSupported &&
+    !notifGranted &&
+    !notifDismissed
 
-  const canContinue = allDone && (isStandaloneMode || pwaSkipped)
+  const canContinue =
+    allDone &&
+    (isStandaloneMode ? notifGranted || notifDismissed || !notifSupported : pwaSkipped)
 
-  const hideManualContinueChrome = useMemo(() => {
-    if (!allDone) return false
-    if (isStandaloneMode) return true
-    return Boolean(hasUsedPwaStandaloneBefore() && pwaSkipped)
-  }, [allDone, isStandaloneMode, pwaSkipped])
+  const requestNotifications = async () => {
+    if (!notifSupported) {
+      setNotifDismissed(true)
+      return
+    }
+    setNotifBusy(true)
+    try {
+      const perm =
+        Notification.permission === 'default'
+          ? await Notification.requestPermission()
+          : Notification.permission
+      if (perm === 'granted' && userId) {
+        await subscribeWebPushForCurrentUser(userId)
+      }
+      setNotifDismissed(true)
+    } finally {
+      setNotifBusy(false)
+    }
+  }
 
   return (
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa]">
@@ -318,7 +319,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
 
         {/* Advisory notice */}
         <AnimatePresence>
-          {allDone && !hideManualContinueChrome && (
+          {allDone && (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
@@ -331,8 +332,43 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
               <p className="text-white/50 text-xs leading-relaxed">
                 {isStandaloneMode
                   ? '您的裝置已完成所有安全驗證，端對端加密環境已就緒。'
-                  : '為防止第三方系統截圖與監控，請將此環境封裝至系統主畫面（Encapsulation）後再繼續。'}
+                  : 'Safari 分頁無法收到推播與完整保護。請「加入主畫面」後從圖示開啟，每次用瀏覽器開啟都會再次提醒。'}
               </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showNotifStep && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white rounded-2xl p-5 shadow-sm ring-1 ring-slate-100 mt-2"
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center">
+                  <BellRing className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">開啟推播通知</p>
+                  <p className="text-xs text-slate-500 mt-0.5">配對成功、探索換日與新訊息才不會漏接</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={notifBusy}
+                onClick={() => void requestNotifications()}
+                className="touch-manipulation w-full bg-slate-900 text-white rounded-xl py-3 text-sm font-bold disabled:opacity-50"
+              >
+                {notifBusy ? '處理中⋯' : '允許通知'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setNotifDismissed(true)}
+                className="touch-manipulation w-full text-slate-400 text-xs py-2 mt-1"
+              >
+                稍後再說
+              </button>
             </motion.div>
           )}
         </AnimatePresence>
@@ -341,7 +377,7 @@ export default function SecurityCheckScreen({ onContinue }: Props) {
       {/* Footer */}
       <div className="px-5 pb-10 pt-4">
         <AnimatePresence>
-          {allDone && !hideManualContinueChrome && (
+          {allDone && (
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}

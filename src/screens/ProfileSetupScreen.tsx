@@ -26,13 +26,7 @@ export interface ProfileSetupData {
   preferredRegion: Region | ''
 }
 
-const INTERESTS = [
-  '精品咖啡', '登山', '底片攝影', '日本文學', '爵士吉他',
-  '手沖咖啡', '電影', '重訓', '單車', '台式料理',
-  '紀錄片', '城市規劃', '義式料理', '閱讀', '天文觀測',
-  '黑膠唱片', '清酒', '植物', '烘焙', '游泳',
-  '登山健行', '桌遊', '投資理財', '料理', '潛水',
-]
+import { PROFILE_INTEREST_TAGS } from '@/lib/profileInterestTags'
 
 const GENDER_OPTIONS = [
   { value: 'male',   label: '男性' },
@@ -317,7 +311,7 @@ export default function ProfileSetupScreen({
           </div>
           <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
             <div className="flex flex-wrap gap-2">
-              {INTERESTS.map((tag) => (
+              {PROFILE_INTEREST_TAGS.map((tag) => (
                 <button
                   key={tag}
                   onClick={() => toggleInterest(tag)}

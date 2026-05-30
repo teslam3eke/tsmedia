@@ -93,6 +93,8 @@ import AdminScreen from '@/screens/AdminScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
+import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
 import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
 import { syncAppIconBadge, clearAppIconBadge } from '@/lib/appIconBadge'
 import {
@@ -3760,15 +3762,6 @@ interface LocalPhoto {
 
 const REGION_OPTIONS: Region[] = ['north', 'central', 'south', 'east']
 
-/** 與 {@link ProfileSetupScreen} 一致，供「我的 → 編輯個人資訊」選興趣。 */
-const PROFILE_INTEREST_TAGS = [
-  '精品咖啡', '登山', '底片攝影', '日本文學', '爵士吉他',
-  '手沖咖啡', '電影', '重訓', '單車', '台式料理',
-  '紀錄片', '城市規劃', '義式料理', '閱讀', '天文觀測',
-  '黑膠唱片', '清酒', '植物', '烘焙', '游泳',
-  '登山健行', '桌遊', '投資理財', '料理', '潛水',
-] as const
-
 function EditRegionGrid({
   value,
   onChange,
@@ -3812,6 +3805,7 @@ function EditProfileScreen({
   const [nickname, setNickname] = useState(profile.nickname ?? '')
   const [bio, setBio]       = useState(profile.bio ?? '')
   const [interests, setInterests] = useState<string[]>(() => (profile.interests ?? []).filter(Boolean))
+  const interestTagOptions = useMemo(() => mergeInterestTagOptions(interests), [interests])
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
@@ -4279,7 +4273,7 @@ function EditProfileScreen({
           </div>
           <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
             <div className="flex flex-wrap gap-2">
-              {PROFILE_INTEREST_TAGS.map((tag) => (
+              {interestTagOptions.map((tag) => (
                 <button
                   key={tag}
                   type="button"
@@ -5925,9 +5919,10 @@ export default function MainScreen({
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
 
-  /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒。 */
+  /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒（Safari 分頁改由安全檢測頁引導）。 */
   useEffect(() => {
     if (!user?.id) return
+    if (needsPwaEncapsulationGate()) return
     if (typeof window === 'undefined' || !('Notification' in window)) return
     if (Notification.permission === 'granted') {
       setShowNotifPermissionNudge(false)
