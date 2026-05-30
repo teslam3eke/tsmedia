@@ -14,6 +14,7 @@ import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabas
 import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
+import { markDiscoverRolloverNotified } from '@/lib/appDay'
 import {
   mergePushDeepLinkIntent,
   parsePushDeepLinkFromSearchParams,
@@ -70,6 +71,12 @@ if ('serviceWorker' in navigator) {
         /* ignore */
       }
       window.dispatchEvent(new CustomEvent('tm_foreground_message_push'))
+      return
+    }
+
+    if (d.type === 'TM_DISCOVER_ROLLOVER_NOTIFIED') {
+      const dayKey = typeof (d as { dayKey?: string }).dayKey === 'string' ? (d as { dayKey: string }).dayKey : ''
+      if (dayKey) markDiscoverRolloverNotified(dayKey)
       return
     }
   })

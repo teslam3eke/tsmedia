@@ -55,7 +55,7 @@ import {
   instantMatchLeaveQueueKeepalive,
   subscribeToMyAppNotifications,
 } from '@/lib/db'
-import { getAppDayKey, msUntilNextAppDayKeyChange, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
+import { getAppDayKey, msUntilNextAppDayKeyChange, msUntilNextTaipei2200, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
@@ -6169,17 +6169,35 @@ export default function MainScreen({
     setDiscoverDeckRolloverTick(0)
   }, [user?.id])
 
-  /** 換日若發生在 APP 未開時，登入時 ref 會直接對齊新 key，timer 偵測路徑不會進入。對照 localStorage 上一次 key 仍補一則系統通知（權限內）。 */
+  /** 換日若發生在 APP 未開時，登入時 ref 會直接對齊新 key；推播僅在台北 22:00 準點或 Cron 補送，不在此補發。 */
   useEffect(() => {
     if (!user?.id) return
     const LS = 'tm_last_seen_app_day_key_v1'
     const k = getAppDayKey()
     try {
-      const prev = localStorage.getItem(LS)
-      if (prev != null && prev !== k) void showDiscoverDeckRolloverNotification(k)
       localStorage.setItem(LS, k)
     } catch {
       /* private mode — 不中斷 */
+    }
+  }, [user?.id])
+
+  /** Asia/Taipei 22:00:00 準點換日推播（App 有 JS 時；Cron 僅補 App 完全未開）。 */
+  useEffect(() => {
+    if (!user?.id) return
+    let timeoutId: number | undefined
+
+    const scheduleTaipei2200Push = () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
+      const delay = msUntilNextTaipei2200()
+      timeoutId = window.setTimeout(() => {
+        void showDiscoverDeckRolloverNotification(getAppDayKey())
+        scheduleTaipei2200Push()
+      }, delay)
+    }
+
+    scheduleTaipei2200Push()
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [user?.id])
 
@@ -6193,7 +6211,6 @@ export default function MainScreen({
       discoverDeckDayRef.current = k
       setDiscoverDeckDayKey(k)
       setDiscoverDeckRolloverTick((n) => n + 1)
-      if (user?.id) void showDiscoverDeckRolloverNotification(k)
     }
 
     const scheduleDeadline = () => {

@@ -175,8 +175,8 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{
 
   /** 並行發送以降低 Vercel serverless 逾時造成「後段訂閱全沒發到」 */
   const pageSize = 500
-  /** 同一批內併發數（FCM/APNs 可承受適度平行；過高易觸發速率限制） */
-  const concurrency = 32
+  /** 同一批內併發數；換日廣播須在 22:00 後短時間內送完，避免後段訂閱延遲數十分鐘才收到 */
+  const concurrency = 64
   let offset = 0
   let sent = 0
   let failed = 0

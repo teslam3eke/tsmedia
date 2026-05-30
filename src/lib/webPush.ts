@@ -13,6 +13,19 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return out
 }
 
+/** 此 PWA 是否已向 PushManager 訂閱（有則 22:00 換日由 Vercel Cron 發 Web Push）。 */
+export async function hasActiveWebPushSubscription(): Promise<boolean> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return false
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready
+    return (await reg.pushManager.getSubscription()) != null
+  } catch {
+    return false
+  }
+}
+
 /** 使用者已允許通知且環境有 VAPID 公鑰時，註冊 Push 並寫入 `push_subscriptions`。 */
 export async function subscribeWebPushForCurrentUser(userId: string): Promise<boolean> {
   if (!VAPID?.trim()) return false

@@ -1,5 +1,6 @@
 /**
- * Vercel Cron：每日 22:00 台北（14:00 UTC）對所有訂閱裝置發「探索換日」推播。
+ * Vercel Cron：每日 22:00 台北（14:00 UTC）對所有訂閱裝置發「探索換日」推播（App 完全未開時的補送）。
+ * 準點以 App 內 `msUntilNextTaipei2200` 為主；Cron 觸發時間為分鐘級且廣播需時間，可能略晚幾分鐘。
  * vercel.json 內 crons 需一併部署；專案建議設定 CRON_SECRET，與 Vercel Cron 帶入的 Bearer 一致。
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'

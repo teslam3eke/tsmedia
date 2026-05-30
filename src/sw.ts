@@ -212,6 +212,19 @@ function hasForegroundOriginClient(clients: readonly Client[]): boolean {
   )
 }
 
+async function pingClientsDiscoverRolloverNotified(dayKey: string): Promise<void> {
+  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  for (const x of clients) {
+    if (!(x instanceof WindowClient)) continue
+    if (!x.url.startsWith(self.location.origin)) continue
+    try {
+      x.postMessage({ type: 'TM_DISCOVER_ROLLOVER_NOTIFIED', dayKey })
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 async function pingClientsForegroundMessageQuiet(): Promise<void> {
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
   for (const x of clients) {
@@ -302,9 +315,14 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
-      /** 10 點探索換日：不論前景背景一律 showNotification */
+      /** 10 點探索換日：不論前景背景一律 showNotification（若同 tag 已由準點本地通知顯示則略過） */
       if (isDiscoverDeckTag) {
-        /* fall through */
+        const existing = await self.registration.getNotifications({ tag })
+        if (existing.length > 0) {
+          const dayKey = tag.slice('tsm-discover-deck-day-'.length)
+          if (dayKey) await pingClientsDiscoverRolloverNotified(dayKey)
+          return
+        }
       }
 
       const o: NotificationOptions & { renotify?: boolean } = {
@@ -313,9 +331,14 @@ self.addEventListener('push', (event: PushEvent) => {
         badge: '/icons/icon-192.png',
         tag,
         data: { url: openUrl },
-        renotify: true,
+        /** 換日 tag 固定；renotify 會在 Cron + 前景各 show 一次時連跳兩則 */
+        renotify: !isDiscoverDeckTag,
       }
       await self.registration.showNotification(title, o)
+      if (isDiscoverDeckTag) {
+        const dayKey = tag.slice('tsm-discover-deck-day-'.length)
+        if (dayKey) await pingClientsDiscoverRolloverNotified(dayKey)
+      }
       if (isMessageReceivedTag) {
         await bumpAppIconBadgeForBackgroundMessage()
       }
