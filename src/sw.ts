@@ -169,22 +169,33 @@ function shouldSuppressMessagePushForMatch(
   return false
 }
 
-type ForegroundAppNotifPayload = {
-  id: string
-  kind: string
-  title: string
-  body: string
-  url: string
-  ref_match_id?: string | null
-}
-
-async function pingClientsForegroundAppNotifQuiet(notification: ForegroundAppNotifPayload): Promise<void> {
+async function pingClientsPushOpenQuiet(openUrl: string): Promise<void> {
+  const target = openUrl.startsWith('http')
+    ? openUrl
+    : new URL(openUrl, self.location.origin).href
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  let focused = false
   for (const x of clients) {
     if (!(x instanceof WindowClient)) continue
     if (!x.url.startsWith(self.location.origin)) continue
+    if (!focused) {
+      try {
+        await x.focus()
+      } catch {
+        /* ignore */
+      }
+      focused = true
+      /** iOS PWA：navigate 寫入 URL 作為 postMessage 漏送時的備援 */
+      try {
+        if (typeof x.navigate === 'function') {
+          await x.navigate(target)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     try {
-      x.postMessage({ type: 'TM_PUSH_APP_NOTIF_FOREGROUND', notification })
+      x.postMessage({ type: 'TM_PUSH_OPEN', url: target })
     } catch {
       /* ignore */
     }
@@ -222,8 +233,6 @@ self.addEventListener('push', (event: PushEvent) => {
       let tag = 'tsmedia'
       let openUrl = '/'
       let payloadMatchLc: string | null = null
-      let payloadKind = ''
-      let payloadNotifId = ''
       let payloadRefMatchId: string | null = null
       try {
         if (event.data) {
@@ -241,8 +250,6 @@ self.addEventListener('push', (event: PushEvent) => {
           if (typeof j.body === 'string') body = j.body
           if (j.tag) tag = j.tag
           if (typeof j.url === 'string') openUrl = j.url
-          if (typeof j.kind === 'string') payloadKind = j.kind
-          if (typeof j.notifId === 'string') payloadNotifId = j.notifId
           if (typeof j.refMatchId === 'string' && j.refMatchId.trim()) {
             payloadRefMatchId = j.refMatchId.trim()
           }
@@ -267,17 +274,9 @@ self.addEventListener('push', (event: PushEvent) => {
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
-      /** 站內事件（驗證／超喜等）：PWA 前景不秀 OS 橫幅，改 postMessage 觸發站內彈窗 */
+      /** 站內事件（驗證／超喜等）：前景不秀 OS 橫幅，改與背景點擊相同的 deep link 路徑 */
       if (isAppNotifTag && !isMessageReceivedTag && hasForegroundOriginClient(clients)) {
-        const kindFromTag = tag.startsWith('app-notif-') ? tag.slice('app-notif-'.length) : payloadKind
-        await pingClientsForegroundAppNotifQuiet({
-          id: payloadNotifId || tag,
-          kind: payloadKind || kindFromTag || 'generic',
-          title,
-          body,
-          url: openUrl,
-          ref_match_id: payloadRefMatchId,
-        })
+        await pingClientsPushOpenQuiet(openUrl)
         return
       }
 
@@ -333,18 +332,34 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.waitUntil(
     (async () => {
       const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      let focused = false
       for (const c of all) {
         if (!(c instanceof WindowClient)) continue
         if (!c.url.startsWith(self.location.origin)) continue
-        await c.focus()
+        if (!focused) {
+          try {
+            await c.focus()
+          } catch {
+            /* ignore */
+          }
+          focused = true
+          try {
+            if (typeof c.navigate === 'function') {
+              await c.navigate(target)
+            }
+          } catch {
+            /* ignore */
+          }
+        }
         try {
           c.postMessage({ type: 'TM_PUSH_OPEN', url: target })
         } catch {
           /* ignore */
         }
-        return
       }
-      await self.clients.openWindow(target)
+      if (!focused) {
+        await self.clients.openWindow(target)
+      }
     })(),
   )
 })

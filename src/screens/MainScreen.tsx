@@ -97,10 +97,20 @@ import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceO
 import { syncAppIconBadge, clearAppIconBadge } from '@/lib/appIconBadge'
 import {
   TM_APP_DEEP_LINK_EVENT,
-  TM_APP_NOTIF_FOREGROUND_EVENT,
   TM_FOREGROUND_TRANSPORT_KICK_EVENT,
   TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
 } from '@/lib/appDeepLinkEvents'
+import {
+  clearPendingPushDeepLink,
+  mergePushDeepLinkIntent,
+  parsePushDeepLinkFromSearchParams,
+  persistPendingPushDeepLink,
+  pushDeepLinkIntentFromAppNotification,
+  readPendingPushDeepLink,
+  stripPushDeepLinkParamsFromUrl,
+  type ApplyPushDeepLinkOutcome,
+  type PushDeepLinkIntent,
+} from '@/lib/pushDeepLink'
 import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
 import {
   discoverProfileAwaitingPhotoUrls,
@@ -5734,6 +5744,12 @@ export default function MainScreen({
   }, [])
   const [instantLeaveGuardOpen, setInstantLeaveGuardOpen] = useState(false)
   const pendingInstantNavTabRef = useRef<Tab | null>(null)
+  /** 推播／通知要求開聊天室，但被即時排隊攔截時暫存 */
+  const pendingPushMatchIdRef = useRef<string | null>(null)
+  const applyPushDeepLinkIntentRef = useRef<(intent: PushDeepLinkIntent) => Promise<ApplyPushDeepLinkOutcome>>(
+    async () => 'deferred_no_user',
+  )
+  const finalizePushDeepLinkConsumptionRef = useRef<() => void>(() => {})
 
   const blockInstantNavIfWaiting = useCallback((target: Tab): boolean => {
     if (activeTabRef.current !== 'instant' || !instantQueueWaitingRef.current || target === 'instant') {
@@ -5745,8 +5761,18 @@ export default function MainScreen({
   }, [])
 
   const dismissInstantLeaveGuard = useCallback(() => {
+    const tab = pendingInstantNavTabRef.current
+    const match = pendingPushMatchIdRef.current
     pendingInstantNavTabRef.current = null
+    pendingPushMatchIdRef.current = null
     setInstantLeaveGuardOpen(false)
+    if (tab || match) {
+      const restored = mergePushDeepLinkIntent(readPendingPushDeepLink(), {
+        tab: tab ?? (match ? 'matches' : undefined),
+        matchId: match ?? undefined,
+      })
+      if (restored) persistPendingPushDeepLink(restored)
+    }
   }, [])
 
   const confirmInstantLeaveGuard = useCallback(async () => {
@@ -5760,6 +5786,17 @@ export default function MainScreen({
     if (next != null) {
       prevTab.current = activeTabRef.current
       setActiveTab(next)
+      const pendingMatch = pendingPushMatchIdRef.current
+      pendingPushMatchIdRef.current = null
+      const deferred = mergePushDeepLinkIntent(readPendingPushDeepLink(), {
+        tab: next,
+        matchId: pendingMatch ?? undefined,
+      })
+      if (deferred) {
+        void applyPushDeepLinkIntentRef.current(deferred).then((outcome) => {
+          if (outcome === 'applied') finalizePushDeepLinkConsumptionRef.current()
+        })
+      }
     } else {
       instantWaitingReportLockRef.current = false
     }
@@ -6049,9 +6086,9 @@ export default function MainScreen({
   }, [])
 
   const dismissActiveAppNotifPopup = useCallback(() => {
-    setActiveAppNotifPopup((cur) => {
-      if (cur == null) return null
-      const id = cur.id
+    setActiveAppNotifPopup((popup) => {
+      if (popup == null) return null
+      const id = popup.id
       void markAppNotificationRead(id).finally(() => {
         queueMicrotask(() => {
           setActiveAppNotifPopup((p) => (p != null ? p : appNotifPopupQueueRef.current.shift() ?? null))
@@ -6061,114 +6098,19 @@ export default function MainScreen({
     })
   }, [])
 
+  const applyPushDeepLinkFromNotificationRef = useRef<(n: AppNotificationRow) => void>(() => {})
+
   const ingestUnreadAppNotifications = useCallback(
     (list: AppNotificationRow[]) => {
-      const verificationKindsQueued = new Set<string>()
       for (const n of list) {
-        /** LINE 類 UX：新訊息不插隊全螢「知道了」，只靠聊天室／角標；背景推播由 SW 負責 */
-        if (n.kind === 'message_received') {
-          void markAppNotificationRead(n.id)
-          continue
-        }
-        /** 驗證通過／拒絕：同 kind 只保留一則站內彈窗（避免 finalize 競態重複 INSERT） */
-        if (n.kind === 'verification_approved' || n.kind === 'verification_rejected') {
-          if (verificationKindsQueued.has(n.kind)) {
-            void markAppNotificationRead(n.id)
-            continue
-          }
-          if (activeAppNotifPopupRef.current?.kind === n.kind) {
-            void markAppNotificationRead(n.id)
-            continue
-          }
-          if (appNotifPopupQueueRef.current.some((q) => q.kind === n.kind)) {
-            void markAppNotificationRead(n.id)
-            continue
-          }
-          verificationKindsQueued.add(n.kind)
-        }
-        if (!appNotifQueuedOnceIdsRef.current.has(n.id)) {
-          appNotifQueuedOnceIdsRef.current.add(n.id)
-          appNotifPopupQueueRef.current.push(n)
-        }
+        if (appNotifQueuedOnceIdsRef.current.has(n.id)) continue
+        appNotifQueuedOnceIdsRef.current.add(n.id)
+        applyPushDeepLinkFromNotificationRef.current(n)
       }
       tryDequeueAppNotifPopup()
     },
     [tryDequeueAppNotifPopup],
   )
-
-  /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id。SW 點通知時 replaceState 後再觸發此邏輯。 */
-  const consumeUrlPushDeepLink = useCallback(() => {
-    if (!user?.id) return
-    if (typeof window === 'undefined') return
-    const url = new URL(window.location.href)
-    const tabParam = url.searchParams.get('tab')
-    const notifRaw = url.searchParams.get('notif')
-    const matchRaw = url.searchParams.get('match')
-    if (!tabParam && !notifRaw && !matchRaw) return
-
-    const notifId = typeof notifRaw === 'string' ? notifRaw.trim() : ''
-    const urlMatchLc = typeof matchRaw === 'string' ? matchRaw.trim().toLowerCase() : ''
-
-    url.searchParams.delete('fromPush')
-    url.searchParams.delete('notif')
-    url.searchParams.delete('match')
-    url.searchParams.delete('tab')
-    const rest = url.searchParams.toString()
-    window.history.replaceState({}, '', url.pathname + (rest ? `?${rest}` : ''))
-
-    if (tabParam === 'discover' || tabParam === 'matches' || tabParam === 'instant' || tabParam === 'profile') {
-      if (!blockInstantNavIfWaiting(tabParam)) {
-        setActiveTab(tabParam)
-      }
-    }
-
-    const openMatchRoom = (matchUuidLc: string) => {
-      if (!matchUuidLc) return
-      if (blockInstantNavIfWaiting('matches')) return
-      setActiveTab('matches')
-      setPendingChatId(matchUuidLc)
-    }
-
-    if (notifId) {
-      appNotifQueuedOnceIdsRef.current.add(notifId)
-      appNotifPopupQueueRef.current = appNotifPopupQueueRef.current.filter(
-        (n) => n.id !== notifId && n.id.toLowerCase() !== notifId.toLowerCase(),
-      )
-      setActiveAppNotifPopup((cur) =>
-        cur && (cur.id === notifId || cur.id.toLowerCase() === notifId.toLowerCase()) ? null : cur,
-      )
-      void markAppNotificationRead(notifId)
-    }
-
-    if (urlMatchLc) openMatchRoom(urlMatchLc)
-    else if (notifId) {
-      void (async () => {
-        try {
-          const { data, error } = await supabase
-            .from('app_notifications')
-            .select('ref_match_id')
-            .eq('id', notifId)
-            .maybeSingle()
-          if (error || !data) return
-          const mid = typeof data.ref_match_id === 'string' ? data.ref_match_id.trim().toLowerCase() : ''
-          if (mid) openMatchRoom(mid)
-        } catch {
-          /* 無 ref_match_id 欄位或離線 */
-        }
-      })()
-    }
-  }, [user?.id, blockInstantNavIfWaiting])
-
-  useEffect(() => {
-    consumeUrlPushDeepLink()
-  }, [consumeUrlPushDeepLink])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handler = () => consumeUrlPushDeepLink()
-    window.addEventListener(TM_APP_DEEP_LINK_EVENT, handler)
-    return () => window.removeEventListener(TM_APP_DEEP_LINK_EVENT, handler)
-  }, [consumeUrlPushDeepLink])
 
   useEffect(() => {
     const uid = user?.id
@@ -6179,39 +6121,6 @@ export default function MainScreen({
       ingestUnreadAppNotifications([row])
     })
   }, [user?.id, physicalChannelResubscribeNonce, ingestUnreadAppNotifications])
-
-  /** SW 前景抑制 OS 橫幅 → main.tsx 轉發 payload → 站內彈窗（與 Realtime 共用 ingest） */
-  useEffect(() => {
-    const uid = user?.id
-    if (!uid) return
-
-    const onForegroundAppNotif = (ev: Event) => {
-      const sw = (ev as CustomEvent<{
-        id: string
-        kind: string
-        title: string
-        body: string
-        url?: string
-        ref_match_id?: string | null
-      }>).detail
-      if (!sw?.id || !sw.kind) return
-      ingestUnreadAppNotifications([
-        {
-          id: sw.id,
-          user_id: uid,
-          kind: sw.kind as AppNotificationKind,
-          title: sw.title,
-          body: sw.body,
-          ref_match_id: sw.ref_match_id ?? null,
-          read_at: null,
-          created_at: new Date().toISOString(),
-        },
-      ])
-    }
-
-    window.addEventListener(TM_APP_NOTIF_FOREGROUND_EVENT, onForegroundAppNotif)
-    return () => window.removeEventListener(TM_APP_NOTIF_FOREGROUND_EVENT, onForegroundAppNotif)
-  }, [user?.id, ingestUnreadAppNotifications])
 
   /** Cold start 與回前景：抓斷線期間未讀 backlog（Realtime 斷線 fallback） */
   useEffect(() => {
@@ -6447,6 +6356,149 @@ export default function MainScreen({
     }
   }, [user?.id])
 
+  const openMatchRoomFromPush = useCallback(
+    (matchUuidLc: string) => {
+      if (!matchUuidLc) return false
+      if (blockInstantNavIfWaiting('matches')) {
+        pendingPushMatchIdRef.current = matchUuidLc
+        return false
+      }
+      setViewingPerson(null)
+      setActiveTab('matches')
+      setPendingChatId(matchUuidLc)
+      void loadLiveMatchThreads('full')
+      return true
+    },
+    [blockInstantNavIfWaiting, loadLiveMatchThreads],
+  )
+
+  const markPushNotifConsumed = useCallback((notifId: string) => {
+    appNotifQueuedOnceIdsRef.current.add(notifId)
+    appNotifPopupQueueRef.current = appNotifPopupQueueRef.current.filter(
+      (n) => n.id !== notifId && n.id.toLowerCase() !== notifId.toLowerCase(),
+    )
+    setActiveAppNotifPopup((cur) =>
+      cur && (cur.id === notifId || cur.id.toLowerCase() === notifId.toLowerCase()) ? null : cur,
+    )
+    void markAppNotificationRead(notifId)
+  }, [])
+
+  const finalizePushDeepLinkConsumption = useCallback(() => {
+    stripPushDeepLinkParamsFromUrl()
+    clearPendingPushDeepLink()
+  }, [])
+
+  const applyPushDeepLinkIntent = useCallback(
+    async (intent: PushDeepLinkIntent): Promise<ApplyPushDeepLinkOutcome> => {
+      if (!user?.id) {
+        persistPendingPushDeepLink(intent)
+        return 'deferred_no_user'
+      }
+
+      const matchTarget = intent.matchId?.trim().toLowerCase() ?? ''
+      const tabTarget = intent.tab
+
+      if (tabTarget && blockInstantNavIfWaiting(tabTarget)) {
+        if (matchTarget) pendingPushMatchIdRef.current = matchTarget
+        persistPendingPushDeepLink(intent)
+        return 'blocked_instant'
+      }
+      if (matchTarget && blockInstantNavIfWaiting('matches')) {
+        pendingPushMatchIdRef.current = matchTarget
+        persistPendingPushDeepLink(intent)
+        return 'blocked_instant'
+      }
+
+      if (tabTarget) setActiveTab(tabTarget)
+
+      if (matchTarget) {
+        openMatchRoomFromPush(matchTarget)
+      } else if (intent.notifId) {
+        try {
+          const { data, error } = await supabase
+            .from('app_notifications')
+            .select('ref_match_id')
+            .eq('id', intent.notifId)
+            .maybeSingle()
+          if (!error && data) {
+            const mid = typeof data.ref_match_id === 'string' ? data.ref_match_id.trim().toLowerCase() : ''
+            if (mid) openMatchRoomFromPush(mid)
+          }
+        } catch {
+          /* 無 ref_match_id 欄位或離線 */
+        }
+      }
+
+      if (intent.notifId) markPushNotifConsumed(intent.notifId)
+
+      return 'applied'
+    },
+    [user?.id, openMatchRoomFromPush, markPushNotifConsumed],
+  )
+
+  /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id。SW 點通知時 replaceState 後再觸發此邏輯。 */
+  const consumeUrlPushDeepLink = useCallback(async () => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    const fromUrl = parsePushDeepLinkFromSearchParams(url.searchParams)
+    const fromStorage = readPendingPushDeepLink()
+    const intent = mergePushDeepLinkIntent(fromStorage, fromUrl)
+    if (!intent) return
+
+    if (!user?.id) {
+      persistPendingPushDeepLink(intent)
+      return
+    }
+
+    const outcome = await applyPushDeepLinkIntent(intent)
+    if (outcome === 'applied') {
+      finalizePushDeepLinkConsumption()
+    } else if (outcome === 'blocked_instant') {
+      stripPushDeepLinkParamsFromUrl()
+    }
+  }, [user?.id, applyPushDeepLinkIntent, finalizePushDeepLinkConsumption])
+
+  useEffect(() => {
+    applyPushDeepLinkIntentRef.current = applyPushDeepLinkIntent
+  }, [applyPushDeepLinkIntent])
+
+  useEffect(() => {
+    finalizePushDeepLinkConsumptionRef.current = finalizePushDeepLinkConsumption
+  }, [finalizePushDeepLinkConsumption])
+
+  useEffect(() => {
+    void consumeUrlPushDeepLink()
+  }, [consumeUrlPushDeepLink])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = () => {
+      void consumeUrlPushDeepLink()
+    }
+    window.addEventListener(TM_APP_DEEP_LINK_EVENT, handler)
+    return () => window.removeEventListener(TM_APP_DEEP_LINK_EVENT, handler)
+  }, [consumeUrlPushDeepLink])
+
+  const applyPushDeepLinkFromNotification = useCallback(
+    (n: AppNotificationRow) => {
+      const intent = pushDeepLinkIntentFromAppNotification({
+        id: n.id,
+        kind: n.kind,
+        ref_match_id: n.ref_match_id,
+      })
+      void applyPushDeepLinkIntent(intent).then((outcome) => {
+        if (outcome === 'applied') finalizePushDeepLinkConsumption()
+        else if (outcome === 'blocked_instant') stripPushDeepLinkParamsFromUrl()
+      })
+    },
+    [applyPushDeepLinkIntent, finalizePushDeepLinkConsumption],
+  )
+
+  useEffect(() => {
+    applyPushDeepLinkFromNotificationRef.current = applyPushDeepLinkFromNotification
+  }, [applyPushDeepLinkFromNotification])
+
   useEffect(() => {
     void loadLiveMatchThreads('full')
   }, [loadLiveMatchThreads])
@@ -6531,15 +6583,27 @@ export default function MainScreen({
     if (conv) {
       setMatchesChatConversation(conv)
       setPendingChatId(null)
+      pendingPushMatchIdRef.current = null
+      return
     }
-  }, [pendingChatId, liveMatchThreads])
+    if (!liveMatchThreadsLoading) {
+      void loadLiveMatchThreads('full')
+    }
+  }, [pendingChatId, liveMatchThreads, liveMatchThreadsLoading, loadLiveMatchThreads])
 
   // "Start chat with <id>" — 配對分頁內開啟聊天室
   const startChatWith = (id: number | string) => {
-    if (blockInstantNavIfWaiting('matches')) return
+    const normalized = typeof id === 'string' ? id.trim().toLowerCase() : id
+    if (blockInstantNavIfWaiting('matches')) {
+      if (typeof normalized === 'string' && normalized) {
+        pendingPushMatchIdRef.current = normalized
+      }
+      return
+    }
     setViewingPerson(null)
     setActiveTab('matches')
-    setPendingChatId(id)
+    setPendingChatId(normalized)
+    void loadLiveMatchThreads('full')
   }
 
   // Fetch current user's gender + preferred region + 生活照（切換分頁時重抓，以便「我的」上傳後可進探索）

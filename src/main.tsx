@@ -13,7 +13,13 @@ import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { ensureConnectionWithBudget, repairAuthAfterResume } from '@/lib/supabase'
 import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
-import { TM_APP_DEEP_LINK_EVENT, TM_APP_NOTIF_FOREGROUND_EVENT } from '@/lib/appDeepLinkEvents'
+import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
+import {
+  mergePushDeepLinkIntent,
+  parsePushDeepLinkFromSearchParams,
+  persistPendingPushDeepLink,
+  readPendingPushDeepLink,
+} from '@/lib/pushDeepLink'
 
 void maybeInitEruda()
 markPwaStandaloneSeenIfNeeded()
@@ -23,6 +29,10 @@ function applyHrefFromServiceWorker(hrefLike: string) {
   try {
     const u = new URL(hrefLike, window.location.origin)
     if (u.origin !== window.location.origin) return
+    const parsed = parsePushDeepLinkFromSearchParams(u.searchParams)
+    if (parsed) {
+      persistPendingPushDeepLink(mergePushDeepLinkIntent(readPendingPushDeepLink(), parsed)!)
+    }
     window.history.replaceState({}, '', u.pathname + u.search + u.hash)
     window.dispatchEvent(new CustomEvent(TM_APP_DEEP_LINK_EVENT))
   } catch {
@@ -60,13 +70,6 @@ if ('serviceWorker' in navigator) {
         /* ignore */
       }
       window.dispatchEvent(new CustomEvent('tm_foreground_message_push'))
-      return
-    }
-
-    if (d.type === 'TM_PUSH_APP_NOTIF_FOREGROUND' && d.notification) {
-      window.dispatchEvent(
-        new CustomEvent(TM_APP_NOTIF_FOREGROUND_EVENT, { detail: d.notification }),
-      )
       return
     }
   })

@@ -170,7 +170,7 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{
     title,
     body,
     tag: dayTag,
-    url: '/',
+    url: '/?tab=discover&fromPush=1',
   })
 
   /** 並行發送以降低 Vercel serverless 逾時造成「後段訂閱全沒發到」 */
