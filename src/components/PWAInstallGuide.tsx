@@ -144,14 +144,9 @@ export default function PWAInstallGuide({ onDismiss, forceShow = false }: Props)
               </div>
 
               <h2 className="text-xl font-bold text-slate-900 mb-1">加入主畫面</h2>
-              <p className="text-sm text-slate-500 mb-3 leading-relaxed">
-                為啟用完整隱私保護、推播通知與安全機制，請將 TsMedia 加入裝置主畫面後再繼續使用。
+              <p className="text-sm text-slate-500 mb-4 leading-relaxed">
+                請加入主畫面以啟用推播與安全功能，並依下列步驟完成。
               </p>
-              {effectivePlatform === 'ios' && (
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed rounded-xl bg-slate-100 px-3 py-2.5">
-                  依 iOS 版本不同，Safari 底部工具列配置可能略有差異，請依序完成下列步驟。
-                </p>
-              )}
 
               {/* ── iOS ─────────────────────────────────────────── */}
               {effectivePlatform === 'ios' && (
