@@ -22,6 +22,9 @@ import {
   getCardPrime,
   type TPDirectAPI,
 } from '@/lib/tappayClient'
+import { usePaymentProvider } from '@/hooks/usePaymentProvider'
+import { paymentModeLabel } from '@/lib/paymentProvider'
+import { startNewebPayCheckout } from '@/lib/newebpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export type MembershipUpdateEvent =
@@ -50,10 +53,7 @@ export default function MembershipManagementScreen({
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
 
-  const tapConfigured =
-    Boolean(import.meta.env.VITE_TAPPAY_APP_ID) &&
-    Boolean(import.meta.env.VITE_TAPPAY_APP_KEY) &&
-    Boolean(import.meta.env.VITE_TAPPAY_SERVER_TYPE)
+  const { mode: paymentMode, sandbox: paymentSandbox, loading: paymentLoading } = usePaymentProvider()
 
   const [tapReady, setTapReady] = useState(false)
   const [tapInitError, setTapInitError] = useState<string | null>(null)
@@ -76,7 +76,7 @@ export default function MembershipManagementScreen({
   }, [reloadProfile])
 
   useEffect(() => {
-    if (!tapConfigured) return
+    if (paymentMode !== 'tappay') return
     let cancelled = false
     ;(async () => {
       try {
@@ -103,7 +103,7 @@ export default function MembershipManagementScreen({
     return () => {
       cancelled = true
     }
-  }, [tapConfigured])
+  }, [paymentMode])
 
   const cardholderPayload = () => ({
     phone_number: holderPhone.trim(),
@@ -114,7 +114,7 @@ export default function MembershipManagementScreen({
   })
 
   const ensureCardholder = () => {
-    if (!tapConfigured) return true
+    if (paymentMode !== 'tappay') return true
     if (!holderName.trim() || !holderPhone.trim() || !holderEmail.trim()) {
       setError('請填寫持卡人姓名、手機與 Email（TapPay 必填）。')
       return false
@@ -126,13 +126,21 @@ export default function MembershipManagementScreen({
     setBusy(true)
     setError(null)
     try {
-      if (!tapConfigured) {
+      if (paymentMode === 'mock') {
         const res = await purchaseCreditPackMock(packKey)
         if (!res.ok) {
           setError(res.error ?? '購買失敗')
           return
         }
         onUpdated({ type: 'pack', subtitle: creditLabel })
+        return
+      }
+      if (paymentMode === 'newebpay') {
+        await startNewebPayCheckout({
+          productType: 'credit_pack',
+          packKey,
+          email: holderEmail.trim() || userEmail,
+        })
         return
       }
       if (!ensureCardholder() || !tpRef || !tapReady) return
@@ -180,6 +188,20 @@ export default function MembershipManagementScreen({
       await reloadProfile()
       onUpdated({ type: 'membership' })
     } finally {
+      setBusy(false)
+    }
+  }
+
+  const subscribeNewebPay = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await startNewebPayCheckout({
+        productType: 'membership',
+        email: holderEmail.trim() || userEmail,
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '無法前往付款')
       setBusy(false)
     }
   }
@@ -291,7 +313,11 @@ export default function MembershipManagementScreen({
                   </div>
                   <button
                     type="button"
-                    disabled={busy || (tapConfigured && (!tapReady || Boolean(tapInitError)))}
+                    disabled={
+                      busy ||
+                      paymentLoading ||
+                      (paymentMode === 'tappay' && (!tapReady || Boolean(tapInitError)))
+                    }
                     onClick={() => void buyPack(pack.key, pack.creditLabel)}
                     className={cn(
                       'shrink-0 rounded-xl px-3 py-2 text-xs font-black transition active:scale-[0.98]',
@@ -336,9 +362,29 @@ export default function MembershipManagementScreen({
             </ul>
           </section>
 
-          {tapConfigured && (
+          {paymentMode === 'newebpay' && (
             <div className="space-y-3 rounded-2xl bg-white/[0.07] p-4 ring-1 ring-white/10">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">信用卡（TapPay）</p>
+              <p className="text-[11px] font-bold tracking-wider text-slate-500">
+                信用卡（{paymentModeLabel('newebpay')}
+                {paymentSandbox ? ' · 測試' : ''}）
+              </p>
+              <p className="text-xs font-semibold leading-relaxed text-slate-400">
+                將前往藍新安全付款頁完成刷卡。單次購買 30 天 VIP，到期後需再手動付款（非自動續扣）。
+              </p>
+              <input
+                type="email"
+                autoComplete="email"
+                placeholder="付款通知 Email（選填）"
+                value={holderEmail}
+                onChange={(e) => setHolderEmail(e.target.value)}
+                className="w-full rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-slate-200 placeholder:text-slate-400"
+              />
+            </div>
+          )}
+
+          {paymentMode === 'tappay' && (
+            <div className="space-y-3 rounded-2xl bg-white/[0.07] p-4 ring-1 ring-white/10">
+              <p className="text-[11px] font-bold tracking-wider text-slate-500">信用卡（TapPay）</p>
               {tapInitError && <p className="text-xs font-semibold text-red-300">{tapInitError}</p>}
               <div
                 id={`${TAPPAY_FIELD_PREFIX}-number`}
@@ -405,7 +451,21 @@ export default function MembershipManagementScreen({
         className="flex-shrink-0 border-t border-white/10 bg-slate-950/90 px-5 pt-3 backdrop-blur-md"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
       >
-        {tapConfigured ? (
+        {paymentMode === 'newebpay' ? (
+          <button
+            type="button"
+            disabled={busy || paymentLoading}
+            onClick={() => void subscribeNewebPay()}
+            className={cn(
+              'w-full rounded-2xl py-4 text-base font-black shadow-lg transition active:scale-[0.99]',
+              busy || paymentLoading
+                ? 'bg-slate-700 text-slate-400'
+                : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-900/30',
+            )}
+          >
+            {busy ? '前往付款頁⋯' : `前往藍新付款 ${monthlyPrice} 元／30 天`}
+          </button>
+        ) : paymentMode === 'tappay' ? (
           <button
             type="button"
             disabled={busy || !tapReady || Boolean(tapInitError)}
@@ -422,11 +482,11 @@ export default function MembershipManagementScreen({
         ) : (
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || paymentLoading}
             onClick={() => void subscribeMock()}
             className={cn(
               'w-full rounded-2xl py-4 text-base font-black shadow-lg transition active:scale-[0.99]',
-              busy
+              busy || paymentLoading
                 ? 'bg-slate-700 text-slate-400'
                 : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-900/30',
             )}

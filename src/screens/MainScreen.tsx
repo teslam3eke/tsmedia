@@ -60,6 +60,12 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
+import { CREDIT_PACK_PRODUCTS } from '@/lib/membershipProducts'
+import {
+  clearPaymentReturnQuery,
+  pollNewebPayOrderPaid,
+  readPaymentReturnQuery,
+} from '@/lib/newebpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
@@ -6238,6 +6244,82 @@ export default function MainScreen({
     if (!user?.id) return
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
+
+  /** 藍新付款完成返回 PWA：輪詢 Notify 入帳後顯示獎勵 */
+  useEffect(() => {
+    if (!user?.id) return
+    const query = readPaymentReturnQuery()
+    if (!query.kind) return
+    clearPaymentReturnQuery()
+
+    if (query.kind === 'cancel') {
+      setRewardFlash({
+        variant: 'grant',
+        title: '已取消付款',
+        subtitle: '可稍後在會員管理再次購買',
+      })
+      return
+    }
+
+    if (query.status === 'fail' || !query.orderNo) {
+      setRewardFlash({
+        variant: 'grant',
+        title: '付款未完成',
+        subtitle: '若已扣款請聯絡客服並保留交易紀錄',
+      })
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      const paid = await pollNewebPayOrderPaid(query.orderNo!)
+      if (cancelled) return
+
+      if (!paid?.paid) {
+        setRewardFlash({
+          variant: 'grant',
+          title: '付款確認中',
+          subtitle: '入帳可能需要數十秒，請稍後在會員管理查看',
+        })
+        return
+      }
+
+      await refreshCredits()
+
+      if (paid.productType === 'credit_pack') {
+        const pack = CREDIT_PACK_PRODUCTS.find((p) => p.key === paid.packKey)
+        setRewardFlash({
+          variant: 'grant',
+          title: '購買成功',
+          subtitle: pack?.creditLabel ?? '道具已入帳',
+        })
+        return
+      }
+
+      const beforeSnap = preSubscriptionCreditsRef.current
+      preSubscriptionCreditsRef.current = null
+      const after = await getCreditBalance(user.id)
+      const parts: string[] = []
+      if (beforeSnap) {
+        if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
+        if (after.super_like > beforeSnap.super_like) {
+          parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)
+        }
+        if (after.blur_unlock > beforeSnap.blur_unlock) {
+          parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
+        }
+      }
+      setRewardFlash({
+        variant: 'grant',
+        title: parts.length > 0 ? '訂閱獎勵已入帳' : 'VIP 購買成功',
+        subtitle: parts.length > 0 ? parts.join(' · ') : '會員權益已啟用',
+      })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, refreshCredits])
 
   useEffect(() => {
     if (!user?.id) return
