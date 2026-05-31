@@ -154,7 +154,7 @@ export default function LandingScreen({ onStart }: Props) {
           transition={{ delay: 0.45, duration: 0.4 }}
           className="relative z-10 mt-6 flex gap-2 flex-wrap"
         >
-          {['🔒 端對端加密', '✅ 實名認證', '🤖 AI 配對'].map((chip) => (
+          {['🔒 端對端加密', '✅ 職業認證', '🤖 AI 配對'].map((chip) => (
             <span
               key={chip}
               className="text-[11px] font-semibold text-white/60 bg-white/8 ring-1 ring-white/12 rounded-full px-3 py-1"
