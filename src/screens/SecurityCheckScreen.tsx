@@ -332,7 +332,7 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
               <p className="text-white/50 text-xs leading-relaxed">
                 {isStandaloneMode
                   ? '您的裝置已完成所有安全驗證，端對端加密環境已就緒。'
-                  : 'Safari 分頁無法收到推播與完整保護。請「加入主畫面」後從圖示開啟，每次用瀏覽器開啟都會再次提醒。'}
+                  : 'Safari 分頁無法使用推播與完整安全保護。請先「加入主畫面」，並從主畫面圖示開啟 App。'}
               </p>
             </motion.div>
           )}
@@ -392,7 +392,7 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
                   className="touch-manipulation w-full bg-slate-900 text-white rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 shadow-xl shadow-slate-900/20"
                 >
                   <Shield className="w-5 h-5" />
-                  立即封裝至主畫面
+                  加入主畫面
                 </motion.button>
               )}
 
