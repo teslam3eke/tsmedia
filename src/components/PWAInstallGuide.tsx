@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Share, Plus, Download, X, Smartphone, MoreVertical } from 'lucide-react'
+import { Share, Plus, Download, X, Smartphone, MoreVertical, ChevronDown } from 'lucide-react'
 
 type Platform = 'ios' | 'android' | 'desktop' | 'standalone'
 
@@ -20,6 +20,19 @@ function detectPlatform(): Platform {
 interface Props {
   onDismiss?: () => void
   forceShow?: boolean
+}
+
+/** Safari 分享選單底部「較多檢視 ⌄」樣式（對照 iOS 系統介面）。 */
+function IosShareMoreActionsChip() {
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 rounded-md bg-slate-200/90 px-2 py-0.5 text-[11px] font-medium text-slate-700 align-middle mx-0.5 whitespace-nowrap"
+      aria-hidden
+    >
+      較多檢視
+      <ChevronDown className="w-3.5 h-3.5" strokeWidth={2.75} aria-hidden />
+    </span>
+  )
 }
 
 function StepRow({
@@ -42,7 +55,7 @@ function StepRow({
         <p className="text-sm font-semibold text-slate-800">{title}</p>
         <div className="flex items-start gap-1.5 mt-1">
           {icon}
-          <span className="text-xs text-slate-500 leading-relaxed">{hint}</span>
+          <div className="text-xs text-slate-500 leading-relaxed">{hint}</div>
         </div>
       </div>
     </div>
@@ -158,7 +171,13 @@ export default function PWAInstallGuide({ onDismiss, forceShow = false }: Props)
                   <StepRow
                     num="3"
                     title="選擇「加入主畫面」"
-                    hint="於分享選單中向下捲動，找到「加入主畫面」後點選。"
+                    hint={
+                      <>
+                        於分享選單中向下捲動尋找「加入主畫面」。若首屏未顯示，可能藏在{' '}
+                        <IosShareMoreActionsChip />
+                        {' '}展開項目內；點開後再選「加入主畫面」（加號圖示）。
+                      </>
+                    }
                     icon={<Plus className="w-4 h-4 text-blue-500 flex-shrink-0" />}
                   />
                   <StepRow
