@@ -142,8 +142,7 @@ export default function LandingScreen({ onStart }: Props) {
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between px-1">
-            <p className="text-sm font-bold text-white">2,400+ 位工程師</p>
+          <div className="mt-3 flex items-center justify-end px-1">
             <p className="text-xs text-white/55">單張主視覺 · 輕霧化處理</p>
           </div>
         </motion.div>
@@ -208,7 +207,7 @@ export default function LandingScreen({ onStart }: Props) {
           {[
             { value: '94%', label: '配對成功率' },
             { value: '4.9★', label: '用戶評分' },
-            { value: '1–3天', label: '審核時效' },
+            { value: '1 分鐘', label: '審核（AI）' },
           ].map(({ value, label }) => (
             <div key={label} className="flex-1 text-center py-3.5 bg-slate-50 rounded-2xl ring-1 ring-slate-100">
               <p className="text-[15px] font-black text-slate-900" style={{ letterSpacing: '-0.02em' }}>{value}</p>
