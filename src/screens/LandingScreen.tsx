@@ -129,7 +129,7 @@ export default function LandingScreen({ onStart }: Props) {
           <div className="relative overflow-hidden rounded-[28px] ring-1 ring-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
             <img
               src="/landing-photo.png"
-              alt="TsMedia hero"
+              alt="tsMedia hero"
               className="block w-full h-[260px] object-cover scale-[1.02]"
               style={{ filter: 'blur(4px)' }}
             />

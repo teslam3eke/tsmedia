@@ -178,7 +178,7 @@ export default function PWAInstallGuide({ onDismiss, forceShow = false }: Props)
                   <StepRow
                     num="4"
                     title="確認並完成安裝"
-                    hint="確認 App 名稱後點選「加入」；完成後請從主畫面上的 TsMedia 圖示開啟。"
+                    hint="確認 App 名稱後點選「加入」；完成後請從主畫面上的 tsMedia 圖示開啟。"
                     icon={<Smartphone className="w-4 h-4 text-blue-500 flex-shrink-0" />}
                   />
 
@@ -229,7 +229,7 @@ export default function PWAInstallGuide({ onDismiss, forceShow = false }: Props)
                   <StepRow
                     num="3"
                     title="確認安裝"
-                    hint="依提示完成安裝後，主畫面將出現 TsMedia 圖示。"
+                    hint="依提示完成安裝後，主畫面將出現 tsMedia 圖示。"
                     icon={<Smartphone className="w-4 h-4 text-slate-500 flex-shrink-0" />}
                   />
 

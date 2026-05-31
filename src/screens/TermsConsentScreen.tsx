@@ -20,7 +20,7 @@ export default function TermsConsentScreen({ busy = false, error, onAccept, onBa
         <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center mb-4 shadow-lg shadow-slate-900/20">
           <FileText className="w-7 h-7 text-white" />
         </div>
-        <p className="text-xs font-bold tracking-[0.22em] text-slate-400 uppercase">TsMedia Agreement</p>
+        <p className="text-xs font-bold tracking-[0.22em] text-slate-400">tsMedia Agreement</p>
         <h1 className="mt-1 text-2xl font-black tracking-[-0.04em] text-slate-950">會員同意書</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-500">
           使用前請閱讀並同意以下條款。版本：{TERMS_VERSION}

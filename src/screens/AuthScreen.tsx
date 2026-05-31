@@ -204,7 +204,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
               {/* Privacy notice for signup */}
               {mode === 'signup' && (
                 <p className="text-xs text-slate-400 text-center leading-relaxed px-2">
-                  建立帳號即代表同意 TsMedia 隱私政策。你的資料僅用於身份驗證，不對外揭露。
+                  建立帳號即代表同意 tsMedia 隱私政策。你的資料僅用於身份驗證，不對外揭露。
                 </p>
               )}
             </motion.div>

@@ -215,8 +215,8 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
           <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
             <Cpu className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-white/60 text-xs tracking-widest uppercase font-medium">
-            TsMedia
+          <span className="text-white/60 text-xs tracking-widest font-medium">
+            tsMedia
           </span>
         </motion.div>
 

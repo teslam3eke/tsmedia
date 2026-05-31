@@ -29,7 +29,7 @@ function supabaseFetchLogEnabled(): boolean {
 }
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('[TsMedia] Supabase env vars not set — running in offline mode.')
+  console.warn('[tsMedia] Supabase env vars not set — running in offline mode.')
 }
 
 /** iOS PWA 回前景後偶有 fetch 永不出結果；包一層逾時避免整個 UI 卡在 loading（abort 後由上層重試／換發 JWT）。 */
