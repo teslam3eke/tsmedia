@@ -50,7 +50,8 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
       return
     }
     if (d?.type === 'TM_BADGE_SYNC' && typeof d.count === 'number') {
-      void syncBadgeFromClient(Math.max(0, Math.min(BADGE_MAX, Math.floor(d.count))))
+      event.waitUntil(syncBadgeFromClient(Math.max(0, Math.min(BADGE_MAX, Math.floor(d.count)))))
+      return
     }
   } catch {
     /* ignore */
@@ -106,7 +107,7 @@ async function applyServiceWorkerRegistrationBadge(n: number): Promise<void> {
   }
 }
 
-/** 主執行緒 syncAppIconBadge → 對齊 cache + registration（唯一寫入點） */
+/** 主執行緒 syncAppIconBadge → 對齊 cache + registration（navigator 由主執行緒負責） */
 async function syncBadgeFromClient(n: number): Promise<void> {
   await applyBackgroundMessageBadge(n)
 }
