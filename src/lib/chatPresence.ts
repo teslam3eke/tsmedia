@@ -7,6 +7,13 @@ import {
 
 const CLIENT_KEY_LS = 'tsm_push_client_key_v1'
 
+/** 與 SW／Webhook 比對 match id 一致（去 hyphen、小寫） */
+export function compactMatchId(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const t = raw.trim().toLowerCase().replace(/-/g, '')
+  return t.length > 0 ? t : null
+}
+
 /** 每 PWA 安裝一組；與 push_subscriptions.client_key / user_chat_presence 對齊 */
 export function getPushClientKey(): string {
   if (typeof window === 'undefined') return 'ssr'

@@ -313,6 +313,9 @@ self.addEventListener('push', (event: PushEvent) => {
           await pingClientsForegroundMessageQuiet()
           return
         }
+
+        /** 背景推播：先累加角標再 showNotification（iOS PWA Badging API） */
+        await bumpAppIconBadgeForBackgroundMessage()
       }
 
       /** 10 點探索換日：不論前景背景一律 showNotification（若同 tag 已由準點本地通知顯示則略過） */
@@ -338,9 +341,6 @@ self.addEventListener('push', (event: PushEvent) => {
       if (isDiscoverDeckTag) {
         const dayKey = tag.slice('tsm-discover-deck-day-'.length)
         if (dayKey) await pingClientsDiscoverRolloverNotified(dayKey)
-      }
-      if (isMessageReceivedTag) {
-        await bumpAppIconBadgeForBackgroundMessage()
       }
     })(),
   )

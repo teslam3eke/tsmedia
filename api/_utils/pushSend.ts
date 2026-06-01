@@ -113,6 +113,48 @@ export type SendWebPushFilter = {
   clientKey?: string
 }
 
+function compactMatchId(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const t = raw.trim().toLowerCase().replace(/-/g, '')
+  return t.length > 0 ? t : null
+}
+
+/** 與前端 chat presence 心跳（15s）對齊；逾時視為 stale 仍發推播 */
+const CHAT_PRESENCE_TTL_MS = 90_000
+
+/** 067：前景開啟某 match 聊天室 → 該 client_key 的 push 訂閱略過 message_received */
+async function resolveChatPresenceSkipClientKeys(
+  supabase: ReturnType<typeof adminSupabase>,
+  userId: string,
+  matchId: string | null | undefined,
+): Promise<Set<string>> {
+  const target = compactMatchId(matchId)
+  if (!target) return new Set()
+
+  const { data, error } = await supabase
+    .from('user_chat_presence')
+    .select('client_key, active_match_id, visibility, updated_at')
+    .eq('user_id', userId)
+    .eq('visibility', 'visible')
+
+  if (error) {
+    console.warn('[pushSend] user_chat_presence query', error.message)
+    return new Set()
+  }
+
+  const now = Date.now()
+  const skip = new Set<string>()
+  for (const row of data ?? []) {
+    const key = typeof row.client_key === 'string' ? row.client_key.trim() : ''
+    if (!key) continue
+    if (compactMatchId(String(row.active_match_id ?? '')) !== target) continue
+    const updatedAt = row.updated_at ? Date.parse(String(row.updated_at)) : NaN
+    if (Number.isFinite(updatedAt) && now - updatedAt > CHAT_PRESENCE_TTL_MS) continue
+    skip.add(key)
+  }
+  return skip
+}
+
 export async function sendWebPushToUser(
   userId: string,
   payload: WebPushPayload,
@@ -145,12 +187,41 @@ export async function sendWebPushToUser(
   return { sent, failed, skipped: 0 }
 }
 
-/** 聊天／訊息類：較高 urgency；橫幅抑制交由 Service Worker（不再 server-side presence skip） */
+/** 聊天／訊息類：server presence 略過 + SW 前景抑制；較高 urgency */
 export async function sendWebPushMessageToUser(
   userId: string,
   payload: WebPushPayload,
 ): Promise<{ sent: number; failed: number; skipped: number }> {
-  return sendWebPushToUser(userId, payload, { TTL: 86_400, urgency: 'high' })
+  configureWebPush()
+  const supabase = adminSupabase()
+  const matchRaw = payload.matchId ?? payload.refMatchId
+  const skipClientKeys = await resolveChatPresenceSkipClientKeys(supabase, userId, matchRaw)
+
+  const { data: rows, error } = await supabase
+    .from('push_subscriptions')
+    .select('endpoint, p256dh, auth, client_key')
+    .eq('user_id', userId)
+
+  if (error) throw error
+  if (!rows?.length) return { sent: 0, failed: 0, skipped: 0 }
+
+  const payloadText = buildPushPayloadText(payload)
+  const options = { TTL: 86_400, urgency: 'high' as const }
+
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+  for (const r of rows as PushSubscriptionRow[]) {
+    const ck = typeof r.client_key === 'string' ? r.client_key.trim() : ''
+    if (ck && skipClientKeys.has(ck)) {
+      skipped++
+      continue
+    }
+    const out = await sendToSubscription(supabase, r, payloadText, options)
+    if (out === 'ok') sent++
+    else failed++
+  }
+  return { sent, failed, skipped }
 }
 
 /** 每晚換日廣播：依 endpoint 逐筆送出（同一使用者多裝置各自一則）。 */

@@ -101,7 +101,16 @@ import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/r
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
-import { armChatPresenceIfForeground, clearChatPresence, upsertUserChatPresenceOnServer } from '@/lib/chatPresence'
+import {
+  armChatPresenceIfForeground,
+  clearChatPresence,
+  compactMatchId,
+  upsertUserChatPresenceOnServer,
+} from '@/lib/chatPresence'
+import {
+  notifyServiceWorkerActiveChatMatch,
+  syncActiveChatMatchToLocationUrl,
+} from '@/lib/swActiveChat'
 import { syncAppIconBadge, clearAppIconBadge } from '@/lib/appIconBadge'
 import {
   TM_APP_DEEP_LINK_EVENT,
@@ -6058,6 +6067,8 @@ export default function MainScreen({
     const onHide = () => {
       if (document.visibilityState !== 'hidden') return
       void upsertUserChatPresenceOnServer(null, 'hidden')
+      notifyServiceWorkerActiveChatMatch(null)
+      syncActiveChatMatchToLocationUrl(null)
     }
     document.addEventListener('visibilitychange', onHide)
     return () => document.removeEventListener('visibilitychange', onHide)
@@ -6103,8 +6114,18 @@ export default function MainScreen({
 
   const ingestUnreadAppNotifications = useCallback(
     (list: AppNotificationRow[]) => {
+      const openMatchLc = compactMatchId(openChatMatchIdRef.current)
       for (const n of list) {
         if (appNotifQueuedOnceIdsRef.current.has(n.id)) continue
+        if (
+          n.kind === 'message_received' &&
+          openMatchLc &&
+          compactMatchId(n.ref_match_id) === openMatchLc
+        ) {
+          appNotifQueuedOnceIdsRef.current.add(n.id)
+          void markAppNotificationRead(n.id)
+          continue
+        }
         appNotifQueuedOnceIdsRef.current.add(n.id)
         applyPushDeepLinkFromNotificationRef.current(n)
       }
@@ -6858,7 +6879,13 @@ export default function MainScreen({
       void clearAppIconBadge()
       return
     }
-    void syncAppIconBadge(matchesTabUnreadCount)
+    const syncIfForeground = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void syncAppIconBadge(matchesTabUnreadCount)
+    }
+    syncIfForeground()
+    document.addEventListener('visibilitychange', syncIfForeground)
+    return () => document.removeEventListener('visibilitychange', syncIfForeground)
   }, [user?.id, matchesTabUnreadCount])
 
   const immersiveChatChrome =
