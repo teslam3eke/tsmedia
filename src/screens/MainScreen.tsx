@@ -6584,12 +6584,15 @@ export default function MainScreen({
     }
 
     /** 殘留 fromPush=1（無新 pushTs／SW token）視同主畫面開啟，勿誤跳聊天室 */
-    if (!authorizePushDeepLinkConsumption(params)) {
+    const pending = readPendingPushDeepLink()
+    if (!authorizePushDeepLinkConsumption(params) && !pending) {
       resetShellForHomeIconLaunch()
       return
     }
 
-    consumePushNotificationLaunchToken()
+    if (authorizePushDeepLinkConsumption(params)) {
+      consumePushNotificationLaunchToken()
+    }
 
     const fromUrl = parsePushDeepLinkFromSearchParams(params)
     const fromStorage = readPendingPushDeepLink()
@@ -6620,11 +6623,11 @@ export default function MainScreen({
     finalizePushDeepLinkConsumptionRef.current = finalizePushDeepLinkConsumption
   }, [finalizePushDeepLinkConsumption])
 
-  /** 冷啟／主畫面圖示：非推播點擊時回到配對列表，不沿用上次聊天室 */
+  /** 冷啟／主畫面圖示：非推播點擊時回到配對列表；fromPush=1 交給 consumeUrlPushDeepLink 處理 */
   useEffect(() => {
     if (!user?.id) return
     const params = new URL(window.location.href).searchParams
-    if (authorizePushDeepLinkConsumption(params)) return
+    if (params.get('fromPush') === '1') return
     resetShellForHomeIconLaunch()
   }, [user?.id, resetShellForHomeIconLaunch])
 

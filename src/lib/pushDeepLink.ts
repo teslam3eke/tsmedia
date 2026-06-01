@@ -12,7 +12,7 @@ export type PushDeepLinkIntent = {
 const PENDING_PUSH_DEEP_LINK_KEY = 'tm_pending_push_deep_link_v1'
 const PUSH_LAUNCH_TOKEN_KEY = 'tm_push_launch_token_v1'
 export const PUSH_TS_URL_PARAM = 'pushTs'
-/** 推播點擊後允許消費 deep link 的時間窗（主畫面圖示開啟不應帶有效 pushTs） */
+/** 推播「點擊」後允許消費 deep link 的時間窗（非 payload 內送出時間） */
 export const PUSH_LAUNCH_MAX_AGE_MS = 120_000
 
 const TAB_VALUES = new Set<PushDeepLinkTab>(['discover', 'matches', 'instant', 'profile'])

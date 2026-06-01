@@ -378,11 +378,23 @@ self.addEventListener('push', (event: PushEvent) => {
   )
 })
 
+/** 推播通知點擊當下刷新 fromPush／pushTs（payload 內 pushTs 為送出時間，不可用來授權） */
+function normalizePushNotificationClickTarget(path: string): string {
+  try {
+    const u = path.startsWith('http') ? new URL(path) : new URL(path, self.location.origin)
+    u.searchParams.set('fromPush', '1')
+    u.searchParams.set('pushTs', String(Date.now()))
+    return u.href
+  } catch {
+    return path.startsWith('http') ? path : new URL(path, self.location.origin).href
+  }
+}
+
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close()
   const data = event.notification.data as { url?: string } | undefined
   const path = typeof data?.url === 'string' ? data.url : '/'
-  const target = path.startsWith('http') ? path : new URL(path, self.location.origin).href
+  const target = normalizePushNotificationClickTarget(path)
 
   event.waitUntil(
     (async () => {
@@ -413,7 +425,14 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
         }
       }
       if (!focused) {
-        await self.clients.openWindow(target)
+        const opened = await self.clients.openWindow(target)
+        if (opened) {
+          try {
+            opened.postMessage({ type: 'TM_PUSH_OPEN', url: target })
+          } catch {
+            /* ignore */
+          }
+        }
       }
     })(),
   )

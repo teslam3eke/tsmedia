@@ -33,9 +33,8 @@ function applyHrefFromServiceWorker(hrefLike: string) {
     const u = new URL(hrefLike, window.location.origin)
     if (u.origin !== window.location.origin) return
     if (u.searchParams.get('fromPush') === '1') {
-      if (!u.searchParams.has(PUSH_TS_URL_PARAM)) {
-        u.searchParams.set(PUSH_TS_URL_PARAM, String(Date.now()))
-      }
+      /** 點推播當下刷新 pushTs（通知 payload 內的 pushTs 為送出時間，可能已過期） */
+      u.searchParams.set(PUSH_TS_URL_PARAM, String(Date.now()))
       markPushNotificationLaunchToken()
     }
     const parsed = parsePushDeepLinkFromSearchParams(u.searchParams)
