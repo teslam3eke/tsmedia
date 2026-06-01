@@ -10,11 +10,16 @@ export function isAppIconBadgeSupported(): boolean {
 export async function syncAppIconBadge(unreadTotal: number): Promise<void> {
   const n = Math.max(0, Math.min(BADGE_MAX, Math.floor(unreadTotal)))
   try {
+    const sw = navigator.serviceWorker?.controller
+    if (sw) {
+      /** 統一由 SW registration 寫角標，避免 navigator + registration 在 iOS 被加總 */
+      sw.postMessage({ type: 'TM_BADGE_SYNC', count: n })
+      return
+    }
     if (isAppIconBadgeSupported()) {
       if (n <= 0) await navigator.clearAppBadge!()
       else await navigator.setAppBadge!(n)
     }
-    navigator.serviceWorker?.controller?.postMessage({ type: 'TM_BADGE_SYNC', count: n })
   } catch {
     /* iOS 不支援或權限限制 */
   }

@@ -50,7 +50,7 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
       return
     }
     if (d?.type === 'TM_BADGE_SYNC' && typeof d.count === 'number') {
-      void persistAppIconBadgeCount(Math.max(0, Math.min(99, Math.floor(d.count))))
+      void syncBadgeFromClient(Math.max(0, Math.min(BADGE_MAX, Math.floor(d.count))))
     }
   } catch {
     /* ignore */
@@ -75,43 +75,52 @@ async function loadAppIconBadgeCountFromCache(): Promise<number> {
   }
 }
 
-async function persistAppIconBadgeCount(n: number): Promise<void> {
-  cachedAppIconBadgeCount = Math.max(0, Math.min(BADGE_MAX, Math.floor(n)))
+function clampBadgeCount(n: number): number {
+  return Math.max(0, Math.min(BADGE_MAX, Math.floor(n)))
+}
+
+async function writeBadgeCountCache(n: number): Promise<void> {
+  cachedAppIconBadgeCount = clampBadgeCount(n)
   try {
     const cache = await caches.open(BADGE_CACHE_NAME)
     await cache.put(BADGE_CACHE_KEY, new Response(String(cachedAppIconBadgeCount)))
   } catch {
     /* ignore */
   }
+}
 
+/** SW 內僅寫 registration；主執行緒用 navigator，兩者勿在同 context 各寫一次（iOS 可能顯示加總） */
+async function applyServiceWorkerRegistrationBadge(n: number): Promise<void> {
+  const count = clampBadgeCount(n)
   type BadgeTarget = {
     setAppBadge?: (contents?: number) => Promise<void>
     clearAppBadge?: () => Promise<void>
   }
-
-  const applyTo = async (target: BadgeTarget): Promise<boolean> => {
-    if (!('setAppBadge' in target)) return false
-    if (cachedAppIconBadgeCount <= 0) await target.clearAppBadge!()
-    else await target.setAppBadge!(cachedAppIconBadgeCount)
-    return true
-  }
-
   try {
-    await applyTo(self.registration as ServiceWorkerRegistration & BadgeTarget)
-  } catch {
-    /* ignore */
-  }
-  try {
-    await applyTo(self.navigator as Navigator & BadgeTarget)
+    const reg = self.registration as ServiceWorkerRegistration & BadgeTarget
+    if (!('setAppBadge' in reg)) return
+    if (count <= 0) await reg.clearAppBadge!()
+    else await reg.setAppBadge!(count)
   } catch {
     /* ignore */
   }
 }
 
-/** App 未開／背景收到訊息推播且將秀 OS 橫幅時，角標 +1（開 App 後由主程式以 DB 總數覆寫） */
+/** 主執行緒 syncAppIconBadge → 對齊 cache + registration（唯一寫入點） */
+async function syncBadgeFromClient(n: number): Promise<void> {
+  await applyBackgroundMessageBadge(n)
+}
+
+/** 背景推播：優先用 server 傳入的未讀總數；舊 payload 才 fallback +1 */
+async function applyBackgroundMessageBadge(next: number): Promise<void> {
+  const count = clampBadgeCount(next)
+  await writeBadgeCountCache(count)
+  await applyServiceWorkerRegistrationBadge(count)
+}
+
 async function bumpAppIconBadgeForBackgroundMessage(): Promise<void> {
   const base = await loadAppIconBadgeCountFromCache()
-  await persistAppIconBadgeCount(base + 1)
+  await applyBackgroundMessageBadge(base + 1)
 }
 
 function matchIdFromPayloadUrl(openUrlPath: string): string | null {
@@ -259,6 +268,7 @@ self.addEventListener('push', (event: PushEvent) => {
       let openUrl = '/'
       let payloadMatchLc: string | null = null
       let payloadRefMatchId: string | null = null
+      let payloadBadgeCount: number | null = null
       try {
         if (event.data) {
           const j = event.data.json() as {
@@ -270,6 +280,7 @@ self.addEventListener('push', (event: PushEvent) => {
             refMatchId?: string
             kind?: string
             notifId?: string
+            badgeCount?: number
           }
           if (j.title) title = j.title
           if (typeof j.body === 'string') body = j.body
@@ -281,6 +292,9 @@ self.addEventListener('push', (event: PushEvent) => {
           if (typeof j.matchId === 'string' && j.matchId.trim()) {
             payloadMatchLc = normalizeMatchIdForCompare(j.matchId)
             if (!payloadRefMatchId) payloadRefMatchId = j.matchId.trim()
+          }
+          if (typeof j.badgeCount === 'number' && Number.isFinite(j.badgeCount)) {
+            payloadBadgeCount = clampBadgeCount(j.badgeCount)
           }
         }
       } catch {
@@ -347,9 +361,13 @@ self.addEventListener('push', (event: PushEvent) => {
         renotify: !isDiscoverDeckTag,
       }
       await self.registration.showNotification(title, o)
-      /** 僅 App 真正在背景時 +1；前景由 MainScreen 以 DB 未讀總數覆寫，避免與 SW 累加打架 */
+      /** 僅 App 真正在背景時更新角標；server 傳 badgeCount 絕對值，避免累加漂移／重複推播 +2 */
       if (isMessageReceivedTag && !hasForegroundOriginClient(clients)) {
-        await bumpAppIconBadgeForBackgroundMessage()
+        if (payloadBadgeCount != null) {
+          await applyBackgroundMessageBadge(payloadBadgeCount)
+        } else {
+          await bumpAppIconBadgeForBackgroundMessage()
+        }
       }
       if (isDiscoverDeckTag) {
         const dayKey = tag.slice('tsm-discover-deck-day-'.length)

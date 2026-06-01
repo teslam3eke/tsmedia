@@ -52,6 +52,8 @@ export type WebPushPayload = {
   kind?: string
   notifId?: string
   refMatchId?: string | null
+  /** 配對聊天未讀加總；SW 背景推播直接設絕對值，避免累加漂移 */
+  badgeCount?: number
 }
 
 function buildPushPayloadText(payload: WebPushPayload): string {
@@ -70,7 +72,39 @@ function buildPushPayloadText(payload: WebPushPayload): string {
     ...(refMatchId ? { refMatchId } : {}),
     ...(payload.kind ? { kind: payload.kind } : {}),
     ...(payload.notifId ? { notifId: payload.notifId } : {}),
+    ...(typeof payload.badgeCount === 'number' && Number.isFinite(payload.badgeCount)
+      ? { badgeCount: Math.max(0, Math.min(99, Math.floor(payload.badgeCount))) }
+      : {}),
   })
+}
+
+/** 使用者所有配對聊天未讀則數加總（service role；供推播角標絕對值） */
+async function fetchUserMatchUnreadTotal(
+  supabase: ReturnType<typeof adminSupabase>,
+  userId: string,
+): Promise<number> {
+  const { data: matchRows, error: matchErr } = await supabase
+    .from('matches')
+    .select('id')
+    .or(`user_a.eq.${userId},user_b.eq.${userId}`)
+  if (matchErr) {
+    console.warn('[pushSend] unread matches', matchErr.message)
+    return 0
+  }
+  const matchIds = (matchRows ?? []).map((r) => r.id).filter(Boolean)
+  if (matchIds.length === 0) return 0
+
+  const { count, error: msgErr } = await supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .in('match_id', matchIds)
+    .is('read_at', null)
+    .neq('sender_id', userId)
+  if (msgErr) {
+    console.warn('[pushSend] unread messages', msgErr.message)
+    return 0
+  }
+  return Math.max(0, Math.min(99, count ?? 0))
 }
 
 async function parallelMapChunks<T>(
@@ -205,7 +239,8 @@ export async function sendWebPushMessageToUser(
   if (error) throw error
   if (!rows?.length) return { sent: 0, failed: 0, skipped: 0 }
 
-  const payloadText = buildPushPayloadText(payload)
+  const badgeCount = await fetchUserMatchUnreadTotal(supabase, userId)
+  const payloadText = buildPushPayloadText({ ...payload, badgeCount })
   const options = { TTL: 86_400, urgency: 'high' as const }
 
   let sent = 0
