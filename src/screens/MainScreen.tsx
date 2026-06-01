@@ -122,7 +122,6 @@ import {
   mergePushDeepLinkIntent,
   parsePushDeepLinkFromSearchParams,
   persistPendingPushDeepLink,
-  pushDeepLinkIntentFromAppNotification,
   readPendingPushDeepLink,
   stripPushDeepLinkParamsFromUrl,
   type ApplyPushDeepLinkOutcome,
@@ -6110,7 +6109,13 @@ export default function MainScreen({
     })
   }, [])
 
-  const applyPushDeepLinkFromNotificationRef = useRef<(n: AppNotificationRow) => void>(() => {})
+  /** 僅站內全螢幕彈窗；訊息類靠列表未讀紅點，不自動跳聊天室 */
+  const APP_NOTIF_POPUP_KINDS = new Set<AppNotificationKind>([
+    'verification_approved',
+    'verification_rejected',
+    'super_like_received',
+    'match_created',
+  ])
 
   const ingestUnreadAppNotifications = useCallback(
     (list: AppNotificationRow[]) => {
@@ -6127,7 +6132,9 @@ export default function MainScreen({
           continue
         }
         appNotifQueuedOnceIdsRef.current.add(n.id)
-        applyPushDeepLinkFromNotificationRef.current(n)
+        if (APP_NOTIF_POPUP_KINDS.has(n.kind)) {
+          appNotifPopupQueueRef.current.push(n)
+        }
       }
       tryDequeueAppNotifPopup()
     },
@@ -6556,6 +6563,14 @@ export default function MainScreen({
     if (typeof window === 'undefined') return
 
     const url = new URL(window.location.href)
+    const fromPush = url.searchParams.get('fromPush') === '1'
+
+    /** 從主畫面圖示開啟時不應沿用 sessionStorage／舊 deep link */
+    if (!fromPush) {
+      clearPendingPushDeepLink()
+      return
+    }
+
     const fromUrl = parsePushDeepLinkFromSearchParams(url.searchParams)
     const fromStorage = readPendingPushDeepLink()
     const intent = mergePushDeepLinkIntent(fromStorage, fromUrl)
@@ -6595,25 +6610,6 @@ export default function MainScreen({
     return () => window.removeEventListener(TM_APP_DEEP_LINK_EVENT, handler)
   }, [consumeUrlPushDeepLink])
 
-  const applyPushDeepLinkFromNotification = useCallback(
-    (n: AppNotificationRow) => {
-      const intent = pushDeepLinkIntentFromAppNotification({
-        id: n.id,
-        kind: n.kind,
-        ref_match_id: n.ref_match_id,
-      })
-      void applyPushDeepLinkIntent(intent).then((outcome) => {
-        if (outcome === 'applied') finalizePushDeepLinkConsumption()
-        else if (outcome === 'blocked_instant') stripPushDeepLinkParamsFromUrl()
-      })
-    },
-    [applyPushDeepLinkIntent, finalizePushDeepLinkConsumption],
-  )
-
-  useEffect(() => {
-    applyPushDeepLinkFromNotificationRef.current = applyPushDeepLinkFromNotification
-  }, [applyPushDeepLinkFromNotification])
-
   useEffect(() => {
     void loadLiveMatchThreads('full')
   }, [loadLiveMatchThreads])
@@ -6622,10 +6618,11 @@ export default function MainScreen({
   useEffect(() => {
     const handler = () => {
       void loadLiveMatchThreads('soft')
+      void refreshMatchTabSidebar()
     }
     window.addEventListener('tm_foreground_message_push', handler)
     return () => window.removeEventListener('tm_foreground_message_push', handler)
-  }, [loadLiveMatchThreads])
+  }, [loadLiveMatchThreads, refreshMatchTabSidebar])
 
   useEffect(() => {
     if (!user?.id || foregroundReloadNonce === 0) return
@@ -6879,14 +6876,19 @@ export default function MainScreen({
       void clearAppIconBadge()
       return
     }
-    const syncIfForeground = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
-      void syncAppIconBadge(matchesTabUnreadCount)
-    }
-    syncIfForeground()
-    document.addEventListener('visibilitychange', syncIfForeground)
-    return () => document.removeEventListener('visibilitychange', syncIfForeground)
+    void syncAppIconBadge(matchesTabUnreadCount)
   }, [user?.id, matchesTabUnreadCount])
+
+  /** 回前景時重抓側欄未讀，再觸發角標同步 */
+  useEffect(() => {
+    if (!user?.id) return
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      void refreshMatchTabSidebar()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [user?.id, refreshMatchTabSidebar])
 
   const immersiveChatChrome =
     (activeTab === 'matches' && matchesChatConversation != null) ||

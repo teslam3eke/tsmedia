@@ -83,14 +83,26 @@ async function persistAppIconBadgeCount(n: number): Promise<void> {
   } catch {
     /* ignore */
   }
+
+  type BadgeTarget = {
+    setAppBadge?: (contents?: number) => Promise<void>
+    clearAppBadge?: () => Promise<void>
+  }
+
+  const applyTo = async (target: BadgeTarget): Promise<boolean> => {
+    if (!('setAppBadge' in target)) return false
+    if (cachedAppIconBadgeCount <= 0) await target.clearAppBadge!()
+    else await target.setAppBadge!(cachedAppIconBadgeCount)
+    return true
+  }
+
   try {
-    const reg = self.registration as ServiceWorkerRegistration & {
-      setAppBadge?: (contents?: number) => Promise<void>
-      clearAppBadge?: () => Promise<void>
-    }
-    if (!('setAppBadge' in reg)) return
-    if (cachedAppIconBadgeCount <= 0) await reg.clearAppBadge!()
-    else await reg.setAppBadge!(cachedAppIconBadgeCount)
+    if (await applyTo(self.registration as ServiceWorkerRegistration & BadgeTarget)) return
+  } catch {
+    /* ignore */
+  }
+  try {
+    await applyTo(self.navigator as Navigator & BadgeTarget)
   } catch {
     /* ignore */
   }
@@ -314,7 +326,7 @@ self.addEventListener('push', (event: PushEvent) => {
           return
         }
 
-        /** 背景推播：先累加角標再 showNotification（iOS PWA Badging API） */
+        /** 背景推播：show 前後各 bump 一次，提高 iOS PWA Badging API 命中率 */
         await bumpAppIconBadgeForBackgroundMessage()
       }
 
@@ -338,6 +350,9 @@ self.addEventListener('push', (event: PushEvent) => {
         renotify: !isDiscoverDeckTag,
       }
       await self.registration.showNotification(title, o)
+      if (isMessageReceivedTag) {
+        await bumpAppIconBadgeForBackgroundMessage()
+      }
       if (isDiscoverDeckTag) {
         const dayKey = tag.slice('tsm-discover-deck-day-'.length)
         if (dayKey) await pingClientsDiscoverRolloverNotified(dayKey)

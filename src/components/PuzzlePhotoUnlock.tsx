@@ -71,6 +71,13 @@ function formatPuzzleBoostCountdown(ms: number) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
+function formatAllPhotosUnlockedLabel(photoSlotCount: number): string {
+  const n = clampPuzzlePhotoSlots(photoSlotCount)
+  if (n <= 1) return '照片已全部解鎖'
+  if (n === 2) return '兩張照片都已解鎖'
+  return '三張照片都已解鎖'
+}
+
 export function getPuzzleProgress(
   messages: PuzzleChatMessage[],
   manualUnlockedTiles: number[] = [],
@@ -357,7 +364,7 @@ export function PuzzlePhotoUnlock({
             </div>
             <p className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-slate-500">
               {progress.allPhotosComplete
-                ? '三張照片都已解鎖'
+                ? formatAllPhotosUnlockedLabel(progress.photoSlotCount)
                 : progress.photoSlotCount > 1
                   ? `第 ${progress.activePhotoIndex + 1}/${progress.photoSlotCount} 張 · 再互相 ${progress.nextRemaining || 3} 則可繼續解鎖`
                   : `再互相 ${progress.nextRemaining || 3} 則可繼續解鎖`}
@@ -547,7 +554,7 @@ export function PuzzlePhotoUnlock({
           </div>
           <p className="border-l-2 border-sky-200/90 pl-2 text-[10px] font-medium leading-relaxed text-slate-500">
             {progress.allPhotosComplete
-              ? '三張照片都已解鎖'
+              ? formatAllPhotosUnlockedLabel(progress.photoSlotCount)
               : `再互相 ${progress.nextRemaining || 3} 則解下一格`}
           </p>
           {progress.boostActive && (
