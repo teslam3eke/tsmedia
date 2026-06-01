@@ -118,11 +118,14 @@ import {
   TM_PHYSICAL_CHANNEL_RESUBSCRIBE_EVENT,
 } from '@/lib/appDeepLinkEvents'
 import {
+  authorizePushDeepLinkConsumption,
   clearPendingPushDeepLink,
+  consumePushNotificationLaunchToken,
   mergePushDeepLinkIntent,
   parsePushDeepLinkFromSearchParams,
   persistPendingPushDeepLink,
   readPendingPushDeepLink,
+  resetShellUrlForHomeIconLaunch,
   stripPushDeepLinkParamsFromUrl,
   type ApplyPushDeepLinkOutcome,
   type PushDeepLinkIntent,
@@ -6558,23 +6561,43 @@ export default function MainScreen({
     [user?.id, openMatchRoomFromPush, markPushNotifConsumed],
   )
 
+  const resetShellForHomeIconLaunch = useCallback(() => {
+    clearPendingPushDeepLink()
+    resetShellUrlForHomeIconLaunch()
+    syncActiveChatMatchToLocationUrl(null)
+    setMatchesChatConversation(null)
+    setPendingChatId(null)
+  }, [])
+
   /** 推播／分享：`?match` 直達對話；僅 `?notif` 時向 DB 取 ref_match_id。SW 點通知時 replaceState 後再觸發此邏輯。 */
   const consumeUrlPushDeepLink = useCallback(async () => {
     if (typeof window === 'undefined') return
 
     const url = new URL(window.location.href)
-    const fromPush = url.searchParams.get('fromPush') === '1'
+    const params = url.searchParams
+    const fromPush = params.get('fromPush') === '1'
 
-    /** 從主畫面圖示開啟時不應沿用 sessionStorage／舊 deep link */
+    /** 主畫面圖示／一般開啟：不消費 deep link */
     if (!fromPush) {
-      clearPendingPushDeepLink()
+      resetShellForHomeIconLaunch()
       return
     }
 
-    const fromUrl = parsePushDeepLinkFromSearchParams(url.searchParams)
+    /** 殘留 fromPush=1（無新 pushTs／SW token）視同主畫面開啟，勿誤跳聊天室 */
+    if (!authorizePushDeepLinkConsumption(params)) {
+      resetShellForHomeIconLaunch()
+      return
+    }
+
+    consumePushNotificationLaunchToken()
+
+    const fromUrl = parsePushDeepLinkFromSearchParams(params)
     const fromStorage = readPendingPushDeepLink()
     const intent = mergePushDeepLinkIntent(fromStorage, fromUrl)
-    if (!intent) return
+    if (!intent) {
+      resetShellForHomeIconLaunch()
+      return
+    }
 
     if (!user?.id) {
       persistPendingPushDeepLink(intent)
@@ -6587,7 +6610,7 @@ export default function MainScreen({
     } else if (outcome === 'blocked_instant') {
       stripPushDeepLinkParamsFromUrl()
     }
-  }, [user?.id, applyPushDeepLinkIntent, finalizePushDeepLinkConsumption])
+  }, [user?.id, applyPushDeepLinkIntent, finalizePushDeepLinkConsumption, resetShellForHomeIconLaunch])
 
   useEffect(() => {
     applyPushDeepLinkIntentRef.current = applyPushDeepLinkIntent
@@ -6596,6 +6619,14 @@ export default function MainScreen({
   useEffect(() => {
     finalizePushDeepLinkConsumptionRef.current = finalizePushDeepLinkConsumption
   }, [finalizePushDeepLinkConsumption])
+
+  /** 冷啟／主畫面圖示：非推播點擊時回到配對列表，不沿用上次聊天室 */
+  useEffect(() => {
+    if (!user?.id) return
+    const params = new URL(window.location.href).searchParams
+    if (authorizePushDeepLinkConsumption(params)) return
+    resetShellForHomeIconLaunch()
+  }, [user?.id, resetShellForHomeIconLaunch])
 
   useEffect(() => {
     void consumeUrlPushDeepLink()

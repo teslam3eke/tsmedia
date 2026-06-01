@@ -17,9 +17,11 @@ import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
 import { markDiscoverRolloverNotified } from '@/lib/appDay'
 import {
   mergePushDeepLinkIntent,
+  markPushNotificationLaunchToken,
   parsePushDeepLinkFromSearchParams,
   persistPendingPushDeepLink,
   readPendingPushDeepLink,
+  PUSH_TS_URL_PARAM,
 } from '@/lib/pushDeepLink'
 
 void maybeInitEruda()
@@ -30,6 +32,12 @@ function applyHrefFromServiceWorker(hrefLike: string) {
   try {
     const u = new URL(hrefLike, window.location.origin)
     if (u.origin !== window.location.origin) return
+    if (u.searchParams.get('fromPush') === '1') {
+      if (!u.searchParams.has(PUSH_TS_URL_PARAM)) {
+        u.searchParams.set(PUSH_TS_URL_PARAM, String(Date.now()))
+      }
+      markPushNotificationLaunchToken()
+    }
     const parsed = parsePushDeepLinkFromSearchParams(u.searchParams)
     if (parsed) {
       persistPendingPushDeepLink(mergePushDeepLinkIntent(readPendingPushDeepLink(), parsed)!)

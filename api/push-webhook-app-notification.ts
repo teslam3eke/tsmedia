@@ -38,6 +38,7 @@ function buildOpenUrlForAppNotification(record: {
     p.set('tab', 'discover')
   }
   p.set('fromPush', '1')
+  p.set('pushTs', String(Date.now()))
   return `/?${p.toString()}`
 }
 

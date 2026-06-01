@@ -276,7 +276,7 @@ export async function broadcastDiscoverDeckRolloverPush(): Promise<{
     title,
     body,
     tag: dayTag,
-    url: '/?tab=discover&fromPush=1',
+    url: `/?tab=discover&fromPush=1&pushTs=${Date.now()}`,
   })
 
   /** 並行發送以降低 Vercel serverless 逾時造成「後段訂閱全沒發到」 */
