@@ -97,7 +97,7 @@ async function persistAppIconBadgeCount(n: number): Promise<void> {
   }
 
   try {
-    if (await applyTo(self.registration as ServiceWorkerRegistration & BadgeTarget)) return
+    await applyTo(self.registration as ServiceWorkerRegistration & BadgeTarget)
   } catch {
     /* ignore */
   }
@@ -325,9 +325,6 @@ self.addEventListener('push', (event: PushEvent) => {
           await pingClientsForegroundMessageQuiet()
           return
         }
-
-        /** 背景推播：show 前後各 bump 一次，提高 iOS PWA Badging API 命中率 */
-        await bumpAppIconBadgeForBackgroundMessage()
       }
 
       /** 10 點探索換日：不論前景背景一律 showNotification（若同 tag 已由準點本地通知顯示則略過） */
@@ -350,7 +347,8 @@ self.addEventListener('push', (event: PushEvent) => {
         renotify: !isDiscoverDeckTag,
       }
       await self.registration.showNotification(title, o)
-      if (isMessageReceivedTag) {
+      /** 僅 App 真正在背景時 +1；前景由 MainScreen 以 DB 未讀總數覆寫，避免與 SW 累加打架 */
+      if (isMessageReceivedTag && !hasForegroundOriginClient(clients)) {
         await bumpAppIconBadgeForBackgroundMessage()
       }
       if (isDiscoverDeckTag) {
