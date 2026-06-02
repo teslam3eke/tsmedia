@@ -505,6 +505,15 @@ export default function MembershipManagementScreen({
           </button>
           。
         </p>
+        <p className="mt-4 text-center text-[11px] font-semibold text-slate-500">
+          客服信箱：{' '}
+          <a
+            href="mailto:letmesaveyou@livemail.tw"
+            className="text-amber-400/95 underline decoration-amber-400/50 underline-offset-2"
+          >
+            letmesaveyou@livemail.tw
+          </a>
+        </p>
       </div>
 
       {cancelConfirmOpen && (
