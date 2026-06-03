@@ -178,7 +178,8 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '', {
     /** 桌機縮視窗並不會抹去 localStorage／session（GoTrue 預設）；明確標註便於追查凍結與復原問題。 */
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true,
+    /** 改由 {@link consumeSupabaseAuthCallbackFromUrl} 在 React 啟動前 await，避免與 getSession 競態 */
+    detectSessionInUrl: false,
     flowType: 'pkce',
     /**
      * 預設使用 Web Locks（navigator.locks）做跨分頁同步。React Strict Mode 會雙掛載、

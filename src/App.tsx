@@ -22,7 +22,7 @@ import {
   windowBlurWakeLikelyForResumeReload,
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
-import { signOut } from '@/lib/auth'
+import { signOut, consumeSupabaseAuthCallbackFromUrl } from '@/lib/auth'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
@@ -514,8 +514,14 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
 
-    // Step 1: synchronously read the cached session from localStorage
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    void (async () => {
+      /** main.tsx 已先換券；此處再 await 一次作 idempotent 保險 */
+      await consumeSupabaseAuthCallbackFromUrl()
+      if (cancelled) return
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
       if (cancelled) return
       const u = session?.user ?? null
       setUser(u)
@@ -527,20 +533,22 @@ export default function App() {
           await ensureConnectionWithBudget()
         }
         const profile = await getProfile(u.id)
+        if (cancelled) return
         routeByProfile(profile, u.id)
       } else {
         go('landing')
       }
-    })
+    })()
 
     // Step 2: keep user state in sync; routing is handled in onSuccess / getSession
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
       setUser(session?.user ?? null)
       if (event === 'SIGNED_OUT') go('landing')
-      // 信箱確認信（PKCE）：首屏 getSession 仍為 null，換券完成後才會觸發 SIGNED_IN，須在此接 onboarding 路由
+      // 信箱確認信（PKCE）：換券完成後接 onboarding 路由（StrictMode 或晚到 callback 備援）
       if (event === 'SIGNED_IN' && session?.user) {
         const profile = await getProfile(session.user.id)
+        if (cancelled) return
         routeByProfile(profile, session.user.id)
       }
     })

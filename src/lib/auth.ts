@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 import { clearAppQueryCache } from './queryClient'
 import { unsubscribeWebPushOnSignOut } from './webPush'
-import type { User, Session } from '@supabase/supabase-js'
+import type { EmailOtpType, User, Session } from '@supabase/supabase-js'
 
 export type AuthResult =
   | { ok: true; user: User; session: Session | null }
@@ -48,6 +48,96 @@ export async function requestPasswordReset(
   })
   if (error) return { ok: false, error: mapError(error.message) }
   return { ok: true }
+}
+
+const AUTH_CALLBACK_QUERY_PARAMS = [
+  'code',
+  'token_hash',
+  'type',
+  'access_token',
+  'refresh_token',
+  'expires_in',
+  'expires_at',
+  'token_type',
+  'error',
+  'error_description',
+  'error_code',
+] as const
+
+/** 信箱確認／重設密碼回站時 URL 是否帶 Supabase auth callback 參數 */
+export function urlHasSupabaseAuthCallback(): boolean {
+  if (typeof window === 'undefined') return false
+  const url = new URL(window.location.href)
+  if (url.searchParams.get('code')) return true
+  if (url.searchParams.get('token_hash')) return true
+  if (url.hash.includes('access_token=')) return true
+  return false
+}
+
+/** 換券完成後清掉 ?code= 等，避免重新整理重複消費或卡在 landing */
+export function stripSupabaseAuthCallbackFromUrl(): void {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  let changed = false
+  for (const key of AUTH_CALLBACK_QUERY_PARAMS) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key)
+      changed = true
+    }
+  }
+  if (url.hash && (url.hash.includes('access_token=') || url.hash.includes('error='))) {
+    url.hash = ''
+    changed = true
+  }
+  if (!changed) return
+  const qs = url.searchParams.toString()
+  window.history.replaceState({}, '', url.pathname + (qs ? `?${qs}` : '') + url.hash)
+}
+
+/**
+ * Email 確認／重設密碼（PKCE `?code=`）：須在首屏路由前 await，避免 getSession 仍 null 而誤進 landing。
+ * 回傳是否成功建立 session。
+ */
+export async function consumeSupabaseAuthCallbackFromUrl(): Promise<boolean> {
+  if (typeof window === 'undefined') return false
+
+  const url = new URL(window.location.href)
+  const code = url.searchParams.get('code')
+
+  if (code) {
+    const {
+      data: { session: existing },
+    } = await supabase.auth.getSession()
+    if (existing) {
+      stripSupabaseAuthCallbackFromUrl()
+      return true
+    }
+
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    stripSupabaseAuthCallbackFromUrl()
+    if (error) {
+      console.warn('[auth] exchangeCodeForSession', error.message)
+      return false
+    }
+    return true
+  }
+
+  const tokenHash = url.searchParams.get('token_hash')
+  const type = url.searchParams.get('type')
+  if (tokenHash && type) {
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: type as EmailOtpType,
+    })
+    stripSupabaseAuthCallbackFromUrl()
+    if (error) {
+      console.warn('[auth] verifyOtp', error.message)
+      return false
+    }
+    return true
+  }
+
+  return false
 }
 
 // ── 登出 ──────────────────────────────────────────────────────
