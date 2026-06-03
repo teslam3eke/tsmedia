@@ -11,6 +11,7 @@ import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import AuthEmailSafariGuideScreen from '@/screens/AuthEmailSafariGuideScreen'
+import IosNonSafariLaunchWarning from '@/components/IosNonSafariLaunchWarning'
 
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -676,6 +677,7 @@ export default function App() {
   if (screen === 'main') {
     return (
       <>
+        <IosNonSafariLaunchWarning />
         {connectivityToast}
         <div
           className="app-container flex flex-col bg-white overflow-hidden"
@@ -694,6 +696,7 @@ export default function App() {
 
   return (
     <>
+      <IosNonSafariLaunchWarning />
       {connectivityToast}
       <AnimatePresence mode="wait">
       <motion.div
