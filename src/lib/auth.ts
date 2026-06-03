@@ -38,6 +38,18 @@ export async function signIn(email: string, password: string): Promise<AuthResul
   return { ok: true, user: data.user, session: data.session }
 }
 
+// ── 忘記密碼（寄送 Email 重設連結）────────────────────────────
+export async function requestPasswordReset(
+  email: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const redirectTo = emailRedirectUrl()
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: redirectTo ?? undefined,
+  })
+  if (error) return { ok: false, error: mapError(error.message) }
+  return { ok: true }
+}
+
 // ── 登出 ──────────────────────────────────────────────────────
 export async function signOut(): Promise<void> {
   await unsubscribeWebPushOnSignOut()

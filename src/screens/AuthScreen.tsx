@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, ChevronRight, Cpu, Eye, EyeOff, ArrowLeft } from 'lucide-react'
-import { signIn, signUp } from '@/lib/auth'
+import { requestPasswordReset, signIn, signUp } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -11,17 +11,21 @@ interface Props {
 }
 
 type Mode = 'signin' | 'signup'
+type AuthPanel = 'form' | 'signupDone' | 'forgotPassword' | 'forgotDone'
 
 export default function AuthScreen({ onSuccess, onBack }: Props) {
-  const [mode, setMode] = useState<Mode>('signup')
+  const [mode, setMode] = useState<Mode>('signin')
+  const [panel, setPanel] = useState<AuthPanel>('form')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [signupDone, setSignupDone] = useState(false)
 
-  const isValid = email.includes('@') && password.length >= 6
+  const isValidEmail = email.includes('@')
+  const isValidSignIn = isValidEmail && password.length >= 6
+  const isValidSignUp = isValidSignIn
+  const isValid = mode === 'signup' ? isValidSignUp : isValidSignIn
 
   const handleSubmit = async () => {
     if (!isValid || loading) return
@@ -40,13 +44,27 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
     }
 
     if (mode === 'signup' && !result.session) {
-      // Supabase sends a confirmation email — show notice
-      setSignupDone(true)
+      setPanel('signupDone')
       return
     }
 
     await onSuccess(result.user)
   }
+
+  const handleForgotPassword = async () => {
+    if (!isValidEmail || loading) return
+    setLoading(true)
+    setError('')
+    const result = await requestPasswordReset(email.trim())
+    setLoading(false)
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    setPanel('forgotDone')
+  }
+
+  const showModeTabs = panel === 'form'
 
   return (
     <div className="max-w-md mx-auto bg-[#fafafa] pb-safe"  style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1.5rem)' }}>
@@ -81,36 +99,38 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
           </div>
         </motion.div>
 
-        {/* Mode tabs */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="flex bg-white/10 rounded-2xl p-1"
-        >
-          {(['signup', 'signin'] as Mode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => { setMode(m); setError('') }}
-              className={cn(
-                'flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200',
-                mode === m
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-white/60 hover:text-white/90',
-              )}
-            >
-              {m === 'signup' ? '申請加入' : '已有帳號'}
-            </button>
-          ))}
-        </motion.div>
+        {/* Mode tabs：左「已有帳號」、右「申請加入」 */}
+        {showModeTabs && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="flex bg-white/10 rounded-2xl p-1"
+          >
+            {(['signin', 'signup'] as Mode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setError('') }}
+                className={cn(
+                  'flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200',
+                  mode === m
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-white/60 hover:text-white/90',
+                )}
+              >
+                {m === 'signin' ? '已有帳號' : '申請加入'}
+              </button>
+            ))}
+          </motion.div>
+        )}
       </div>
 
       {/* Form */}
       <div className="px-5 pt-8">
         <AnimatePresence mode="wait">
-          {signupDone ? (
+          {panel === 'signupDone' ? (
             <motion.div
-              key="done"
+              key="signup-done"
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-center py-10"
@@ -123,10 +143,93 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
                 請前往 <span className="font-semibold text-slate-800">{email}</span> 點擊確認連結，完成後即可繼續申請流程。
               </p>
               <button
-                onClick={() => setSignupDone(false)}
+                onClick={() => setPanel('form')}
                 className="mt-6 text-sm text-slate-400 underline underline-offset-2"
               >
                 重新輸入信箱
+              </button>
+            </motion.div>
+          ) : panel === 'forgotDone' ? (
+            <motion.div
+              key="forgot-done"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-center py-10"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-sky-100 flex items-center justify-center mx-auto mb-4">
+                <Mail className="w-8 h-8 text-sky-600" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 mb-2">重設密碼信已寄出</h2>
+              <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
+                請前往 <span className="font-semibold text-slate-800">{email}</span> 點擊 Email 驗證連結，即可設定新密碼。
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPanel('form')
+                  setMode('signin')
+                  setError('')
+                }}
+                className="mt-6 text-sm font-semibold text-slate-600 underline underline-offset-2"
+              >
+                返回登入
+              </button>
+            </motion.div>
+          ) : panel === 'forgotPassword' ? (
+            <motion.div
+              key="forgot"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+            >
+              <div>
+                <p className="text-2xl font-extrabold text-slate-900" style={{ letterSpacing: '-0.03em' }}>
+                  忘記密碼
+                </p>
+                <p className="text-sm text-slate-400 mt-1">
+                  輸入註冊信箱，我們會寄送 Email 驗證連結供你重設密碼
+                </p>
+              </div>
+
+              <div className="bg-white rounded-2xl px-4 py-3.5 shadow-sm ring-1 ring-slate-100 flex items-center gap-3 focus-within:ring-slate-300 transition-all">
+                <Mail className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); setError('') }}
+                  onFocus={(e) => { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300) }}
+                  placeholder="your@email.com"
+                  autoComplete="email"
+                  onKeyDown={(e) => e.key === 'Enter' && void handleForgotPassword()}
+                  className="flex-1 text-sm text-slate-900 placeholder:text-slate-300 outline-none bg-transparent"
+                />
+              </div>
+
+              <AnimatePresence>
+                {error && (
+                  <motion.p
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="text-sm text-red-500 text-center px-2"
+                  >
+                    {error}
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPanel('form')
+                  setMode('signin')
+                  setError('')
+                }}
+                className="w-full text-center text-sm font-semibold text-slate-500 underline underline-offset-2"
+              >
+                返回登入
               </button>
             </motion.div>
           ) : (
@@ -187,6 +290,21 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
                 </button>
               </div>
 
+              {mode === 'signin' && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPanel('forgotPassword')
+                      setError('')
+                    }}
+                    className="text-sm font-semibold text-slate-500 underline underline-offset-2 hover:text-slate-700"
+                  >
+                    忘記密碼？
+                  </button>
+                </div>
+              )}
+
               {/* Error */}
               <AnimatePresence>
                 {error && (
@@ -213,7 +331,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
       </div>
 
       {/* CTA */}
-      {!signupDone && (
+      {panel === 'form' && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -241,6 +359,41 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
             ) : (
               <>
                 {mode === 'signup' ? '建立帳號，開始申請' : '登入'}
+                <ChevronRight className="w-5 h-5" />
+              </>
+            )}
+          </motion.button>
+        </motion.div>
+      )}
+
+      {panel === 'forgotPassword' && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="px-5 pb-12 pt-4"
+        >
+          <motion.button
+            whileTap={{ scale: isValidEmail && !loading ? 0.97 : 1 }}
+            onClick={() => void handleForgotPassword()}
+            disabled={!isValidEmail || loading}
+            className={cn(
+              'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
+              isValidEmail && !loading
+                ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20'
+                : 'bg-slate-100 text-slate-300',
+            )}
+          >
+            {loading ? (
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+              >
+                <Cpu className="w-5 h-5" />
+              </motion.div>
+            ) : (
+              <>
+                寄送 Email 驗證連結
                 <ChevronRight className="w-5 h-5" />
               </>
             )}
