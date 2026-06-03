@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils'
 
 interface Props {
   onComplete: (answers: Record<number, string>, questions: Question[]) => void
-  onSkip: () => void
   gender?: Gender
   userId?: string
   onBackToProfile?: () => void
@@ -24,7 +23,6 @@ const MIN_CHARS = 20
 
 export default function QuestionnaireScreen({
   onComplete,
-  onSkip,
   gender = 'male',
   userId,
   onBackToProfile,
@@ -265,13 +263,6 @@ export default function QuestionnaireScreen({
           {isLast ? (allAnswered ? '提交作答' : '請完整作答') : '下一題'}
           <ChevronRight className="w-5 h-5" />
         </motion.button>
-      </div>
-
-      {/* Skip */}
-      <div className="px-5 pb-6 -mt-4 text-center">
-        <button onClick={onSkip} className="text-slate-400 text-xs py-1">
-          跳過（測試模式）
-        </button>
       </div>
     </div>
   )

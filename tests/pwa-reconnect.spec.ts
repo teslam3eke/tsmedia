@@ -34,11 +34,6 @@ async function setDocumentVisibility(page: Page, state: 'hidden' | 'visible') {
 async function enterMainShell(page: Page) {
   await page.goto(`${LOCAL_DEV_URL}/?tab=discover`)
 
-  const skipDemo = page.getByRole('button', { name: '跳過（測試模式）' })
-  if (await skipDemo.isVisible({ timeout: 20_000 }).catch(() => false)) {
-    await skipDemo.click()
-  }
-
   await expect(page.getByRole('button', { name: '探索' })).toBeVisible({ timeout: 30_000 })
 }
 

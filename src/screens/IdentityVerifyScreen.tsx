@@ -31,7 +31,6 @@ interface Props {
   claimedName?: string | null
   gender?: 'male' | 'female'
   onComplete: () => void
-  onSkip: () => void
   /** 職業審核 submitted 等待時：可返回編輯資料／問卷或登出 */
   onEditProfile?: () => void
   onEditQuestionnaire?: () => void
@@ -106,7 +105,6 @@ export default function IdentityVerifyScreen({
   claimedName,
   gender = 'male',
   onComplete,
-  onSkip,
   onEditProfile,
   onEditQuestionnaire,
   onSignOut,
@@ -722,15 +720,6 @@ export default function IdentityVerifyScreen({
           <p className="text-xs text-slate-400 mt-4 max-w-[280px] leading-relaxed">
             審核期間你仍可修改個人資料或問卷，或先登出稍後再回來。
           </p>
-          {import.meta.env.DEV && (
-            <button
-              type="button"
-              onClick={onSkip}
-              className="mt-4 text-xs text-slate-400 underline underline-offset-2"
-            >
-              略過（測試）
-            </button>
-          )}
         </div>
         <VerifyWaitActions
           onEditProfile={onEditProfile}
@@ -1183,12 +1172,6 @@ export default function IdentityVerifyScreen({
             </>
           )}
         </motion.button>
-
-        {gender !== 'female' && import.meta.env.DEV && (
-        <button type="button" onClick={onSkip} className="w-full text-slate-400 text-sm py-2">
-          跳過（測試模式）
-        </button>
-        )}
       </div>
     </div>
     {employmentManualWait

@@ -20,12 +20,11 @@ interface FormData {
 
 interface Props {
   onComplete: (data: FormData) => void
-  onSkip: () => void
 }
 
 const STEPS = ['基本資料', '職涯資訊', '興趣標籤']
 
-export default function OnboardingScreen({ onComplete, onSkip }: Props) {
+export default function OnboardingScreen({ onComplete }: Props) {
   const [step, setStep] = useState(0)
   const [form, setForm] = useState<FormData>({
     name: '',
@@ -229,13 +228,6 @@ export default function OnboardingScreen({ onComplete, onSkip }: Props) {
           {step < 2 ? '下一步' : '完成，開始配對'}
           <ChevronRight className="w-5 h-5" />
         </motion.button>
-
-        <button
-          onClick={onSkip}
-          className="w-full text-slate-400 text-sm py-2"
-        >
-          跳過（測試模式）
-        </button>
       </div>
     </div>
   )

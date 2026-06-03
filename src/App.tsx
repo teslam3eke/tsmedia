@@ -735,7 +735,7 @@ export default function App() {
           <ProfileSetupScreen
             userId={user?.id}
             onComplete={handleProfileSetupComplete}
-            onSkip={() => go('questionnaire')}
+            onBack={verifyWaitRevisit ? undefined : () => go('terms-consent')}
             onBackToQuestionnaire={verifyWaitRevisit ? () => go('questionnaire') : undefined}
             onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
           />
@@ -744,7 +744,6 @@ export default function App() {
         {screen === 'questionnaire' && (
           <QuestionnaireScreen
             onComplete={handleQuestionnaireComplete}
-            onSkip={() => go('identity-verify')}
             gender={userGender}
             userId={user?.id}
             onBackToProfile={verifyWaitRevisit ? () => go('profile-setup') : undefined}
@@ -762,14 +761,6 @@ export default function App() {
               const u = await getActiveUser()
               const profile = u ? await getProfile(u.id) : null
               launchMainFromProfile(profile)
-            }}
-            onSkip={async () => {
-              /** DEV 專用：略過男性須 approved 的職業驗證閘門 */
-              if (!import.meta.env.DEV) return
-              setVerifyWaitRevisit(false)
-              const u = await getActiveUser()
-              const profile = u ? await getProfile(u.id) : null
-              launchMainFromProfile(profile, { devBypassMaleVerify: true })
             }}
             onEditProfile={() => {
               setVerifyWaitRevisit(true)

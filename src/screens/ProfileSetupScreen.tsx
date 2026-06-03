@@ -8,7 +8,8 @@ import { REGION_LABELS, type Region } from '@/lib/types'
 interface Props {
   userId?: string
   onComplete: (data: ProfileSetupData) => void
-  onSkip: () => void
+  /** 首次 onboarding：返回條款同意頁 */
+  onBack?: () => void
   onBackToQuestionnaire?: () => void
   onReturnToVerify?: () => void
 }
@@ -39,7 +40,7 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0
 export default function ProfileSetupScreen({
   userId,
   onComplete,
-  onSkip,
+  onBack,
   onBackToQuestionnaire,
   onReturnToVerify,
 }: Props) {
@@ -147,23 +148,23 @@ export default function ProfileSetupScreen({
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
       <div className="px-5 pt-safe pb-6 border-b border-slate-100">
-        {(onBackToQuestionnaire || onReturnToVerify) && (
+        {(onBack || onBackToQuestionnaire || onReturnToVerify) && (
           <div className="flex items-center gap-2 mb-3">
-            {onBackToQuestionnaire ? (
+            {(onBack || onBackToQuestionnaire) && (
               <button
                 type="button"
-                onClick={onBackToQuestionnaire}
-                className="w-8 h-8 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
-                aria-label="返回問卷"
+                onClick={onBack ?? onBackToQuestionnaire}
+                className="flex items-center gap-1 text-sm font-semibold text-slate-500 active:text-slate-800"
               >
-                <ChevronLeft className="w-4 h-4 text-slate-600" />
+                <ChevronLeft className="w-4 h-4" />
+                上一頁
               </button>
-            ) : null}
+            )}
             {onReturnToVerify ? (
               <button
                 type="button"
                 onClick={onReturnToVerify}
-                className="text-xs font-semibold text-slate-500 active:text-slate-800"
+                className="ml-auto text-xs font-semibold text-slate-500 active:text-slate-800"
               >
                 返回審核等待
               </button>
@@ -364,9 +365,6 @@ export default function ProfileSetupScreen({
             下一步：價值觀評估
             <ChevronRight className="w-5 h-5" />
           </motion.button>
-          <button onClick={onSkip} className="w-full text-slate-400 text-sm py-2">
-            跳過（測試模式）
-          </button>
         </motion.div>
 
       </div>
