@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { AlertCircle, Check, FileText, ShieldCheck } from 'lucide-react'
+import { AlertCircle, Check, ChevronLeft, FileText, ShieldCheck } from 'lucide-react'
 import { TERMS_VERSION } from '@/lib/db'
 import { TERMS_SECTIONS } from '@/lib/termsContent'
 
@@ -16,7 +16,17 @@ export default function TermsConsentScreen({ busy = false, error, onAccept, onBa
 
   return (
     <div className="min-h-dvh bg-[#f8fafc] flex flex-col">
-      <div className="px-5 pt-8 pb-4 bg-white border-b border-slate-100">
+      <div className="px-5 pt-safe pb-4 bg-white border-b border-slate-100">
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mb-3 flex items-center gap-1 text-sm font-semibold text-slate-500 active:text-slate-800"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            上一頁
+          </button>
+        ) : null}
         <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center mb-4 shadow-lg shadow-slate-900/20">
           <FileText className="w-7 h-7 text-white" />
         </div>
@@ -70,11 +80,6 @@ export default function TermsConsentScreen({ busy = false, error, onAccept, onBa
         >
           {busy ? '儲存同意紀錄中' : '同意並繼續'}
         </motion.button>
-        {onBack && (
-          <button onClick={onBack} className="mt-2 w-full py-2.5 text-xs font-semibold text-slate-400">
-            返回
-          </button>
-        )}
       </div>
     </div>
   )

@@ -9,6 +9,8 @@ interface Props {
   onComplete: (answers: Record<number, string>, questions: Question[]) => void
   gender?: Gender
   userId?: string
+  /** 第 1 題：返回基本資料填寫 */
+  onBack?: () => void
   onBackToProfile?: () => void
   onReturnToVerify?: () => void
 }
@@ -25,6 +27,7 @@ export default function QuestionnaireScreen({
   onComplete,
   gender = 'male',
   userId,
+  onBack,
   onBackToProfile,
   onReturnToVerify,
 }: Props) {
@@ -85,29 +88,31 @@ export default function QuestionnaireScreen({
   const colors = CATEGORY_COLORS[q.category]
   const progress = ((current + 1) / questions.length) * 100
 
+  const screenBack = onBack ?? onBackToProfile
+
   return (
     <div className="max-w-md mx-auto bg-[#fafafa]">
       {/* Header */}
       <div className="px-5 pt-safe pb-4">
-        {(onReturnToVerify || (current === 0 && onBackToProfile)) && (
-          <div className="flex items-center justify-between mb-3">
-            {current === 0 && onBackToProfile ? (
+        {(screenBack || onReturnToVerify) && (
+          <div className="flex items-center gap-2 mb-3">
+            {current === 0 && screenBack ? (
               <button
                 type="button"
-                onClick={onBackToProfile}
-                className="w-8 h-8 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
-                aria-label="返回個人資料"
+                onClick={screenBack}
+                className="flex items-center gap-1 text-sm font-semibold text-slate-500 active:text-slate-800"
               >
-                <ChevronLeft className="w-4 h-4 text-slate-600" />
+                <ChevronLeft className="w-4 h-4" />
+                上一頁
               </button>
             ) : (
-              <span className="w-8" />
+              <span className="flex-1" />
             )}
             {onReturnToVerify ? (
               <button
                 type="button"
                 onClick={onReturnToVerify}
-                className="text-xs font-semibold text-slate-500 active:text-slate-800"
+                className="ml-auto text-xs font-semibold text-slate-500 active:text-slate-800"
               >
                 返回審核等待
               </button>

@@ -746,7 +746,7 @@ export default function App() {
             onComplete={handleQuestionnaireComplete}
             gender={userGender}
             userId={user?.id}
-            onBackToProfile={verifyWaitRevisit ? () => go('profile-setup') : undefined}
+            onBack={() => go('profile-setup')}
             onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
           />
         )}
