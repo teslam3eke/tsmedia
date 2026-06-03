@@ -10,6 +10,7 @@ import QuestionnaireScreen from '@/screens/QuestionnaireScreen'
 import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
+import AuthEmailSafariGuideScreen from '@/screens/AuthEmailSafariGuideScreen'
 
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -22,7 +23,7 @@ import {
   windowBlurWakeLikelyForResumeReload,
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
-import { signOut, consumeSupabaseAuthCallbackFromUrl } from '@/lib/auth'
+import { signOut, consumeSupabaseAuthCallbackFromUrl, shouldShowIosSafariAuthGuide } from '@/lib/auth'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import type { QuestionnaireEntry } from '@/lib/types'
@@ -35,6 +36,7 @@ type Screen =
   | 'splash'
   | 'landing'
   | 'auth'
+  | 'auth-safari-guide'
   | 'security-check'
   | 'terms-consent'
   | 'profile-setup'
@@ -46,6 +48,7 @@ const SCREEN_ORDER: Screen[] = [
   'splash',
   'landing',
   'auth',
+  'auth-safari-guide',
   'security-check',
   'terms-consent',
   'profile-setup',
@@ -115,6 +118,8 @@ export default function App() {
   const [mainInitialTab, setMainInitialTab] = useState<MainScreenTab>('discover')
   /** 職業 submitted 等待時從驗證頁返回編輯資料／問卷 */
   const [verifyWaitRevisit, setVerifyWaitRevisit] = useState(false)
+  /** iOS 非 Safari 開啟 PKCE 確認連結，或換券失敗 */
+  const [authSafariExchangeFailed, setAuthSafariExchangeFailed] = useState(false)
 
   const getActiveUser = async () => {
     if (user) return user
@@ -516,8 +521,19 @@ export default function App() {
 
     void (async () => {
       /** main.tsx 已先換券；此處再 await 一次作 idempotent 保險 */
-      await consumeSupabaseAuthCallbackFromUrl()
+      const authConsume = await consumeSupabaseAuthCallbackFromUrl()
       if (cancelled) return
+
+      if (
+        authConsume.outcome === 'deferred_ios_non_safari' ||
+        authConsume.outcome === 'failed' ||
+        shouldShowIosSafariAuthGuide()
+      ) {
+        setAuthSafariExchangeFailed(authConsume.outcome === 'failed')
+        go('auth-safari-guide')
+        setReady(true)
+        return
+      }
 
       const {
         data: { session },
@@ -704,6 +720,16 @@ export default function App() {
               routeByProfile(profile, signedInUser.id)
             }}
             onBack={() => go('landing')}
+          />
+        )}
+
+        {screen === 'auth-safari-guide' && (
+          <AuthEmailSafariGuideScreen
+            exchangeFailed={authSafariExchangeFailed}
+            onGoSignIn={() => {
+              setAuthSafariExchangeFailed(false)
+              go('auth')
+            }}
           />
         )}
 

@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, ChevronRight, Cpu, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { requestPasswordReset, signIn, signUp } from '@/lib/auth'
+import { iosEmailAuthSafariHint } from '@/lib/authBrowser'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -26,6 +27,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
   const isValidSignIn = isValidEmail && password.length >= 6
   const isValidSignUp = isValidSignIn
   const isValid = mode === 'signup' ? isValidSignUp : isValidSignIn
+  const iosSafariHint = iosEmailAuthSafariHint()
 
   const handleSubmit = async () => {
     if (!isValid || loading) return
@@ -142,6 +144,11 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
               <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
                 請前往 <span className="font-semibold text-slate-800">{email}</span> 點擊確認連結，完成後即可繼續申請流程。
               </p>
+              {iosSafariHint ? (
+                <p className="mt-4 text-xs leading-relaxed text-amber-800 bg-amber-50 rounded-2xl px-3 py-2.5 max-w-xs mx-auto text-left">
+                  {iosSafariHint}
+                </p>
+              ) : null}
               <button
                 onClick={() => setPanel('form')}
                 className="mt-6 text-sm text-slate-400 underline underline-offset-2"
@@ -163,6 +170,11 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
               <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
                 請前往 <span className="font-semibold text-slate-800">{email}</span> 點擊 Email 驗證連結，即可設定新密碼。
               </p>
+              {iosSafariHint ? (
+                <p className="mt-4 text-xs leading-relaxed text-amber-800 bg-amber-50 rounded-2xl px-3 py-2.5 max-w-xs mx-auto text-left">
+                  {iosSafariHint}
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {

@@ -1,6 +1,8 @@
 import { supabase } from './supabase'
 import { clearAppQueryCache } from './queryClient'
 import { unsubscribeWebPushOnSignOut } from './webPush'
+import { isIosNonSafariBrowser } from './authBrowser'
+import { iosOrIpadosLikely } from './resumeHardReload'
 import type { EmailOtpType, User, Session } from '@supabase/supabase-js'
 
 export type AuthResult =
@@ -50,6 +52,39 @@ export async function requestPasswordReset(
   return { ok: true }
 }
 
+/** iOS 非 Safari 開啟 PKCE 確認連結時暫存完整 URL（尚未換券，避免 code 被消耗） */
+export const IOS_AUTH_CALLBACK_URL_KEY = 'tm_ios_auth_callback_url'
+
+export type AuthCallbackConsumeResult =
+  | { outcome: 'none' }
+  | { outcome: 'session' }
+  | { outcome: 'failed' }
+  | { outcome: 'deferred_ios_non_safari' }
+
+export function readIosDeferredAuthCallbackUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return sessionStorage.getItem(IOS_AUTH_CALLBACK_URL_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function clearIosDeferredAuthCallbackUrl(): void {
+  try {
+    sessionStorage.removeItem(IOS_AUTH_CALLBACK_URL_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function shouldShowIosSafariAuthGuide(): boolean {
+  if (typeof window === 'undefined') return false
+  if (readIosDeferredAuthCallbackUrl()) return true
+  const url = new URL(window.location.href)
+  return Boolean(url.searchParams.get('code') && isIosNonSafariBrowser())
+}
+
 const AUTH_CALLBACK_QUERY_PARAMS = [
   'code',
   'token_hash',
@@ -96,30 +131,48 @@ export function stripSupabaseAuthCallbackFromUrl(): void {
 
 /**
  * Email 確認／重設密碼（PKCE `?code=`）：須在首屏路由前 await，避免 getSession 仍 null 而誤進 landing。
- * 回傳是否成功建立 session。
+ * iOS 非 Safari 不換券，改引導使用者用 Safari 開同一連結。
  */
-export async function consumeSupabaseAuthCallbackFromUrl(): Promise<boolean> {
-  if (typeof window === 'undefined') return false
+export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallbackConsumeResult> {
+  if (typeof window === 'undefined') return { outcome: 'none' }
 
   const url = new URL(window.location.href)
   const code = url.searchParams.get('code')
 
   if (code) {
+    if (isIosNonSafariBrowser()) {
+      try {
+        sessionStorage.setItem(IOS_AUTH_CALLBACK_URL_KEY, window.location.href)
+      } catch {
+        /* ignore */
+      }
+      return { outcome: 'deferred_ios_non_safari' }
+    }
+
     const {
       data: { session: existing },
     } = await supabase.auth.getSession()
     if (existing) {
       stripSupabaseAuthCallbackFromUrl()
-      return true
+      clearIosDeferredAuthCallbackUrl()
+      return { outcome: 'session' }
     }
 
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     stripSupabaseAuthCallbackFromUrl()
     if (error) {
       console.warn('[auth] exchangeCodeForSession', error.message)
-      return false
+      if (iosOrIpadosLikely()) {
+        try {
+          sessionStorage.setItem(IOS_AUTH_CALLBACK_URL_KEY, url.href)
+        } catch {
+          /* ignore */
+        }
+      }
+      return { outcome: 'failed' }
     }
-    return true
+    clearIosDeferredAuthCallbackUrl()
+    return { outcome: 'session' }
   }
 
   const tokenHash = url.searchParams.get('token_hash')
@@ -132,12 +185,13 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<boolean> {
     stripSupabaseAuthCallbackFromUrl()
     if (error) {
       console.warn('[auth] verifyOtp', error.message)
-      return false
+      return { outcome: 'failed' }
     }
-    return true
+    clearIosDeferredAuthCallbackUrl()
+    return { outcome: 'session' }
   }
 
-  return false
+  return { outcome: 'none' }
 }
 
 // ── 登出 ──────────────────────────────────────────────────────
