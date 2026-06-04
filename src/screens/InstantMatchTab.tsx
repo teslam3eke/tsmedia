@@ -208,12 +208,12 @@ function InstantHoursClosedNotice({ msUntil }: { msUntil: number }) {
 const MATCHING_ICON_PX = 112
 const MATCHING_RING_MAX_SCALE = 2.85
 
-/** 排隊中：雷達環在固定方框內擴散，外層卡片完整包住動畫區 */
+/** 排隊中：雷達環在卡片內方形容器擴散（僅外層 InstantCard 一框） */
 function MatchingPulseVisual() {
   return (
     <div className="flex w-full flex-col items-center">
       <div
-        className="relative mx-auto aspect-square w-full max-w-[20rem] overflow-hidden rounded-2xl bg-gradient-to-b from-slate-50 to-white ring-1 ring-inset ring-slate-200/90"
+        className="relative mx-auto aspect-square w-full max-w-[20rem] overflow-hidden"
         aria-hidden
       >
         <div className="absolute inset-0 flex items-center justify-center">
