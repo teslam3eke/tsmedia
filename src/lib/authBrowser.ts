@@ -10,9 +10,14 @@ export function isIosNonSafariBrowser(): boolean {
   return /CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo/i.test(ua)
 }
 
-/** iOS 非 Safari（Chrome 等）：每次冷啟／重新整理應顯示警示 */
-export function shouldWarnIosNonSafariBrowser(): boolean {
+/** iOS 非 Safari（Chrome 等）：須阻擋進入後續流程 */
+export function needsIosSafariBrowserGate(): boolean {
   return isIosNonSafariBrowser()
+}
+
+/** iOS 非 Safari（Chrome 等）：每次冷啟／重新整理應顯示警示（已改為全螢幕閘門） */
+export function shouldWarnIosNonSafariBrowser(): boolean {
+  return needsIosSafariBrowserGate()
 }
 
 /** 註冊／收信時給使用者的 iOS Safari 提示（無法從 Email 強制指定瀏覽器）。 */

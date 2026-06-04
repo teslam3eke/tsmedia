@@ -10,8 +10,8 @@ import QuestionnaireScreen from '@/screens/QuestionnaireScreen'
 import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
-import AuthEmailSafariGuideScreen from '@/screens/AuthEmailSafariGuideScreen'
-import IosNonSafariLaunchWarning from '@/components/IosNonSafariLaunchWarning'
+import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
+import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -37,7 +37,6 @@ type Screen =
   | 'splash'
   | 'landing'
   | 'auth'
-  | 'auth-safari-guide'
   | 'security-check'
   | 'terms-consent'
   | 'profile-setup'
@@ -49,7 +48,6 @@ const SCREEN_ORDER: Screen[] = [
   'splash',
   'landing',
   'auth',
-  'auth-safari-guide',
   'security-check',
   'terms-consent',
   'profile-setup',
@@ -174,6 +172,7 @@ export default function App() {
     profile: import('@/lib/types').ProfileRow | null,
     opts?: { devBypassMaleVerify?: boolean },
   ) => {
+    if (needsIosSafariBrowserGate()) return
     if (!canEnterMainShell(profile, opts)) {
       go('identity-verify')
       return
@@ -195,6 +194,7 @@ export default function App() {
 
   // After security check, decide where to go based on profile completeness.
   const routeAfterSecurityCheck = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (needsIosSafariBrowserGate()) return
     if (!hasAcceptedLatestTerms(profile)) return go('terms-consent')
     if (!profile?.name) return go('profile-setup')
     setCurrentProfileName(profile.name)
@@ -207,6 +207,7 @@ export default function App() {
 
   // 首次登入仍走安全頁；iOS Safari 分頁每次皆須封裝引導；其餘裝置看過一次後略過。
   const routeByProfile = (profile: import('@/lib/types').ProfileRow | null, userId: string) => {
+    if (needsIosSafariBrowserGate()) return
     if (profile?.gender) setUserGender(profile.gender)
     if (profile?.name) setCurrentProfileName(profile.name)
     if (needsPwaEncapsulationGate()) {
@@ -531,7 +532,6 @@ export default function App() {
         shouldShowIosSafariAuthGuide()
       ) {
         setAuthSafariExchangeFailed(authConsume.outcome === 'failed')
-        go('auth-safari-guide')
         setReady(true)
         return
       }
@@ -561,6 +561,7 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
       setUser(session?.user ?? null)
+      if (needsIosSafariBrowserGate()) return
       if (event === 'SIGNED_OUT') go('landing')
       // 信箱確認信（PKCE）：換券完成後接 onboarding 路由（StrictMode 或晚到 callback 備援）
       if (event === 'SIGNED_IN' && session?.user) {
@@ -574,6 +575,7 @@ export default function App() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = (next: Screen) => {
+    if (needsIosSafariBrowserGate()) return
     setPrev((prev) => prev)
     setScreen((prev) => { setPrev(prev); return next })
   }
@@ -670,6 +672,10 @@ export default function App() {
 
   if (!authReady) return <SplashScreen />
 
+  if (needsIosSafariBrowserGate()) {
+    return <IosSafariRequiredScreen exchangeFailed={authSafariExchangeFailed} />
+  }
+
   // Main screen is rendered OUTSIDE AnimatePresence/motion.div so it is not
   // inside any transformed containing block. `position: fixed; inset: 0`
   // pins it to the visual viewport edges — guaranteed no bottom gap on iOS
@@ -677,7 +683,6 @@ export default function App() {
   if (screen === 'main') {
     return (
       <>
-        <IosNonSafariLaunchWarning />
         {connectivityToast}
         <div
           className="app-container flex flex-col bg-white overflow-hidden"
@@ -696,7 +701,6 @@ export default function App() {
 
   return (
     <>
-      <IosNonSafariLaunchWarning />
       {connectivityToast}
       <AnimatePresence mode="wait">
       <motion.div
@@ -716,23 +720,12 @@ export default function App() {
         {screen === 'auth' && (
           <AuthScreen
             onSuccess={async (signedInUser) => {
-              // Use the authenticated user returned by Supabase directly to avoid
-              // getSession timing races right after login.
+              if (needsIosSafariBrowserGate()) return
               setUser(signedInUser)
               const profile = await getProfile(signedInUser.id)
               routeByProfile(profile, signedInUser.id)
             }}
             onBack={() => go('landing')}
-          />
-        )}
-
-        {screen === 'auth-safari-guide' && (
-          <AuthEmailSafariGuideScreen
-            exchangeFailed={authSafariExchangeFailed}
-            onGoSignIn={() => {
-              setAuthSafariExchangeFailed(false)
-              go('auth')
-            }}
           />
         )}
 
