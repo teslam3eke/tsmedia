@@ -204,35 +204,41 @@ function InstantHoursClosedNotice({ msUntil }: { msUntil: number }) {
   )
 }
 
-/** 排隊中：高對比動態（雷達環 + 掃描條）— 外層留足空間避免環狀動畫被卡片裁切 */
+/** 圖示 112px；雷達環最大 scale — 方框邊長需 ≥ 112 × scale */
+const MATCHING_ICON_PX = 112
+const MATCHING_RING_MAX_SCALE = 2.85
+
+/** 排隊中：雷達環在固定方框內擴散，外層卡片完整包住動畫區 */
 function MatchingPulseVisual() {
   return (
-    <div className="flex flex-col items-center overflow-visible">
-      <div className="relative mx-auto w-full overflow-visible px-2 py-12">
-        <div className="relative mx-auto flex h-28 w-28 items-center justify-center overflow-visible">
-        {[0, 1, 2].map((i) => (
-          <motion.div
-            key={i}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-800/40"
-            style={{ width: 112, height: 112 }}
-            initial={{ opacity: 0.5 }}
-            animate={{ scale: [1, 2.85], opacity: [0.5, 0] }}
-            transition={{ duration: 4.6, repeat: Infinity, delay: i * 1.45, ease: 'easeOut' }}
-          />
-        ))}
-        <motion.div
-          className="relative z-[1] flex h-28 w-28 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md"
-          animate={{ scale: [1, 1.05, 1] }}
-          transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
-          aria-hidden
-        >
-          <Users className="h-16 w-16" strokeWidth={2} />
-        </motion.div>
+    <div className="flex w-full flex-col items-center">
+      <div
+        className="relative mx-auto aspect-square w-full max-w-[20rem] overflow-hidden rounded-2xl bg-gradient-to-b from-slate-50 to-white ring-1 ring-inset ring-slate-200/90"
+        aria-hidden
+      >
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="relative flex h-28 w-28 items-center justify-center">
+            {[0, 1, 2].map((i) => (
+              <motion.div
+                key={i}
+                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-800/40"
+                style={{ width: MATCHING_ICON_PX, height: MATCHING_ICON_PX }}
+                initial={{ opacity: 0.5 }}
+                animate={{ scale: [1, MATCHING_RING_MAX_SCALE], opacity: [0.5, 0] }}
+                transition={{ duration: 4.6, repeat: Infinity, delay: i * 1.45, ease: 'easeOut' }}
+              />
+            ))}
+            <motion.div
+              className="relative z-[1] flex h-28 w-28 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-md"
+              animate={{ scale: [1, 1.05, 1] }}
+              transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              <Users className="h-16 w-16" strokeWidth={2} />
+            </motion.div>
+          </div>
         </div>
       </div>
-      <p className="mt-1 text-sm font-bold text-slate-800">
-        尋找另一位使用者…
-      </p>
+      <p className="mt-5 text-sm font-bold text-slate-800">尋找另一位使用者…</p>
       <div className="relative mt-5 h-2 w-full max-w-[220px] overflow-hidden rounded-full bg-slate-200">
         <motion.div
           className="absolute inset-y-0 w-[42%] rounded-full bg-slate-800"
@@ -876,7 +882,7 @@ export default function InstantMatchTab({
       <div className={pageShellClass}>
         <InstantHeading lines={INSTANT_WAITING_GUIDE_LINES} />
         <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-6">
-          <InstantCard className="overflow-visible py-2">
+          <InstantCard className="overflow-hidden px-4 py-6">
             <MatchingPulseVisual />
           </InstantCard>
           {pollError && <p className="text-center text-xs font-medium text-red-600">{pollError}</p>}
