@@ -204,11 +204,12 @@ function InstantHoursClosedNotice({ msUntil }: { msUntil: number }) {
   )
 }
 
-/** 排隊中：高對比動態（雷達環 + 掃描條 + 跳字點）— 配色仍維持 slate 主軸 */
+/** 排隊中：高對比動態（雷達環 + 掃描條）— 外層留足空間避免環狀動畫被卡片裁切 */
 function MatchingPulseVisual() {
   return (
-    <div className="flex flex-col items-center">
-      <div className="relative flex h-28 w-28 items-center justify-center">
+    <div className="flex flex-col items-center overflow-visible">
+      <div className="relative mx-auto w-full overflow-visible px-2 py-12">
+        <div className="relative mx-auto flex h-28 w-28 items-center justify-center overflow-visible">
         {[0, 1, 2].map((i) => (
           <motion.div
             key={i}
@@ -227,8 +228,9 @@ function MatchingPulseVisual() {
         >
           <Users className="h-16 w-16" strokeWidth={2} />
         </motion.div>
+        </div>
       </div>
-      <p className="mt-4 text-sm font-bold text-slate-800">
+      <p className="mt-1 text-sm font-bold text-slate-800">
         尋找另一位使用者…
       </p>
       <div className="relative mt-5 h-2 w-full max-w-[220px] overflow-hidden rounded-full bg-slate-200">
@@ -874,7 +876,7 @@ export default function InstantMatchTab({
       <div className={pageShellClass}>
         <InstantHeading lines={INSTANT_WAITING_GUIDE_LINES} />
         <div className="flex flex-1 flex-col justify-center gap-4 px-5 pb-6">
-          <InstantCard className="overflow-hidden py-8">
+          <InstantCard className="overflow-visible py-2">
             <MatchingPulseVisual />
           </InstantCard>
           {pollError && <p className="text-center text-xs font-medium text-red-600">{pollError}</p>}
