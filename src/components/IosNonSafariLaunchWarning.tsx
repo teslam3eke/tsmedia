@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, X } from 'lucide-react'
 import { shouldWarnIosNonSafariBrowser } from '@/lib/authBrowser'
+import IosOpenInSafariActions from '@/components/IosOpenInSafariActions'
 
 /**
  * 每次載入（冷啟／重新整理）若為 iOS 非 Safari，顯示警示。
@@ -43,6 +44,10 @@ export default function IosNonSafariLaunchWarning() {
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
                   建議：Safari 開啟 tsmedia.tw 並「加入主畫面」，之後從主畫面圖示進入；或在「設定 → App → 預設瀏覽器 App」改回 Safari。
                 </p>
+                <IosOpenInSafariActions
+                  className="mt-4"
+                  tryLabel="嘗試用 Safari 開啟 tsMedia"
+                />
               </div>
               <button
                 type="button"

@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
-import { AlertCircle, Check, Compass, Copy, ExternalLink, Mail } from 'lucide-react'
+import { useMemo } from 'react'
+import { AlertCircle, Compass, ExternalLink, Mail } from 'lucide-react'
 import {
   clearIosDeferredAuthCallbackUrl,
   readIosDeferredAuthCallbackUrl,
 } from '@/lib/auth'
+import IosOpenInSafariActions from '@/components/IosOpenInSafariActions'
 
 interface Props {
   /** 換券失敗（可能已消耗 code）時顯示備援登入提示 */
@@ -17,18 +17,6 @@ export default function AuthEmailSafariGuideScreen({ exchangeFailed, onGoSignIn 
     () => readIosDeferredAuthCallbackUrl() ?? (typeof window !== 'undefined' ? window.location.href : ''),
     [],
   )
-  const [copied, setCopied] = useState(false)
-
-  const copyLink = async () => {
-    if (!callbackUrl) return
-    try {
-      await navigator.clipboard.writeText(callbackUrl)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2500)
-    } catch {
-      /* 部分 WebView 不支援 clipboard */
-    }
-  }
 
   const handleGoSignIn = () => {
     clearIosDeferredAuthCallbackUrl()
@@ -61,28 +49,19 @@ export default function AuthEmailSafariGuideScreen({ exchangeFailed, onGoSignIn 
         <ol className="mt-6 space-y-3 text-sm text-slate-700">
           <li className="flex gap-3">
             <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">1</span>
-            <span>點下方「複製確認連結」</span>
+            <span>點下方「嘗試用 Safari 開啟」或複製連結</span>
           </li>
           <li className="flex gap-3">
             <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">2</span>
-            <span>開啟 Safari，貼到網址列並前往</span>
-          </li>
-          <li className="flex gap-3">
-            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">3</span>
-            <span>或從主畫面 tsMedia 圖示開啟後再貼上連結</span>
+            <span>在 Safari 完成驗證（或從主畫面 tsMedia 圖示開啟後貼上）</span>
           </li>
         </ol>
 
-        <motion.button
-          type="button"
-          whileTap={{ scale: 0.98 }}
-          onClick={() => void copyLink()}
-          disabled={!callbackUrl}
-          className="mt-8 w-full rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 flex items-center justify-center gap-2 disabled:opacity-40"
-        >
-          {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-          {copied ? '已複製' : '複製確認連結'}
-        </motion.button>
+        <IosOpenInSafariActions
+          url={callbackUrl}
+          className="mt-6"
+          tryLabel="嘗試用 Safari 開啟確認連結"
+        />
 
         <p className="mt-3 text-[11px] text-slate-400 break-all leading-relaxed">
           {callbackUrl}
