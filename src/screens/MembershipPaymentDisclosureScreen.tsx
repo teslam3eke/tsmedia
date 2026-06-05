@@ -60,7 +60,7 @@ export default function MembershipPaymentDisclosureScreen({ onBack }: Props) {
               </div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
                 <dt className="font-semibold text-slate-700">付款方式</dt>
-                <dd className="text-right text-slate-800">信用卡（藍新金流 NewebPay 安全付款頁）</dd>
+                <dd className="text-right text-slate-800">信用卡（綠界科技金流 ECPay 安全付款頁）</dd>
               </div>
               <div>
                 <dt className="font-semibold text-slate-700">服務內容</dt>

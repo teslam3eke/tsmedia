@@ -245,10 +245,9 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo }: Props) {
           <button
             type="button"
             onClick={onOpenPaymentInfo}
-            className="flex w-full items-center justify-between rounded-2xl bg-slate-50 px-4 py-3.5 text-left ring-1 ring-slate-100 active:bg-slate-100"
+            className="flex w-full items-center justify-center rounded-2xl bg-slate-50 px-4 py-3.5 text-center ring-1 ring-slate-100 active:bg-slate-100"
           >
             <span className="text-sm font-bold text-slate-800">會員收付資訊</span>
-            <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden />
           </button>
           <SupportEmailFooter />
         </div>
