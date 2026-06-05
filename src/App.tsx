@@ -11,6 +11,7 @@ import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
+import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 
 import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
@@ -36,6 +37,7 @@ import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnl
 type Screen =
   | 'splash'
   | 'landing'
+  | 'membership-payment-info'
   | 'auth'
   | 'security-check'
   | 'terms-consent'
@@ -47,6 +49,7 @@ type Screen =
 const SCREEN_ORDER: Screen[] = [
   'splash',
   'landing',
+  'membership-payment-info',
   'auth',
   'security-check',
   'terms-consent',
@@ -714,7 +717,12 @@ export default function App() {
         {screen === 'landing' && (
           <LandingScreen
             onStart={() => go('auth')}
+            onOpenPaymentInfo={() => go('membership-payment-info')}
           />
+        )}
+
+        {screen === 'membership-payment-info' && (
+          <MembershipPaymentDisclosureScreen onBack={() => go('landing')} />
         )}
 
         {screen === 'auth' && (

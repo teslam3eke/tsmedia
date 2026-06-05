@@ -1,8 +1,10 @@
 import { motion } from 'framer-motion'
 import { ChevronRight, Cpu, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
+import SupportEmailFooter from '@/components/SupportEmailFooter'
 
 interface Props {
   onStart: () => void
+  onOpenPaymentInfo: () => void
 }
 
 const FEATURES = [
@@ -26,7 +28,7 @@ const FEATURES = [
   },
 ]
 
-export default function LandingScreen({ onStart }: Props) {
+export default function LandingScreen({ onStart, onOpenPaymentInfo }: Props) {
   return (
     <div className="min-h-dvh flex flex-col bg-white">
 
@@ -238,6 +240,18 @@ export default function LandingScreen({ onStart }: Props) {
           申請加入菁英社群
           <ChevronRight className="w-5 h-5" />
         </motion.button>
+
+        <div className="mt-8 space-y-4 border-t border-slate-100 pt-6">
+          <button
+            type="button"
+            onClick={onOpenPaymentInfo}
+            className="flex w-full items-center justify-between rounded-2xl bg-slate-50 px-4 py-3.5 text-left ring-1 ring-slate-100 active:bg-slate-100"
+          >
+            <span className="text-sm font-bold text-slate-800">會員收付資訊</span>
+            <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden />
+          </button>
+          <SupportEmailFooter />
+        </div>
       </motion.div>
 
     </div>
