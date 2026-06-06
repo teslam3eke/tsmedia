@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { motion } from 'framer-motion'
 import { Cpu, Eye, EyeOff, Lock, ChevronRight } from 'lucide-react'
-import { updatePassword } from '@/lib/auth'
-import { supabase } from '@/lib/supabase'
+import { ensureRecoveryAuthSession, updatePassword } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -18,20 +17,36 @@ export default function ResetPasswordScreen({ user, onComplete }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [sessionUser, setSessionUser] = useState<User | null>(user ?? null)
+  const [sessionReady, setSessionReady] = useState(false)
 
   useEffect(() => {
     setSessionUser(user ?? null)
   }, [user])
 
   useEffect(() => {
-    void supabase.auth.getUser().then(({ data: { user: u } }) => {
-      if (u) setSessionUser(u)
-    })
-  }, [])
+    let cancelled = false
+    void (async () => {
+      const u = user ?? (await ensureRecoveryAuthSession())
+      if (cancelled) return
+      setSessionUser(u)
+      setSessionReady(true)
+      if (!u) {
+        setError('連結已失效或未登入，請回到登入頁重新申請重設密碼。')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   const passwordsMatch = confirm.length === 0 || password === confirm
   const passwordLongEnough = password.length >= 6
-  const isValid = passwordLongEnough && password === confirm && confirm.length >= 6
+  const isValid =
+    sessionReady &&
+    Boolean(sessionUser) &&
+    passwordLongEnough &&
+    password === confirm &&
+    confirm.length >= 6
 
   const handleSubmit = async () => {
     if (!isValid || loading) return
@@ -40,8 +55,7 @@ export default function ResetPasswordScreen({ user, onComplete }: Props) {
 
     let active = sessionUser
     if (!active) {
-      const { data: { user: u } } = await supabase.auth.getUser()
-      active = u ?? null
+      active = await ensureRecoveryAuthSession()
       setSessionUser(active)
     }
     if (!active) {
@@ -128,6 +142,10 @@ export default function ResetPasswordScreen({ user, onComplete }: Props) {
             className="flex-1 text-sm text-slate-900 placeholder:text-slate-300 outline-none bg-transparent"
           />
         </div>
+
+        {!sessionReady ? (
+          <p className="text-sm text-slate-400 text-center">正在驗證重設連結…</p>
+        ) : null}
 
         {!passwordLongEnough && password.length > 0 ? (
           <p className="text-sm text-amber-600 text-center">密碼需至少 6 碼</p>
