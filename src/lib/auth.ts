@@ -35,6 +35,17 @@ function pathnameIsPasswordRecovery(pathname: string): boolean {
   return path === '/reset-password' || path.endsWith('/reset-password')
 }
 
+/** 目前網址是否在重設密碼專用路徑（信內 redirect_to 落地後） */
+export function isOnPasswordRecoveryRoute(): boolean {
+  if (typeof window === 'undefined') return false
+  return pathnameIsPasswordRecovery(window.location.pathname)
+}
+
+function parseUrlHashParams(url: URL): URLSearchParams {
+  const raw = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash
+  return new URLSearchParams(raw)
+}
+
 function urlIndicatesPasswordRecovery(url: URL): boolean {
   if (pathnameIsPasswordRecovery(url.pathname)) return true
   if (url.searchParams.get('auth') === 'recovery') return true
@@ -272,19 +283,56 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
   if (typeof window === 'undefined') return { outcome: 'none' }
 
   const url = new URL(window.location.href)
-  const code = url.searchParams.get('code')
   const recoveryIntent = urlIndicatesPasswordRecovery(url)
 
-  if (code) {
-    if (isIosNonSafariBrowser()) {
-      try {
-        sessionStorage.setItem(IOS_AUTH_CALLBACK_URL_KEY, window.location.href)
-      } catch {
-        /* ignore */
-      }
-      return { outcome: 'deferred_ios_non_safari' }
+  if (isIosNonSafariBrowser() && urlHasSupabaseAuthCallback()) {
+    try {
+      sessionStorage.setItem(IOS_AUTH_CALLBACK_URL_KEY, window.location.href)
+    } catch {
+      /* ignore */
     }
+    return { outcome: 'deferred_ios_non_safari' }
+  }
 
+  /** Supabase 重設密碼常走 hash implicit（#access_token=），非 ?code= */
+  if (url.hash.includes('access_token=')) {
+    const hashParams = parseUrlHashParams(url)
+    const hashError = hashParams.get('error_description') ?? hashParams.get('error')
+    if (hashError) {
+      console.warn('[auth] hash callback error', hashError)
+      stripSupabaseAuthCallbackFromUrl()
+      return { outcome: 'failed' }
+    }
+    const accessToken = hashParams.get('access_token')
+    const refreshToken = hashParams.get('refresh_token')
+    if (accessToken && refreshToken) {
+      const hashType = hashParams.get('type')
+      const isRecovery = recoveryIntent || hashType === 'recovery'
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      })
+      stripSupabaseAuthCallbackFromUrl()
+      if (error) {
+        console.warn('[auth] setSession from hash', error.message)
+        if (iosOrIpadosLikely()) {
+          try {
+            sessionStorage.setItem(IOS_AUTH_CALLBACK_URL_KEY, url.href)
+          } catch {
+            /* ignore */
+          }
+        }
+        return { outcome: 'failed' }
+      }
+      const passwordRecovery = isRecovery ? markRecoveryFromAuthCallback(url) : readPasswordRecoveryPending()
+      clearIosDeferredAuthCallbackUrl()
+      return { outcome: 'session', passwordRecovery }
+    }
+  }
+
+  const code = url.searchParams.get('code')
+
+  if (code) {
     /** 重設密碼連結必須換券（不可因有舊 session 略過），否則無法 updateUser。 */
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (error) {

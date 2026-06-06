@@ -34,6 +34,7 @@ import {
   readPasswordRecoveryPending,
   readPasswordResetFlowStarted,
   clearPasswordResetFlowStarted,
+  isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
@@ -566,7 +567,9 @@ export default function App() {
     }
 
     const needsRecoveryScreen = () =>
-      readPasswordRecoveryPending() || readPasswordResetFlowStarted()
+      readPasswordRecoveryPending() ||
+      readPasswordResetFlowStarted() ||
+      isOnPasswordRecoveryRoute()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
@@ -610,7 +613,8 @@ export default function App() {
       if (cancelled) return
       const u = session?.user ?? null
       setUser(u)
-      if (u && needsRecoveryScreen()) {
+      if (needsRecoveryScreen()) {
+        if (u) markPasswordRecoveryPending()
         routeToPasswordRecovery()
         setReady(true)
         return
@@ -629,7 +633,7 @@ export default function App() {
   /** authReady 後若仍停在 splash（早期 return 漏設 screen）→ 避免空白頁 */
   useEffect(() => {
     if (!authReady || screen !== 'splash') return
-    if (readPasswordRecoveryPending() || readPasswordResetFlowStarted()) {
+    if (readPasswordRecoveryPending() || readPasswordResetFlowStarted() || isOnPasswordRecoveryRoute()) {
       routeToPasswordRecovery()
       return
     }

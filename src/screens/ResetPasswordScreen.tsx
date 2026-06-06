@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Cpu, Eye, EyeOff, Lock, ChevronRight } from 'lucide-react'
 import { updatePassword } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -14,8 +15,18 @@ export default function ResetPasswordScreen({ onComplete }: Props) {
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [hasSession, setHasSession] = useState(false)
 
-  const isValid = password.length >= 6 && password === confirm
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      setHasSession(Boolean(session))
+      if (!session) {
+        setError('連結已失效或未登入，請回到登入頁重新申請重設密碼。')
+      }
+    })
+  }, [])
+
+  const isValid = password.length >= 6 && password === confirm && hasSession
 
   const handleSubmit = async () => {
     if (!isValid || loading) return
