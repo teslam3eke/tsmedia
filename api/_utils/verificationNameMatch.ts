@@ -44,7 +44,7 @@ function claimedMatchesChineseSegments(claimedName: string, detectedName: string
 
 /** 扣繳／薪資：僅以中文姓名比對；不得用英文／羅馬拼音通過。 */
 export function preferChineseOnlyNameMatch(docType?: VerificationDocTypeHint): boolean {
-  return docType === 'tax_return' || docType === 'payslip'
+  return docType === 'tax_return' || docType === 'payslip' || docType === 'other'
 }
 
 export function claimedNameMatchesDetected(

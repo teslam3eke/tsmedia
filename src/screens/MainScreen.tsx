@@ -4130,6 +4130,8 @@ function EditProfileScreen({
       } as const
     }
 
+    const incomeDocType: 'tax_return' | 'payslip' = 'tax_return'
+
     const controller = new AbortController()
     const timeout = window.setTimeout(() => controller.abort(), 5 * 60 * 1000)
     try {
@@ -4142,8 +4144,7 @@ function EditProfileScreen({
           verificationKind: 'income',
           claimedIncomeTier: tier,
           claimedName: profile.name ?? undefined,
-          claimedCompany: profile.company ?? undefined,
-          docType: 'other',
+          docType: incomeDocType,
         }),
         signal: controller.signal,
       })
@@ -4256,7 +4257,7 @@ function EditProfileScreen({
     const submitResult = await submitIncomeVerification(
       userId,
       tier,
-      'payslip',
+      'tax_return',
       res.path,
       aiResult,
       reviewMode,

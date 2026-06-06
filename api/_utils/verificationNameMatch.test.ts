@@ -31,4 +31,13 @@ describe('claimedNameMatchesDetected', () => {
       claimedNameMatchesDetected('王小明', '王小明', { docType: 'payslip' }),
     ).toBe(true)
   })
+
+  it('扣繳憑單：中文＋括號英文仍可對上', () => {
+    expect(
+      claimedNameMatchesDetected('林家華', '林家華 (LIN CHIA-HUA)', { docType: 'tax_return' }),
+    ).toBe(true)
+    expect(
+      claimedNameMatchesDetected('林家華', '林家華 (LIN CHIA-HUA)', { docType: 'other' }),
+    ).toBe(true)
+  })
 })

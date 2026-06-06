@@ -11,8 +11,29 @@ import {
 } from './_utils/verificationNameMatch.js'
 
 // POST /api/verify-id
-// Body: { imageBase64: string; verificationKind?: 'employment' | 'income'; claimedIncomeTier?: string; claimedName?: string; claimedCompany?: string; docType?: string }
+
 // Returns: { ok: boolean; company: 'TSMC' | 'MediaTek' | null; message: string }
+
+type IncomeTier = 'silver' | 'gold' | 'diamond'
+
+function incomeTierMeetsClaim(
+  claimed: IncomeTier | undefined,
+  suggested: IncomeTier | null | undefined,
+): boolean {
+  if (!claimed) return suggested != null
+  if (!suggested) return false
+  const rank: Record<IncomeTier, number> = { silver: 1, gold: 2, diamond: 3 }
+  return rank[suggested] >= rank[claimed]
+}
+
+function incomeDocTypeForNameMatch(
+  verificationKind: 'employment' | 'income',
+  docType: VerificationDocTypeHint | undefined,
+): VerificationDocTypeHint | undefined {
+  if (verificationKind !== 'income') return docType
+  if (docType === 'tax_return' || docType === 'payslip') return docType
+  return 'tax_return'
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -71,8 +92,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   "isEmployeeId": true/false,
   "company": null,
   "detectedName": "文件上的姓名，若看不到則為 null",
-  "detectedEmployer": "逐字抄出文件上的扣繳單位/給付單位/雇主名稱，若看不到則為 null",
-  "employerEvidenceQuote": "能證明雇主名稱的原文片段，若看不到則為 null",
+  "detectedEmployer": "若有扣繳單位/雇主欄位可填，否則 null",
+  "employerEvidenceQuote": "可選；收入審核不強制要求",
   "nameMatches": true/false,
   "annualIncomeAmount": "文件可辨識的年收入數字，若看不到則為 null",
   "suggestedIncomeTier": "silver" | "gold" | "diamond" | null,
@@ -81,15 +102,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 判斷標準：
+- isEmployeeId 表示「是否為有效收入證明文件且支持申請等級」，不是員工證
 - 若圖片模糊、不清楚、不是收入/薪資/稅務/銀行收入文件，isEmployeeId 為 false
-- 若文件明顯無法支持申請的收入等級，isEmployeeId 為 false
-- 若使用者姓名有提供，文件上的姓名必須與使用者姓名相同或高度一致；員工證若中英文姓名並列，detectedName 請優先含中文並以「中文／英文」格式填入，只要中文與使用者姓名一致即可；扣繳憑單與薪資單的 detectedName 只能填繁體中文姓名，不得只填英文；若不同、看不到中文姓名、或無法判斷姓名，isEmployeeId 為 false 且 nameMatches 為 false
-- 扣繳憑單必須讀「所得人姓名」的中文作為 detectedName，不要把扣繳單位、公司名稱、負責人、英文姓名或統編誤當成姓名
-- detectedName 必須填入你從文件看到的姓名；若看不到姓名，detectedName 為 null
-- detectedEmployer 必須逐字填入扣繳單位/給付單位/雇主名稱；不可推測、不可填使用者選擇公司
-- employerEvidenceQuote 必須逐字填入包含雇主名稱的原文片段；若沒有清楚看到，isEmployeeId 為 false
+- 若文件明顯無法支持申請的收入等級（suggestedIncomeTier 低於 claimed），isEmployeeId 為 false
+- 若使用者姓名有提供，detectedName 只填繁體中文姓名；若同列英文如「林家華 (LIN CHIA-HUA)」仍只填中文「林家華」；中文與使用者姓名一致則 nameMatches 為 true
+- 扣繳憑單必須讀「所得人姓名」的中文作為 detectedName
+- detectedEmployer／employerEvidenceQuote 可填但不影響收入審核通過與否
 - 若年收入 200–299 萬，suggestedIncomeTier 為 silver；300–399 萬為 gold；400 萬以上為 diamond；低於 200 萬或無法判斷為 null
-- 若文件有遮蔽敏感資訊但仍能判斷收入範圍，可接受`
+- 若文件有遮蔽敏感資訊但仍能判斷收入範圍，可接受
+- 當姓名一致、suggestedIncomeTier 符合或高於申請等級、文件類型正確時，isEmployeeId 必須為 true`
     : `你是台灣科技公司職業身份文件的驗證系統。
 請仔細辨認這張圖片，判斷：
 1. 這是否為台積電（TSMC）或聯發科（MediaTek）的正式員工身份文件？
@@ -188,24 +209,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reason: string
     }
 
-    const docTypeForMatch = docType as VerificationDocTypeHint | undefined
+    const docTypeForMatch = incomeDocTypeForNameMatch(
+      verificationKind,
+      docType as VerificationDocTypeHint | undefined,
+    )
     const serverNameMatches = normalizedClaimedName
       ? claimedNameMatchesDetected(normalizedClaimedName, parsed.detectedName, { docType: docTypeForMatch })
       : false
-    const taxOrPayslipNeedsEmployer = verificationKind === 'employment'
-      && (docType === 'tax_return' || docType === 'payslip')
+
+    if (verificationKind === 'income') {
+      if (!normalizedClaimedName) {
+        return res.status(200).json({
+          ok: false,
+          company: null,
+          confidence: parsed.confidence,
+          reason: '缺少使用者姓名，無法比對文件姓名。',
+          message: '缺少使用者姓名，無法比對文件姓名，請先完成個人資料姓名設定。',
+        })
+      }
+
+      const incomeNameMismatch = !serverNameMatches
+      const incomeTierOk = incomeTierMeetsClaim(claimedIncomeTier, parsed.suggestedIncomeTier)
+      const incomeConfidenceOk = parsed.confidence === 'high' || parsed.confidence === 'medium'
+      const incomeDocAccepted = !incomeNameMismatch
+        && incomeTierOk
+        && (
+          parsed.isEmployeeId
+          || (incomeConfidenceOk && parsed.suggestedIncomeTier != null && serverNameMatches)
+        )
+
+      if (!incomeDocAccepted) {
+        const strictReason = incomeNameMismatch
+          ? `文件姓名與使用者姓名不一致或無法確認。使用者姓名：${normalizedClaimedName}；文件姓名：${parsed.detectedName ?? '未辨識'}`
+          : !incomeTierOk
+            ? `文件顯示的收入等級不足以支持申請的 ${claimedIncomeTier ?? '收入'} 等級。`
+            : undefined
+        const rawReason = strictReason ?? parsed.reason
+        const rawMessage = strictReason || parsed.reason || '未能辨識為有效收入證明，請確認圖片清晰度並重新上傳'
+        return res.status(200).json({
+          ok: false,
+          company: null,
+          reason: sanitizeVerificationUserMessage(rawReason),
+          confidence: parsed.confidence,
+          message: sanitizeVerificationUserMessage(rawMessage),
+        })
+      }
+
+      const successReason = sanitizeVerificationUserMessage(parsed.reason)
+      return res.status(200).json({
+        ok: true,
+        company: null,
+        confidence: parsed.confidence,
+        reason: successReason,
+        suggestedIncomeTier: parsed.suggestedIncomeTier ?? null,
+        message: `✓ 已辨識為有效收入證明（${successReason}）`,
+      })
+    }
+
+    const taxOrPayslipNeedsEmployer = docType === 'tax_return' || docType === 'payslip'
     const resolvedCompany = resolveTopTierCompanyFromFields(parsed)
     const topTierEmployerSeen = hasTopTierEmployerEvidence(parsed)
     const employmentAcceptableConfidence = parsed.confidence === 'high'
       || (taxOrPayslipNeedsEmployer && parsed.confidence === 'medium' && resolvedCompany && topTierEmployerSeen)
-    const isLowConfidenceEmployment = verificationKind === 'employment' && !employmentAcceptableConfidence
-    const employmentNameMismatch = verificationKind === 'employment' && Boolean(normalizedClaimedName) && !serverNameMatches
-    const employmentVendorDoc = verificationKind === 'employment' && parsed.containsVendorTerms === true
-    const employerEvidenceMissing = verificationKind === 'employment'
-      && taxOrPayslipNeedsEmployer
-      && !topTierEmployerSeen
-    const employerMismatch = verificationKind === 'employment'
-      && taxOrPayslipNeedsEmployer
+    const isLowConfidenceEmployment = !employmentAcceptableConfidence
+    const employmentNameMismatch = Boolean(normalizedClaimedName) && !serverNameMatches
+    const employmentVendorDoc = parsed.containsVendorTerms === true
+    const employerEvidenceMissing = taxOrPayslipNeedsEmployer && !topTierEmployerSeen
+    const employerMismatch = taxOrPayslipNeedsEmployer
       && Boolean(parsed.detectedEmployer?.trim())
       && !topTierEmployerSeen
     const taxPayslipLooksValid = taxOrPayslipNeedsEmployer
@@ -213,20 +283,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       && topTierEmployerSeen
       && serverNameMatches
       && !employmentVendorDoc
-    const effectiveIsEmployeeId = parsed.isEmployeeId
-      || (verificationKind === 'employment' && taxPayslipLooksValid)
-    const incomeNameMismatch = verificationKind === 'income' && Boolean(normalizedClaimedName) && !serverNameMatches
+    const effectiveIsEmployeeId = parsed.isEmployeeId || taxPayslipLooksValid
     if (
       !effectiveIsEmployeeId
-      || incomeNameMismatch
-      || (verificationKind === 'employment' && (
-        !resolvedCompany
-        || isLowConfidenceEmployment
-        || employmentNameMismatch
-        || employmentVendorDoc
-        || employerMismatch
-        || employerEvidenceMissing
-      ))
+      || !resolvedCompany
+      || isLowConfidenceEmployment
+      || employmentNameMismatch
+      || employmentVendorDoc
+      || employerMismatch
+      || employerEvidenceMissing
     ) {
       const strictReason = employmentNameMismatch
         ? `證件姓名與使用者姓名不一致或無法確認。使用者姓名：${normalizedClaimedName}；證件姓名：${parsed.detectedName ?? '未辨識'}`
@@ -236,13 +301,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? `扣繳單位/雇主不符合頂尖企業限定資格。辨識到的扣繳單位/雇主：${parsed.detectedEmployer ?? '未辨識'}`
             : employerEvidenceMissing
               ? `無法從原文片段確認符合頂尖企業限定資格。原文片段：${parsed.employerEvidenceQuote ?? '未辨識'}`
-              : incomeNameMismatch
-                ? `文件姓名與使用者姓名不一致或無法確認。使用者姓名：${normalizedClaimedName}；文件姓名：${parsed.detectedName ?? '未辨識'}`
-                : undefined
+              : undefined
       const rawReason = strictReason ?? parsed.reason
-      const rawMessage = strictReason || (isLowConfidenceEmployment ? '員工身份、姓名或正式員工證特徵不足，需人工確認' : parsed.reason) || (verificationKind === 'income'
-        ? '未能辨識為有效收入證明，請確認圖片清晰度並重新上傳'
-        : '未能辨識為符合頂尖企業限定的正式員工文件，請確認圖片清晰度並重新上傳')
+      const rawMessage = strictReason || (isLowConfidenceEmployment ? '員工身份、姓名或正式員工證特徵不足，需人工確認' : parsed.reason) || '未能辨識為符合頂尖企業限定的正式員工文件，請確認圖片清晰度並重新上傳'
       return res.status(200).json({
         ok: false,
         company: null,
@@ -260,9 +321,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       confidence: parsed.confidence,
       reason: successReason,
       suggestedIncomeTier: parsed.suggestedIncomeTier ?? null,
-      message: verificationKind === 'income'
-        ? `✓ 已辨識為有效收入證明（${successReason}）`
-        : `✓ 已辨識為符合頂尖企業限定的正式員工文件（${successReason}）`,
+      message: `✓ 已辨識為符合頂尖企業限定的正式員工文件（${successReason}）`,
     })
   } catch (err) {
     console.error('[verify-id] Unexpected error:', err)
