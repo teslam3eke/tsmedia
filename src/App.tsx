@@ -11,6 +11,7 @@ import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
+import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 
@@ -25,7 +26,13 @@ import {
   windowBlurWakeLikelyForResumeReload,
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
-import { signOut, consumeSupabaseAuthCallbackFromUrl, shouldShowIosSafariAuthGuide } from '@/lib/auth'
+import {
+  signOut,
+  consumeSupabaseAuthCallbackFromUrl,
+  shouldShowIosSafariAuthGuide,
+  markPasswordRecoveryPending,
+  readPasswordRecoveryPending,
+} from '@/lib/auth'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
@@ -40,6 +47,7 @@ type Screen =
   | 'landing'
   | 'membership-payment-info'
   | 'auth'
+  | 'reset-password'
   | 'security-check'
   | 'terms-consent'
   | 'profile-setup'
@@ -52,6 +60,7 @@ const SCREEN_ORDER: Screen[] = [
   'landing',
   'membership-payment-info',
   'auth',
+  'reset-password',
   'security-check',
   'terms-consent',
   'profile-setup',
@@ -531,6 +540,34 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
 
+    const routeSignedInUser = async (u: User) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        await ensureConnectionWithBudget()
+      }
+      const profile = await getProfile(u.id)
+      if (cancelled) return
+      routeByProfile(profile, u.id)
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (cancelled) return
+      setUser(session?.user ?? null)
+      if (needsIosSafariBrowserGate()) return
+      if (event === 'PASSWORD_RECOVERY') {
+        markPasswordRecoveryPending()
+        go('reset-password')
+        return
+      }
+      if (event === 'SIGNED_OUT') go('landing')
+      if (event === 'SIGNED_IN' && session?.user) {
+        if (readPasswordRecoveryPending()) {
+          go('reset-password')
+          return
+        }
+        await routeSignedInUser(session.user)
+      }
+    })
+
     void (async () => {
       /** main.tsx 已先換券；此處再 await 一次作 idempotent 保險 */
       const authConsume = await consumeSupabaseAuthCallbackFromUrl()
@@ -546,6 +583,10 @@ export default function App() {
         return
       }
 
+      if (authConsume.outcome === 'session' && authConsume.passwordRecovery) {
+        markPasswordRecoveryPending()
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession()
@@ -554,32 +595,15 @@ export default function App() {
       setUser(u)
       setReady(true)
       if (u) {
-        // iOS Safari／PWA：冷啟時 React 此 effect 晚於初始 `pageshow`，MainScreen 的 wake 監聽尚不存在，
-        // 若 storage 內 access_token 已過期，這裡第一個 getProfile 會失敗（桌面較少見）。
-        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await ensureConnectionWithBudget()
+        if (readPasswordRecoveryPending()) {
+          go('reset-password')
+          return
         }
-        const profile = await getProfile(u.id)
-        if (cancelled) return
-        routeByProfile(profile, u.id)
+        await routeSignedInUser(u)
       } else {
         go('landing')
       }
     })()
-
-    // Step 2: keep user state in sync; routing is handled in onSuccess / getSession
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (cancelled) return
-      setUser(session?.user ?? null)
-      if (needsIosSafariBrowserGate()) return
-      if (event === 'SIGNED_OUT') go('landing')
-      // 信箱確認信（PKCE）：換券完成後接 onboarding 路由（StrictMode 或晚到 callback 備援）
-      if (event === 'SIGNED_IN' && session?.user) {
-        const profile = await getProfile(session.user.id)
-        if (cancelled) return
-        routeByProfile(profile, session.user.id)
-      }
-    })
 
     return () => { cancelled = true; subscription.unsubscribe() }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -737,10 +761,29 @@ export default function App() {
             onSuccess={async (signedInUser) => {
               if (needsIosSafariBrowserGate()) return
               setUser(signedInUser)
+              if (readPasswordRecoveryPending()) {
+                go('reset-password')
+                return
+              }
               const profile = await getProfile(signedInUser.id)
               routeByProfile(profile, signedInUser.id)
             }}
             onBack={() => go('landing')}
+          />
+        )}
+
+        {screen === 'reset-password' && (
+          <ResetPasswordScreen
+            onComplete={async () => {
+              const activeUser = await getActiveUser()
+              if (!activeUser) {
+                go('auth')
+                return
+              }
+              setUser(activeUser)
+              const profile = await getProfile(activeUser.id)
+              routeByProfile(profile, activeUser.id)
+            }}
           />
         )}
 

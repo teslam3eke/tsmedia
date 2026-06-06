@@ -23,5 +23,5 @@ export function shouldWarnIosNonSafariBrowser(): boolean {
 /** 註冊／收信時給使用者的 iOS Safari 提示（無法從 Email 強制指定瀏覽器）。 */
 export function iosEmailAuthSafariHint(): string | null {
   if (!iosOrIpadosLikely()) return null
-  return 'iPhone 請用 Safari（或從主畫面 tsMedia 圖示）註冊並點確認信；若連結在 Chrome 開啟可能無法完成驗證。'
+  return 'iPhone 請用 Safari（或從主畫面 tsMedia 圖示）開啟信件連結；若在 Chrome 等 App 內開啟，可能無法完成驗證或重設密碼。'
 }

@@ -52,12 +52,48 @@ export async function requestPasswordReset(
   return { ok: true }
 }
 
+/** 使用者點重設密碼信後須先完成 {@link updatePassword}，再進 onboarding／主畫面 */
+export const PASSWORD_RECOVERY_PENDING_KEY = 'tm_password_recovery_v1'
+
+export function markPasswordRecoveryPending(): void {
+  try {
+    sessionStorage.setItem(PASSWORD_RECOVERY_PENDING_KEY, '1')
+  } catch {
+    /* private mode */
+  }
+}
+
+export function readPasswordRecoveryPending(): boolean {
+  try {
+    return sessionStorage.getItem(PASSWORD_RECOVERY_PENDING_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function clearPasswordRecoveryPending(): void {
+  try {
+    sessionStorage.removeItem(PASSWORD_RECOVERY_PENDING_KEY)
+  } catch {
+    /* private mode */
+  }
+}
+
+export async function updatePassword(
+  newPassword: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) return { ok: false, error: mapError(error.message) }
+  clearPasswordRecoveryPending()
+  return { ok: true }
+}
+
 /** iOS 非 Safari 開啟 PKCE 確認連結時暫存完整 URL（尚未換券，避免 code 被消耗） */
 export const IOS_AUTH_CALLBACK_URL_KEY = 'tm_ios_auth_callback_url'
 
 export type AuthCallbackConsumeResult =
   | { outcome: 'none' }
-  | { outcome: 'session' }
+  | { outcome: 'session'; passwordRecovery?: boolean }
   | { outcome: 'failed' }
   | { outcome: 'deferred_ios_non_safari' }
 
@@ -155,7 +191,10 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
     if (existing) {
       stripSupabaseAuthCallbackFromUrl()
       clearIosDeferredAuthCallbackUrl()
-      return { outcome: 'session' }
+      return {
+        outcome: 'session',
+        passwordRecovery: readPasswordRecoveryPending(),
+      }
     }
 
     const { error } = await supabase.auth.exchangeCodeForSession(code)
@@ -172,12 +211,16 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
       return { outcome: 'failed' }
     }
     clearIosDeferredAuthCallbackUrl()
-    return { outcome: 'session' }
+    return {
+      outcome: 'session',
+      passwordRecovery: readPasswordRecoveryPending(),
+    }
   }
 
   const tokenHash = url.searchParams.get('token_hash')
   const type = url.searchParams.get('type')
   if (tokenHash && type) {
+    const isRecovery = type === 'recovery'
     const { error } = await supabase.auth.verifyOtp({
       token_hash: tokenHash,
       type: type as EmailOtpType,
@@ -187,8 +230,9 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
       console.warn('[auth] verifyOtp', error.message)
       return { outcome: 'failed' }
     }
+    if (isRecovery) markPasswordRecoveryPending()
     clearIosDeferredAuthCallbackUrl()
-    return { outcome: 'session' }
+    return { outcome: 'session', passwordRecovery: isRecovery }
   }
 
   return { outcome: 'none' }

@@ -29,6 +29,16 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
   const isValid = mode === 'signup' ? isValidSignUp : isValidSignIn
   const iosSafariHint = iosEmailAuthSafariHint()
 
+  const handleHeaderBack = () => {
+    if (panel === 'forgotPassword' || panel === 'forgotDone') {
+      setPanel('form')
+      setMode('signin')
+      setError('')
+      return
+    }
+    onBack()
+  }
+
   const handleSubmit = async () => {
     if (!isValid || loading) return
     setLoading(true)
@@ -77,7 +87,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
         style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1e293b 100%)' }}
       >
         <motion.button
-          onClick={onBack}
+          onClick={handleHeaderBack}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           className="flex items-center gap-2 text-white/70 text-base font-medium mb-7 hover:text-white transition-colors active:opacity-70 py-1 pr-3"
@@ -168,7 +178,12 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
               </div>
               <h2 className="text-xl font-bold text-slate-900 mb-2">重設密碼信已寄出</h2>
               <p className="text-sm text-slate-500 leading-relaxed max-w-xs mx-auto">
-                請前往 <span className="font-semibold text-slate-800">{email}</span> 點擊 Email 驗證連結，即可設定新密碼。
+                請前往 <span className="font-semibold text-slate-800">{email}</span> 開啟信件，點擊
+                <span className="font-semibold text-slate-700">重設密碼連結</span>。
+              </p>
+              <p className="mt-3 text-xs text-slate-400 leading-relaxed max-w-xs mx-auto text-left">
+                接下來：① 點連結回到 tsMedia → ② 在此設定新密碼 → ③ 完成後即可登入。
+                若未收到，請檢查垃圾郵件；連結通常 24 小時內有效。
               </p>
               {iosSafariHint ? (
                 <p className="mt-4 text-xs leading-relaxed text-amber-800 bg-amber-50 rounded-2xl px-3 py-2.5 max-w-xs mx-auto text-left">
@@ -201,7 +216,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
                   忘記密碼
                 </p>
                 <p className="text-sm text-slate-400 mt-1">
-                  輸入註冊信箱，我們會寄送 Email 驗證連結供你重設密碼
+                  輸入註冊信箱，我們會寄送重設密碼連結
                 </p>
               </div>
 
@@ -405,7 +420,7 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
               </motion.div>
             ) : (
               <>
-                寄送 Email 驗證連結
+                寄送重設密碼連結
                 <ChevronRight className="w-5 h-5" />
               </>
             )}
