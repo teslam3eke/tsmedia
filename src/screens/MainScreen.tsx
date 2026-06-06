@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   BellRing, AlertCircle, Gem,
-  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Star,
+  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Star, UserMinus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -45,7 +45,7 @@ import {
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
   getUnreadAppNotifications, markAppNotificationRead,
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
-  recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile,
+  recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile, endMatch,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   getPhotoUnlockState,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
@@ -213,6 +213,8 @@ interface Profile {
   likedToday?: boolean
   /** 曾對此人送過超喜（RPC 欄位 super_liked_today；不限 app 日） */
   superLikedToday?: boolean
+  /** 對方曾對你送超喜（探索置頂） */
+  incomingSuperLiked?: boolean
 }
 
 export type MainScreenTab = 'discover' | 'matches' | 'instant' | 'profile'
@@ -452,6 +454,7 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
     showIncomeBorder: Boolean(row.show_income_border && row.income_tier),
     likedToday: Boolean(row.liked_today),
     superLikedToday: Boolean(row.super_liked_today),
+    incomingSuperLiked: Boolean(row.incoming_super_liked),
   }
 }
 
@@ -983,6 +986,73 @@ function BlockProfileConfirm({
   )
 }
 
+function EndMatchConfirm({
+  matchId,
+  displayName,
+  onClose,
+  onEnded,
+}: {
+  matchId: string
+  displayName: string
+  onClose: () => void
+  onEnded?: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await endMatch(matchId)
+      if (!result.ok) {
+        setError(result.error ?? '解除失敗，請稍後再試。')
+        return
+      }
+      onEnded?.()
+      onClose()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[245] flex items-center justify-center bg-slate-950/55 px-5"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.94, y: 10, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.96, y: 8, opacity: 0 }}
+        className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
+          <UserMinus className="h-6 w-6 text-slate-600" />
+        </div>
+        <h2 className="text-base font-black text-slate-900">解除與 {displayName} 的朋友關係</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">
+          解除後你們將從配對列表消失，聊天紀錄也會一併刪除。之後仍可在探索中再次互相喜歡而配對。若要完全不再往來，請使用「封鎖此用戶」。
+        </p>
+        {error && <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">{error}</p>}
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <button onClick={onClose} className="rounded-2xl bg-slate-100 py-3 text-sm font-bold text-slate-500">
+            取消
+          </button>
+          <button onClick={submit} disabled={busy} className="rounded-2xl bg-slate-900 py-3 text-sm font-bold text-white disabled:opacity-60">
+            {busy ? '處理中' : '確認解除'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
+  )
+}
+
 function ReportMessageModal({
   target,
   onClose,
@@ -1295,7 +1365,7 @@ function DiscoverTab({
   /** 成功送出愛心／超級喜歡後（扣款成功），供全螢幕獎勵動畫。 */
   onCreditAction?: (kind: 'like' | 'super_like') => void
   /** 伺服器回傳已配對時刷新配對／聊天列表（Realtime 亦會更新） */
-  onDiscoverMatch?: () => void
+  onDiscoverMatch?: (payload: { peerUserId: string; matchId?: string }) => void
   /** 開啟通知設定全螢幕（由主殼統一渲染 {@link NotificationModal}） */
   onOpenNotificationSettings: () => void
 }) {
@@ -1825,7 +1895,14 @@ function DiscoverTab({
       }
       return
     }
-    if (result.blocked || result.alreadyLiked || result.alreadySuperLiked) {
+    if (result.blocked) {
+      return
+    }
+    if (result.alreadyLiked || result.alreadySuperLiked) {
+      if (result.matched && profile.userId) {
+        onDiscoverMatch?.({ peerUserId: profile.userId, matchId: result.matchId })
+      }
+      goNext()
       return
     }
     if (result.ok && userId && profile.userId) {
@@ -1847,8 +1924,8 @@ function DiscoverTab({
       }
     }
     if (result.ok) {
-      if (result.matched) {
-        onDiscoverMatch?.()
+      if (result.matched && profile.userId) {
+        onDiscoverMatch?.({ peerUserId: profile.userId, matchId: result.matchId })
       }
       if (!result.matched) {
         if (action === 'like') onCreditAction?.('like')
@@ -2180,6 +2257,12 @@ function DiscoverTab({
                       <div className="pb-1">
                         <div className="flex items-baseline flex-wrap gap-x-2 gap-y-1.5">
                           <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{getPublicName(profile)}</span>
+                          {profile.incomingSuperLiked && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-fuchsia-100 px-2.5 py-0.5 text-[11px] font-bold text-fuchsia-800 ring-1 ring-fuchsia-200">
+                              <Sparkles className="h-3 w-3" aria-hidden />
+                              對你超級喜歡
+                            </span>
+                          )}
                           <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
                           <span className="flex flex-wrap items-center gap-1.5">
                             <DiscoverRegionChips profile={profile} />
@@ -2321,7 +2404,7 @@ function DiscoverTab({
                   {index > 0 && <div className="w-12 h-12" />}
                 </div>
                 <p className="mt-8 text-center text-[11px] leading-relaxed text-slate-400">
-                  一般愛心不會通知對方；超級喜歡將與對方立即配對，雙方可開始聊天。
+                  一般愛心不會通知對方；超級喜歡會通知對方並優先出現在其探索中。雙方互相按愛心才會配對。
                 </p>
               </div>
             </div>
@@ -2370,7 +2453,7 @@ function DiscoverTab({
                 </p>
                 {confirmIntent === 'super_like' && (
                   <p className="text-[13px] text-slate-500">
-                    超級喜歡為另行取得的道具；送出後扣減 1 次，並與對方立即配對（與互相喜歡相同，可開聊天室）。
+                    超級喜歡為另行取得的道具；送出後扣減 1 次。對方會收到通知，並在探索中優先看到你；對方回按愛心才會配對。
                   </p>
                 )}
                 <p className="font-semibold text-slate-800">真的要送出嗎？</p>
@@ -2766,17 +2849,21 @@ function PersonDetailView({
   person,
   onClose,
   onStartChat,
+  onMatchEnded,
   clearedPhotoSlots = [],
 }: {
   person: PersonSummary
   onClose: () => void
   onStartChat?: (id: number | string) => void
+  /** 解除配對成功後（刷新列表、關閉聊天等） */
+  onMatchEnded?: (matchId: string) => void
   /** Demo：在聊天拼圖完整解鎖的相片索引（與 photoUrls 對齊）。 */
   clearedPhotoSlots?: number[]
 }) {
   const [liveProfile, setLiveProfile] = useState<Profile | null>(null)
   const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
+  const [endMatchOpen, setEndMatchOpen] = useState(false)
 
   useEffect(() => {
     if (!person.peerUserId) {
@@ -2797,6 +2884,8 @@ function PersonDetailView({
   }, [person.peerUserId])
 
   const profile = person.peerUserId ? liveProfile : findFullProfile(person.id)
+  const liveMatchId = typeof person.matchId === 'string' && person.matchId.trim() ? person.matchId.trim() : null
+  const displayName = profile ? getPublicName(profile) : person.name
 
   return createPortal(
     <motion.div
@@ -2961,6 +3050,16 @@ function PersonDetailView({
           className="flex-shrink-0 px-5 pt-3 bg-[#fafafa] border-t border-slate-100 space-y-2"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}
         >
+          {liveMatchId && (
+            <button
+              type="button"
+              onClick={() => setEndMatchOpen(true)}
+              className="w-full py-3 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 bg-slate-100 text-slate-700"
+            >
+              <UserMinus className="w-4 h-4" />
+              解除朋友關係
+            </button>
+          )}
           <button
             onClick={() => setBlockTarget({
               profileKey: profile ? profile.profileKey : `person:${person.id}`,
@@ -2996,6 +3095,19 @@ function PersonDetailView({
             target={blockTarget}
             onClose={() => setBlockTarget(null)}
             onBlocked={onClose}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {endMatchOpen && liveMatchId && (
+          <EndMatchConfirm
+            matchId={liveMatchId}
+            displayName={displayName}
+            onClose={() => setEndMatchOpen(false)}
+            onEnded={() => {
+              onMatchEnded?.(liveMatchId)
+              onClose()
+            }}
           />
         )}
       </AnimatePresence>
@@ -3134,6 +3246,7 @@ function ChatRoomView({
   physicalChannelResubscribeNonce,
   onLiveMatchOutboundMessage,
   onMatchIncomingMarkedRead,
+  onMatchEnded,
 }: {
   conversation: Conversation
   currentUserId: string | null
@@ -3154,6 +3267,8 @@ function ChatRoomView({
   onLiveMatchOutboundMessage?: () => void
   /** 開啟聊天後將對方訊息標已讀並刷新側欄徽章／預覽。 */
   onMatchIncomingMarkedRead?: () => void
+  /** 解除配對成功後。 */
+  onMatchEnded?: (matchId: string) => void
 }) {
   const isLive = Boolean(conversation.matchId && currentUserId)
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
@@ -3162,6 +3277,7 @@ function ChatRoomView({
   const [input, setInput] = useState('')
   const [reportMessage, setReportMessage] = useState<ChatMessage | null>(null)
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
+  const [endMatchOpen, setEndMatchOpen] = useState(false)
   const [recentSendTimes, setRecentSendTimes] = useState<number[]>([])
   const [sendWarning, setSendWarning] = useState('')
   const [sending, setSending] = useState(false)
@@ -3573,6 +3689,16 @@ function ChatRoomView({
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-black leading-tight text-slate-900">{conversation.name}</p>
           </div>
+          {isLive && conversation.matchId && (
+            <button
+              type="button"
+              onClick={() => setEndMatchOpen(true)}
+              aria-label="解除朋友關係"
+              className="h-8 shrink-0 rounded-full bg-slate-100 px-3 text-[11px] font-bold text-slate-600 active:bg-slate-200"
+            >
+              解除
+            </button>
+          )}
           <button
             onClick={() => setBlockTarget({
               profileKey: conversation.peerUserId ? `user:${conversation.peerUserId}` : `demo:${String(conversation.id)}`,
@@ -3760,6 +3886,19 @@ function ChatRoomView({
             target={blockTarget}
             onClose={() => setBlockTarget(null)}
             onBlocked={onBack}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {endMatchOpen && conversation.matchId && (
+          <EndMatchConfirm
+            matchId={conversation.matchId}
+            displayName={conversation.name}
+            onClose={() => setEndMatchOpen(false)}
+            onEnded={() => {
+              onMatchEnded?.(conversation.matchId!)
+              onBack()
+            }}
           />
         )}
       </AnimatePresence>
@@ -6752,6 +6891,17 @@ export default function MainScreen({
     void loadLiveMatchThreads('full')
   }
 
+  const handleMatchEnded = useCallback((matchId: string) => {
+    const normalized = matchId.trim().toLowerCase()
+    void loadLiveMatchThreads('soft')
+    scheduleMatchTabUnreadRefresh()
+    setMatchesChatConversation((prev) => {
+      if (!prev?.matchId) return prev
+      if (prev.matchId.trim().toLowerCase() === normalized) return null
+      return prev
+    })
+  }, [loadLiveMatchThreads, scheduleMatchTabUnreadRefresh])
+
   // Fetch current user's gender + preferred region + 生活照（切換分頁時重抓，以便「我的」上傳後可進探索）
   useEffect(() => {
     if (!user?.id) {
@@ -6814,14 +6964,24 @@ export default function MainScreen({
         creditBalance={creditBalance}
         onOpenSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
-        onDiscoverMatch={() => {
+        onDiscoverMatch={({ peerUserId, matchId }) => {
+          try {
+            playInAppSound('match')
+          } catch {
+            /* Web Audio 極少數環境可能丟錯 */
+          }
+          if (matchId) {
+            setMatchSplash({ matchId, peerUserId })
+          }
           void loadLiveMatchThreads('soft')
         }}
         onCreditAction={(kind) => {
           setRewardFlash({
             variant: kind === 'like' ? 'heart_sent' : 'super_sent',
             title: kind === 'like' ? '已送出愛心' : '已送出超級喜歡',
-            subtitle: '繼續探索下一位',
+            subtitle: kind === 'super_like'
+              ? '已通知對方，對方回按愛心才會配對'
+              : '繼續探索下一位',
           })
         }}
         onOpenNotificationSettings={() => setNotifSettingsModalOpen(true)}
@@ -6859,6 +7019,7 @@ export default function MainScreen({
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         onLiveMatchOutboundMessage={scheduleMatchTabUnreadRefresh}
         onMatchIncomingMarkedRead={scheduleMatchTabUnreadRefresh}
+        onMatchEnded={handleMatchEnded}
       />
     ) : (
       <MatchesTab
@@ -7049,6 +7210,7 @@ export default function MainScreen({
             clearedPhotoSlots={viewingPerson.peerUserId ? [] : (demoPuzzleClearedByProfile[viewingPerson.id] ?? [])}
             onClose={() => setViewingPerson(null)}
             onStartChat={startChatWith}
+            onMatchEnded={handleMatchEnded}
           />
         )}
       </AnimatePresence>

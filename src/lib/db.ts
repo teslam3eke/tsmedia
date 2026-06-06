@@ -718,6 +718,8 @@ export type DailyDiscoverRpcRow = {
   liked_today?: boolean
   /** 是否曾對此人送過超級喜歡（不限日期；鍵名沿用 super_liked_today） */
   super_liked_today?: boolean
+  /** 此人是否曾對探索者送超級喜歡（探索卡片置頂／徽章） */
+  incoming_super_liked?: boolean
 }
 
 /** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
@@ -916,6 +918,7 @@ export async function recordProfileInteraction(payload: {
 }): Promise<{
   ok: boolean
   matched?: boolean
+  matchId?: string
   blocked?: boolean
   /** 曾對該對象送過 like／super_like（不限日期，不再用「當日」） */
   alreadyLiked?: boolean
@@ -939,6 +942,7 @@ export async function recordProfileInteraction(payload: {
   }
   const row = data as {
     matched?: boolean
+    match_id?: string
     blocked?: boolean
     already_liked?: boolean
     already_super_liked?: boolean
@@ -948,6 +952,7 @@ export async function recordProfileInteraction(payload: {
   return {
     ok: true,
     matched: Boolean(row?.matched),
+    matchId: typeof row?.match_id === 'string' ? row.match_id : undefined,
     blocked: Boolean(row?.blocked),
     alreadyLiked: Boolean(
       row?.already_liked ?? row?.already_liked_today,
@@ -1972,6 +1977,25 @@ export async function getMyBlockedProfileKeys(): Promise<string[]> {
     return []
   }
   return (data ?? []).map((row) => row.blocked_profile_key).filter(Boolean)
+}
+
+export async function endMatch(matchId: string): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('end_match', {
+    p_match_id: matchId,
+  })
+
+  if (error) {
+    console.error('[db] endMatch error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  const row = data as { ok?: boolean; error?: string } | null
+  if (row?.ok === false) {
+    return { ok: false, error: row.error ?? '解除失敗，請稍後再試。' }
+  }
+
+  return { ok: true }
 }
 
 export async function blockProfile(payload: {
