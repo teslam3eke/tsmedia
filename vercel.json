@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/reset-password",
+      "destination": "/index.html"
+    },
+    {
       "source": "/build-id.txt",
       "destination": "/api/git-sha"
     }

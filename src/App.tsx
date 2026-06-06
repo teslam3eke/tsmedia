@@ -577,13 +577,7 @@ export default function App() {
         return
       }
       if (event === 'SIGNED_OUT') go('landing')
-      if (event === 'SIGNED_IN' && session?.user) {
-        if (needsRecoveryScreen()) {
-          routeToPasswordRecovery()
-          return
-        }
-        await routeSignedInUser(session.user)
-      }
+      /** 首屏路由由下方 init 負責；勿在此處 SIGNED_IN → main，會搶在 recovery 判斷之前。 */
     })
 
     void (async () => {
@@ -631,6 +625,16 @@ export default function App() {
 
     return () => { cancelled = true; subscription.unsubscribe() }
   }, [go, routeToPasswordRecovery]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** authReady 後若仍停在 splash（早期 return 漏設 screen）→ 避免空白頁 */
+  useEffect(() => {
+    if (!authReady || screen !== 'splash') return
+    if (readPasswordRecoveryPending() || readPasswordResetFlowStarted()) {
+      routeToPasswordRecovery()
+      return
+    }
+    go('landing')
+  }, [authReady, screen, go, routeToPasswordRecovery])
 
   const handleSignOut = async () => {
     setVerifyWaitRevisit(false)

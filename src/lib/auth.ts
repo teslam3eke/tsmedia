@@ -23,14 +23,20 @@ function emailRedirectUrl(): string | undefined {
   return `${base}/`
 }
 
-/** 重設密碼信 redirect；帶 `auth=recovery` 供 PKCE 回站辨識（跨裝置亦可靠）。 */
+/** 重設密碼信 redirect；專用路徑供 PKCE 回站辨識（跨裝置、新分頁皆可靠）。 */
 function passwordResetRedirectUrl(): string | undefined {
   const base = siteOriginBase()
   if (!base) return undefined
-  return `${base}/?auth=recovery`
+  return `${base}/reset-password`
+}
+
+function pathnameIsPasswordRecovery(pathname: string): boolean {
+  const path = pathname.replace(/\/$/, '') || '/'
+  return path === '/reset-password' || path.endsWith('/reset-password')
 }
 
 function urlIndicatesPasswordRecovery(url: URL): boolean {
+  if (pathnameIsPasswordRecovery(url.pathname)) return true
   if (url.searchParams.get('auth') === 'recovery') return true
   if (url.searchParams.get('type') === 'recovery') return true
   if (url.hash.includes('type=recovery')) return true
@@ -87,31 +93,50 @@ export const PASSWORD_RESET_FLOW_KEY = 'tm_password_reset_flow_v1'
 const PASSWORD_RESET_FLOW_TTL_MS = 24 * 60 * 60 * 1000
 
 export function markPasswordResetFlowStarted(): void {
+  const val = String(Date.now())
   try {
-    sessionStorage.setItem(PASSWORD_RESET_FLOW_KEY, String(Date.now()))
+    sessionStorage.setItem(PASSWORD_RESET_FLOW_KEY, val)
+  } catch {
+    /* private mode */
+  }
+  try {
+    localStorage.setItem(PASSWORD_RESET_FLOW_KEY, val)
   } catch {
     /* private mode */
   }
 }
 
 export function readPasswordResetFlowStarted(): boolean {
+  let raw: string | null = null
   try {
-    const raw = sessionStorage.getItem(PASSWORD_RESET_FLOW_KEY)
-    if (!raw) return false
-    const ts = Number(raw)
-    if (!Number.isFinite(ts) || Date.now() - ts > PASSWORD_RESET_FLOW_TTL_MS) {
-      clearPasswordResetFlowStarted()
-      return false
-    }
-    return true
+    raw = sessionStorage.getItem(PASSWORD_RESET_FLOW_KEY)
   } catch {
+    /* ignore */
+  }
+  if (!raw) {
+    try {
+      raw = localStorage.getItem(PASSWORD_RESET_FLOW_KEY)
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!raw) return false
+  const ts = Number(raw)
+  if (!Number.isFinite(ts) || Date.now() - ts > PASSWORD_RESET_FLOW_TTL_MS) {
+    clearPasswordResetFlowStarted()
     return false
   }
+  return true
 }
 
 export function clearPasswordResetFlowStarted(): void {
   try {
     sessionStorage.removeItem(PASSWORD_RESET_FLOW_KEY)
+  } catch {
+    /* private mode */
+  }
+  try {
+    localStorage.removeItem(PASSWORD_RESET_FLOW_KEY)
   } catch {
     /* private mode */
   }
@@ -144,12 +169,20 @@ export function clearPasswordRecoveryPending(): void {
   }
 }
 
+/** 重設完成後把 /reset-password 清回根路徑，避免重新整理又進重設頁 */
+export function normalizeUrlAfterPasswordRecovery(): void {
+  if (typeof window === 'undefined') return
+  if (!pathnameIsPasswordRecovery(window.location.pathname)) return
+  window.history.replaceState({}, '', '/')
+}
+
 export async function updatePassword(
   newPassword: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const { error } = await supabase.auth.updateUser({ password: newPassword })
   if (error) return { ok: false, error: mapError(error.message) }
   clearPasswordRecoveryPending()
+  normalizeUrlAfterPasswordRecovery()
   return { ok: true }
 }
 
@@ -240,6 +273,7 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
 
   const url = new URL(window.location.href)
   const code = url.searchParams.get('code')
+  const recoveryIntent = urlIndicatesPasswordRecovery(url)
 
   if (code) {
     if (isIosNonSafariBrowser()) {
@@ -251,19 +285,7 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
       return { outcome: 'deferred_ios_non_safari' }
     }
 
-    const {
-      data: { session: existing },
-    } = await supabase.auth.getSession()
-    if (existing) {
-      const passwordRecovery = markRecoveryFromAuthCallback(url)
-      stripSupabaseAuthCallbackFromUrl()
-      clearIosDeferredAuthCallbackUrl()
-      return {
-        outcome: 'session',
-        passwordRecovery,
-      }
-    }
-
+    /** 重設密碼連結必須換券（不可因有舊 session 略過），否則無法 updateUser。 */
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     if (error) {
       console.warn('[auth] exchangeCodeForSession', error.message)
@@ -277,7 +299,7 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
       }
       return { outcome: 'failed' }
     }
-    const passwordRecovery = markRecoveryFromAuthCallback(url)
+    const passwordRecovery = recoveryIntent ? markRecoveryFromAuthCallback(url) : readPasswordRecoveryPending()
     stripSupabaseAuthCallbackFromUrl()
     clearIosDeferredAuthCallbackUrl()
     return {
