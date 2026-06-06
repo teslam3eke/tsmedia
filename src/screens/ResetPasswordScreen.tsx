@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { motion } from 'framer-motion'
 import { Cpu, Eye, EyeOff, Lock, ChevronRight } from 'lucide-react'
 import { updatePassword } from '@/lib/auth'
@@ -6,32 +7,49 @@ import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 interface Props {
+  user?: User | null
   onComplete: () => void | Promise<void>
 }
 
-export default function ResetPasswordScreen({ onComplete }: Props) {
+export default function ResetPasswordScreen({ user, onComplete }: Props) {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [hasSession, setHasSession] = useState(false)
+  const [sessionUser, setSessionUser] = useState<User | null>(user ?? null)
 
   useEffect(() => {
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      setHasSession(Boolean(session))
-      if (!session) {
-        setError('連結已失效或未登入，請回到登入頁重新申請重設密碼。')
-      }
+    setSessionUser(user ?? null)
+  }, [user])
+
+  useEffect(() => {
+    void supabase.auth.getUser().then(({ data: { user: u } }) => {
+      if (u) setSessionUser(u)
     })
   }, [])
 
-  const isValid = password.length >= 6 && password === confirm && hasSession
+  const passwordsMatch = confirm.length === 0 || password === confirm
+  const passwordLongEnough = password.length >= 6
+  const isValid = passwordLongEnough && password === confirm && confirm.length >= 6
 
   const handleSubmit = async () => {
     if (!isValid || loading) return
     setLoading(true)
     setError('')
+
+    let active = sessionUser
+    if (!active) {
+      const { data: { user: u } } = await supabase.auth.getUser()
+      active = u ?? null
+      setSessionUser(active)
+    }
+    if (!active) {
+      setLoading(false)
+      setError('連結已失效或未登入，請回到登入頁重新申請重設密碼。')
+      return
+    }
+
     const result = await updatePassword(password)
     setLoading(false)
     if (!result.ok) {
@@ -111,7 +129,11 @@ export default function ResetPasswordScreen({ onComplete }: Props) {
           />
         </div>
 
-        {confirm.length > 0 && password !== confirm ? (
+        {!passwordLongEnough && password.length > 0 ? (
+          <p className="text-sm text-amber-600 text-center">密碼需至少 6 碼</p>
+        ) : null}
+
+        {!passwordsMatch ? (
           <p className="text-sm text-amber-600 text-center">兩次輸入的密碼不一致</p>
         ) : null}
 
@@ -125,6 +147,7 @@ export default function ResetPasswordScreen({ onComplete }: Props) {
         className="px-5 pb-12 pt-6"
       >
         <motion.button
+          type="button"
           whileTap={{ scale: isValid && !loading ? 0.97 : 1 }}
           onClick={() => void handleSubmit()}
           disabled={!isValid || loading}

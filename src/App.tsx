@@ -801,6 +801,7 @@ export default function App() {
 
         {screen === 'reset-password' && (
           <ResetPasswordScreen
+            user={user}
             onComplete={async () => {
               const activeUser = await getActiveUser()
               if (!activeUser) {
