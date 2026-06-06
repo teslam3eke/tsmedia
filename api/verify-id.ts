@@ -1,6 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { sanitizeVerificationUserMessage } from './_utils/companySanitize.js'
 import {
+  hasTopTierEmployerEvidence,
+  resolveTopTierCompanyFromFields,
+  type TopTierCompany,
+} from './_utils/employerMatch.js'
+import {
   claimedNameMatchesDetected,
   type VerificationDocTypeHint,
 } from './_utils/verificationNameMatch.js'
@@ -8,22 +13,6 @@ import {
 // POST /api/verify-id
 // Body: { imageBase64: string; verificationKind?: 'employment' | 'income'; claimedIncomeTier?: string; claimedName?: string; claimedCompany?: string; docType?: string }
 // Returns: { ok: boolean; company: 'TSMC' | 'MediaTek' | null; message: string }
-
-function normalizeCompanyForCompare(value: string | null | undefined): string {
-  return (value ?? '')
-    .normalize('NFKC')
-    .replace(/[\s　·・．.。､,，、\-－_()（）[\]【】「」『』:：;；/\\|]/g, '')
-    .toLowerCase()
-}
-
-function employerMatchesCompany(company: 'TSMC' | 'MediaTek' | null | undefined, detectedEmployer: string | null | undefined): boolean {
-  const employer = normalizeCompanyForCompare(detectedEmployer)
-  if (!company || !employer) return false
-  if (company === 'MediaTek') {
-    return employer.includes('聯發科') || employer.includes('mediatek') || employer.includes('mtk')
-  }
-  return employer.includes('台積電') || employer.includes('台灣積體電路') || employer.includes('tsmc')
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -50,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const normalizedClaimedName = claimedName?.trim() ?? ''
   const normalizedClaimedCompany = claimedCompany === 'TSMC' || claimedCompany === 'MediaTek' ? claimedCompany : null
   const docTypeHint = docType === 'tax_return'
-    ? '這張文件類型是扣繳憑單/扣繳暨免扣繳憑單。detectedName 必須只填「所得人姓名」欄位上的繁體中文姓名（2–4 字），忽略英文／羅馬拼音／護照拼音列；若同時有中文與英文，只填中文，不要填「中文／英文」格式。公司必須逐字抄出「扣繳單位」、「給付單位」、「雇主名稱」或公司名稱欄位；不可根據使用者選擇公司推測。'
+    ? '這張文件類型是扣繳憑單/各類所得扣繳暨免扣繳憑單。detectedName 必須只填「所得人姓名」欄位上的繁體中文姓名（2–4 字），忽略英文／羅馬拼音／護照拼音列；若同時有中文與英文，只填中文，不要填「中文／英文」格式。雇主／公司名稱通常印在**右上角「扣繳單位」**區塊（含統一編號、單位名稱、地址）；請優先逐字讀取該區塊填入 detectedEmployer 與 employerEvidenceQuote，亦可能出現在「給付單位」或「雇主名稱」欄位；不可根據使用者選擇公司推測。'
     : docType === 'payslip'
       ? '這張文件類型是薪資單。detectedName 必須只填員工姓名欄位的繁體中文姓名，忽略英文／羅馬拼音；公司請看雇主、公司、發薪單位。'
       : docType === 'employee_id'
@@ -128,7 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 判斷標準：
 - 可接受正式員工識別證、薪資單、扣繳憑單、報稅/薪資資料；但必須能看出使用者是台積電或聯發科正式員工
-- 若是扣繳憑單，detectedName 必須取自「所得人姓名」（或同義欄位「納稅義務人」、「姓名」）的繁體中文，忽略英文／羅馬拼音；company 必須依「扣繳單位」、「給付單位」、「雇主名稱」判斷
+- 若是扣繳憑單，detectedName 必須取自「所得人姓名」（或同義欄位「納稅義務人」、「姓名」）的繁體中文，忽略英文／羅馬拼音；company 必須依文件實際雇主判斷，**優先讀右上角「扣繳單位」區塊**（統編旁單位名稱），其次才是「給付單位」、「雇主名稱」
 - 使用者選擇公司可能選錯；只要文件實際雇主/公司是台積電或聯發科正式員工文件即可通過，company 請回文件實際公司
 - 若是扣繳憑單或薪資單，detectedEmployer 必須逐字抄出文件上的扣繳單位/給付單位/雇主名稱；不得根據使用者選擇公司或文件外資訊推測
 - 若 detectedEmployer 逐字內容不是台積電/TSMC/台灣積體電路或聯發科/MediaTek/MTK，isEmployeeId 必須為 false，company 必須為 null
@@ -203,23 +192,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const serverNameMatches = normalizedClaimedName
       ? claimedNameMatchesDetected(normalizedClaimedName, parsed.detectedName, { docType: docTypeForMatch })
       : false
-    const isLowConfidenceEmployment = verificationKind === 'employment' && parsed.confidence !== 'high'
-    const employmentNameMismatch = verificationKind === 'employment' && Boolean(normalizedClaimedName) && !serverNameMatches
-    const employmentVendorDoc = verificationKind === 'employment' && parsed.containsVendorTerms === true
     const taxOrPayslipNeedsEmployer = verificationKind === 'employment'
       && (docType === 'tax_return' || docType === 'payslip')
-    const employerMismatch = verificationKind === 'employment'
-      && taxOrPayslipNeedsEmployer
-      && !employerMatchesCompany(parsed.company, parsed.detectedEmployer)
+    const resolvedCompany = resolveTopTierCompanyFromFields(parsed)
+    const topTierEmployerSeen = hasTopTierEmployerEvidence(parsed)
+    const employmentAcceptableConfidence = parsed.confidence === 'high'
+      || (taxOrPayslipNeedsEmployer && parsed.confidence === 'medium' && resolvedCompany && topTierEmployerSeen)
+    const isLowConfidenceEmployment = verificationKind === 'employment' && !employmentAcceptableConfidence
+    const employmentNameMismatch = verificationKind === 'employment' && Boolean(normalizedClaimedName) && !serverNameMatches
+    const employmentVendorDoc = verificationKind === 'employment' && parsed.containsVendorTerms === true
     const employerEvidenceMissing = verificationKind === 'employment'
       && taxOrPayslipNeedsEmployer
-      && !employerMatchesCompany(parsed.company, parsed.employerEvidenceQuote)
+      && !topTierEmployerSeen
+    const employerMismatch = verificationKind === 'employment'
+      && taxOrPayslipNeedsEmployer
+      && Boolean(parsed.detectedEmployer?.trim())
+      && !topTierEmployerSeen
+    const taxPayslipLooksValid = taxOrPayslipNeedsEmployer
+      && Boolean(resolvedCompany)
+      && topTierEmployerSeen
+      && serverNameMatches
+      && !employmentVendorDoc
+    const effectiveIsEmployeeId = parsed.isEmployeeId
+      || (verificationKind === 'employment' && taxPayslipLooksValid)
     const incomeNameMismatch = verificationKind === 'income' && Boolean(normalizedClaimedName) && !serverNameMatches
     if (
-      !parsed.isEmployeeId
+      !effectiveIsEmployeeId
       || incomeNameMismatch
       || (verificationKind === 'employment' && (
-        !parsed.company
+        !resolvedCompany
         || isLowConfidenceEmployment
         || employmentNameMismatch
         || employmentVendorDoc
@@ -251,10 +252,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
+    const successCompany: TopTierCompany = resolvedCompany ?? parsed.company!
     const successReason = sanitizeVerificationUserMessage(parsed.reason)
     return res.status(200).json({
       ok: true,
-      company: parsed.company,
+      company: successCompany,
       confidence: parsed.confidence,
       reason: successReason,
       suggestedIncomeTier: parsed.suggestedIncomeTier ?? null,
