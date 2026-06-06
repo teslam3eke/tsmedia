@@ -5,6 +5,7 @@ import SupportEmailFooter from '@/components/SupportEmailFooter'
 interface Props {
   onStart: () => void
   onOpenPaymentInfo: () => void
+  authNotice?: string | null
 }
 
 const FEATURES = [
@@ -28,9 +29,18 @@ const FEATURES = [
   },
 ]
 
-export default function LandingScreen({ onStart, onOpenPaymentInfo }: Props) {
+export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }: Props) {
   return (
     <div className="min-h-dvh flex flex-col bg-white">
+
+      {authNotice ? (
+        <div
+          role="alert"
+          className="mx-5 mt-safe rounded-2xl bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200"
+        >
+          {authNotice}
+        </div>
+      ) : null}
 
       {/* ── Dark hero (no image) ──────────────────────────────────── */}
       <div

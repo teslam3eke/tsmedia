@@ -2,7 +2,14 @@
 
 在 Supabase Dashboard：**Authentication → Email Templates** 貼上以下內容。
 
-請確認 **Site URL** 與 **Redirect URLs** 已包含正式網域（與 `VITE_SITE_URL` 一致）。
+請確認 **Site URL** 與 **Redirect URLs** 已包含正式網域（與 `VITE_SITE_URL` 一致），並**額外加入重設密碼 redirect**：
+
+```
+https://www.tsmedia.tw/?auth=recovery
+https://www.tsmedia.tw/
+```
+
+本地測試可再加 `http://localhost:5173/?auth=recovery`。
 
 ---
 

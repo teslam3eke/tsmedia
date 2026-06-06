@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { AnimatePresence, motion, type TargetAndTransition } from 'framer-motion'
 import type { User } from '@supabase/supabase-js'
 
@@ -32,6 +32,8 @@ import {
   shouldShowIosSafariAuthGuide,
   markPasswordRecoveryPending,
   readPasswordRecoveryPending,
+  readPasswordResetFlowStarted,
+  clearPasswordResetFlowStarted,
 } from '@/lib/auth'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
@@ -132,6 +134,8 @@ export default function App() {
   const [verifyWaitRevisit, setVerifyWaitRevisit] = useState(false)
   /** iOS 非 Safari 開啟 PKCE 確認連結，或換券失敗 */
   const [authSafariExchangeFailed, setAuthSafariExchangeFailed] = useState(false)
+  /** 信箱連結換券失敗時顯示於 landing */
+  const [authCallbackError, setAuthCallbackError] = useState<string | null>(null)
 
   const getActiveUser = async () => {
     if (user) return user
@@ -536,6 +540,18 @@ export default function App() {
     }
   }, [screen])
 
+  const go = useCallback((next: Screen) => {
+    if (needsIosSafariBrowserGate()) return
+    setPrev((prev) => prev)
+    setScreen((prev) => { setPrev(prev); return next })
+  }, [])
+
+  const routeToPasswordRecovery = useCallback(() => {
+    markPasswordRecoveryPending()
+    clearPasswordResetFlowStarted()
+    go('reset-password')
+  }, [go])
+
   // ── Auth init: read existing session first, then listen for changes ─────────
   useEffect(() => {
     let cancelled = false
@@ -549,19 +565,21 @@ export default function App() {
       routeByProfile(profile, u.id)
     }
 
+    const needsRecoveryScreen = () =>
+      readPasswordRecoveryPending() || readPasswordResetFlowStarted()
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
       setUser(session?.user ?? null)
       if (needsIosSafariBrowserGate()) return
       if (event === 'PASSWORD_RECOVERY') {
-        markPasswordRecoveryPending()
-        go('reset-password')
+        routeToPasswordRecovery()
         return
       }
       if (event === 'SIGNED_OUT') go('landing')
       if (event === 'SIGNED_IN' && session?.user) {
-        if (readPasswordRecoveryPending()) {
-          go('reset-password')
+        if (needsRecoveryScreen()) {
+          routeToPasswordRecovery()
           return
         }
         await routeSignedInUser(session.user)
@@ -579,12 +597,17 @@ export default function App() {
         shouldShowIosSafariAuthGuide()
       ) {
         setAuthSafariExchangeFailed(authConsume.outcome === 'failed')
+        if (authConsume.outcome === 'failed' && !needsIosSafariBrowserGate()) {
+          setAuthCallbackError('連結已失效或無法完成驗證，請重新申請重設密碼，或改用 Safari 開啟信件連結。')
+          go('landing')
+        }
         setReady(true)
         return
       }
 
       if (authConsume.outcome === 'session' && authConsume.passwordRecovery) {
         markPasswordRecoveryPending()
+        clearPasswordResetFlowStarted()
       }
 
       const {
@@ -593,12 +616,13 @@ export default function App() {
       if (cancelled) return
       const u = session?.user ?? null
       setUser(u)
+      if (u && needsRecoveryScreen()) {
+        routeToPasswordRecovery()
+        setReady(true)
+        return
+      }
       setReady(true)
       if (u) {
-        if (readPasswordRecoveryPending()) {
-          go('reset-password')
-          return
-        }
         await routeSignedInUser(u)
       } else {
         go('landing')
@@ -606,13 +630,7 @@ export default function App() {
     })()
 
     return () => { cancelled = true; subscription.unsubscribe() }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const go = (next: Screen) => {
-    if (needsIosSafariBrowserGate()) return
-    setPrev((prev) => prev)
-    setScreen((prev) => { setPrev(prev); return next })
-  }
+  }, [go, routeToPasswordRecovery]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSignOut = async () => {
     setVerifyWaitRevisit(false)
@@ -747,6 +765,7 @@ export default function App() {
       >
         {screen === 'landing' && (
           <LandingScreen
+            authNotice={authCallbackError}
             onStart={() => go('auth')}
             onOpenPaymentInfo={() => go('membership-payment-info')}
           />
@@ -761,8 +780,8 @@ export default function App() {
             onSuccess={async (signedInUser) => {
               if (needsIosSafariBrowserGate()) return
               setUser(signedInUser)
-              if (readPasswordRecoveryPending()) {
-                go('reset-password')
+              if (readPasswordRecoveryPending() || readPasswordResetFlowStarted()) {
+                routeToPasswordRecovery()
                 return
               }
               const profile = await getProfile(signedInUser.id)

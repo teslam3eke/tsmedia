@@ -10,12 +10,40 @@ export type AuthResult =
   | { ok: false; error: string }
 
 // ── 註冊（Email + Password）────────────────────────────────────
-function emailRedirectUrl(): string | undefined {
+function siteOriginBase(): string | undefined {
   if (typeof window === 'undefined') return undefined
   const fromEnv = import.meta.env.VITE_SITE_URL?.trim().replace(/\/$/, '')
-  if (fromEnv) return `${fromEnv}/`
-  const { origin, pathname } = window.location
-  return `${origin}${pathname || '/'}`
+  if (fromEnv) return fromEnv
+  return window.location.origin
+}
+
+function emailRedirectUrl(): string | undefined {
+  const base = siteOriginBase()
+  if (!base) return undefined
+  return `${base}/`
+}
+
+/** 重設密碼信 redirect；帶 `auth=recovery` 供 PKCE 回站辨識（跨裝置亦可靠）。 */
+function passwordResetRedirectUrl(): string | undefined {
+  const base = siteOriginBase()
+  if (!base) return undefined
+  return `${base}/?auth=recovery`
+}
+
+function urlIndicatesPasswordRecovery(url: URL): boolean {
+  if (url.searchParams.get('auth') === 'recovery') return true
+  if (url.searchParams.get('type') === 'recovery') return true
+  if (url.hash.includes('type=recovery')) return true
+  return readPasswordResetFlowStarted() || readPasswordRecoveryPending()
+}
+
+function markRecoveryFromAuthCallback(url: URL): boolean {
+  const recovery = urlIndicatesPasswordRecovery(url)
+  if (recovery) {
+    markPasswordRecoveryPending()
+    clearPasswordResetFlowStarted()
+  }
+  return recovery
 }
 
 export async function signUp(email: string, password: string): Promise<AuthResult> {
@@ -44,12 +72,49 @@ export async function signIn(email: string, password: string): Promise<AuthResul
 export async function requestPasswordReset(
   email: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const redirectTo = emailRedirectUrl()
+  const redirectTo = passwordResetRedirectUrl()
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: redirectTo ?? undefined,
   })
   if (error) return { ok: false, error: mapError(error.message) }
+  markPasswordResetFlowStarted()
   return { ok: true }
+}
+
+/** 同裝置申請重設密碼後的備援旗標（跨裝置主要靠 redirect `?auth=recovery`） */
+export const PASSWORD_RESET_FLOW_KEY = 'tm_password_reset_flow_v1'
+
+const PASSWORD_RESET_FLOW_TTL_MS = 24 * 60 * 60 * 1000
+
+export function markPasswordResetFlowStarted(): void {
+  try {
+    sessionStorage.setItem(PASSWORD_RESET_FLOW_KEY, String(Date.now()))
+  } catch {
+    /* private mode */
+  }
+}
+
+export function readPasswordResetFlowStarted(): boolean {
+  try {
+    const raw = sessionStorage.getItem(PASSWORD_RESET_FLOW_KEY)
+    if (!raw) return false
+    const ts = Number(raw)
+    if (!Number.isFinite(ts) || Date.now() - ts > PASSWORD_RESET_FLOW_TTL_MS) {
+      clearPasswordResetFlowStarted()
+      return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function clearPasswordResetFlowStarted(): void {
+  try {
+    sessionStorage.removeItem(PASSWORD_RESET_FLOW_KEY)
+  } catch {
+    /* private mode */
+  }
 }
 
 /** 使用者點重設密碼信後須先完成 {@link updatePassword}，再進 onboarding／主畫面 */
@@ -125,6 +190,7 @@ const AUTH_CALLBACK_QUERY_PARAMS = [
   'code',
   'token_hash',
   'type',
+  'auth',
   'access_token',
   'refresh_token',
   'expires_in',
@@ -189,18 +255,19 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
       data: { session: existing },
     } = await supabase.auth.getSession()
     if (existing) {
+      const passwordRecovery = markRecoveryFromAuthCallback(url)
       stripSupabaseAuthCallbackFromUrl()
       clearIosDeferredAuthCallbackUrl()
       return {
         outcome: 'session',
-        passwordRecovery: readPasswordRecoveryPending(),
+        passwordRecovery,
       }
     }
 
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-    stripSupabaseAuthCallbackFromUrl()
     if (error) {
       console.warn('[auth] exchangeCodeForSession', error.message)
+      stripSupabaseAuthCallbackFromUrl()
       if (iosOrIpadosLikely()) {
         try {
           sessionStorage.setItem(IOS_AUTH_CALLBACK_URL_KEY, url.href)
@@ -210,10 +277,12 @@ export async function consumeSupabaseAuthCallbackFromUrl(): Promise<AuthCallback
       }
       return { outcome: 'failed' }
     }
+    const passwordRecovery = markRecoveryFromAuthCallback(url)
+    stripSupabaseAuthCallbackFromUrl()
     clearIosDeferredAuthCallbackUrl()
     return {
       outcome: 'session',
-      passwordRecovery: readPasswordRecoveryPending(),
+      passwordRecovery,
     }
   }
 
