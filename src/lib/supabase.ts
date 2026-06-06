@@ -6,6 +6,7 @@ import {
   reportResumeEvent,
 } from './resumeRealtimeTelemetry'
 import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
+import { isOnboardingResumeProtectActive } from './onboardingDraft'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from './instantMatchUnloadGuard'
 import {
   TM_FOREGROUND_TRANSPORT_KICK_EVENT,
@@ -712,6 +713,7 @@ async function runEnsureWithRetries(): Promise<boolean> {
 
   /** 離線不要做無限重整迴圈；僅在目前判定為線上時重載（避免 iOS SW／假連線卡住）。 */
   if (isWithinMediaPickerGracePeriod()) return false
+  if (isOnboardingResumeProtectActive()) return false
 
   if (navigator.onLine) {
     markSkipInstantMatchLeaveOnNextFullUnload()

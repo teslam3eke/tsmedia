@@ -1,33 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { sanitizeVerificationUserMessage } from './_utils/companySanitize.js'
+import {
+  claimedNameMatchesDetected,
+  type VerificationDocTypeHint,
+} from './_utils/verificationNameMatch.js'
 
 // POST /api/verify-id
 // Body: { imageBase64: string; verificationKind?: 'employment' | 'income'; claimedIncomeTier?: string; claimedName?: string; claimedCompany?: string; docType?: string }
 // Returns: { ok: boolean; company: 'TSMC' | 'MediaTek' | null; message: string }
-
-function normalizeNameForCompare(name: string | null | undefined): string {
-  return (name ?? '')
-    .normalize('NFKC')
-    .replace(/[\s　·・．.。､,，、\-－_()（）[\]【】「」『』:：;；/\\|]/g, '')
-    .toLowerCase()
-}
-
-/** 員工證常見「中文／English」多行或多欄 — 先切段再各自正規化（勿整段 normalize，否則／會被吃掉無法拆） */
-function extractDetectedNameCandidates(detected: string | null | undefined): string[] {
-  if (detected == null || detected.trim() === '') return []
-  const trimmed = detected.trim()
-  const pieces = trimmed.split(/[/／｜|\n\r]+/).map((s) => s.trim()).filter(Boolean)
-  const rawPieces = pieces.length > 0 ? pieces : [trimmed]
-  return [...new Set(rawPieces.map((s) => normalizeNameForCompare(s)).filter(Boolean))]
-}
-
-/** 使用者資料姓名須與證件上任一可辨識姓名片段一致（支援中英並列員工證） */
-function claimedNameMatchesDetected(claimedName: string, detectedName: string | null | undefined): boolean {
-  const claimed = normalizeNameForCompare(claimedName)
-  if (!claimed) return false
-  const candidates = extractDetectedNameCandidates(detectedName)
-  return candidates.some((c) => c === claimed)
-}
 
 function normalizeCompanyForCompare(value: string | null | undefined): string {
   return (value ?? '')
@@ -70,12 +50,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const normalizedClaimedName = claimedName?.trim() ?? ''
   const normalizedClaimedCompany = claimedCompany === 'TSMC' || claimedCompany === 'MediaTek' ? claimedCompany : null
   const docTypeHint = docType === 'tax_return'
-    ? '這張文件類型是扣繳憑單/扣繳暨免扣繳憑單。姓名請優先讀「所得人姓名」，也可能標示為「納稅義務人」、「姓名」。公司必須逐字抄出「扣繳單位」、「給付單位」、「雇主名稱」或公司名稱欄位；不可根據使用者選擇公司推測。'
+    ? '這張文件類型是扣繳憑單/扣繳暨免扣繳憑單。detectedName 必須只填「所得人姓名」欄位上的繁體中文姓名（2–4 字），忽略英文／羅馬拼音／護照拼音列；若同時有中文與英文，只填中文，不要填「中文／英文」格式。公司必須逐字抄出「扣繳單位」、「給付單位」、「雇主名稱」或公司名稱欄位；不可根據使用者選擇公司推測。'
     : docType === 'payslip'
-      ? '這張文件類型是薪資單。姓名請讀員工姓名/姓名欄位，公司請看雇主、公司、發薪單位。'
+      ? '這張文件類型是薪資單。detectedName 必須只填員工姓名欄位的繁體中文姓名，忽略英文／羅馬拼音；公司請看雇主、公司、發薪單位。'
       : docType === 'employee_id'
         ? '這張文件類型是員工證/識別證。證件若同時有中文姓名與英文姓名（或羅馬拼音），detectedName 必須優先包含清晰的中文姓名（與使用者資料比對以中文為準）；不得僅填英文而忽略可看見的中文。若中英文並列，請填「中文姓名／英文姓名」同一字串（例如「陳怡君／CHEN YI-CHUN」）。'
-        : '若文件是扣繳憑單，姓名請讀「所得人姓名」；若是薪資單，姓名請讀員工姓名；若是員工證，請優先讀中文姓名；中英文並列時以「中文／英文」填入 detectedName。'
+        : '若文件是扣繳憑單，姓名請只讀「所得人姓名」的中文；若是薪資單，姓名請只讀中文員工姓名；若是員工證，請優先讀中文姓名；中英文並列時以「中文／英文」填入 detectedName。'
   if (verificationKind === 'employment' && !normalizedClaimedName) {
     return res.status(200).json({
       ok: false,
@@ -114,8 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 判斷標準：
 - 若圖片模糊、不清楚、不是收入/薪資/稅務/銀行收入文件，isEmployeeId 為 false
 - 若文件明顯無法支持申請的收入等級，isEmployeeId 為 false
-- 若使用者姓名有提供，文件上的姓名必須與使用者姓名相同或高度一致；員工證／薪資類文件若中英文姓名並列，detectedName 請優先含中文並以「中文／英文」格式填入，只要中文與使用者姓名一致即可；若不同、看不到姓名、或無法判斷姓名，isEmployeeId 為 false 且 nameMatches 為 false
-- 扣繳憑單必須讀「所得人姓名」作為 detectedName，不要把扣繳單位、公司名稱、負責人或統編誤當成姓名
+- 若使用者姓名有提供，文件上的姓名必須與使用者姓名相同或高度一致；員工證若中英文姓名並列，detectedName 請優先含中文並以「中文／英文」格式填入，只要中文與使用者姓名一致即可；扣繳憑單與薪資單的 detectedName 只能填繁體中文姓名，不得只填英文；若不同、看不到中文姓名、或無法判斷姓名，isEmployeeId 為 false 且 nameMatches 為 false
+- 扣繳憑單必須讀「所得人姓名」的中文作為 detectedName，不要把扣繳單位、公司名稱、負責人、英文姓名或統編誤當成姓名
 - detectedName 必須填入你從文件看到的姓名；若看不到姓名，detectedName 為 null
 - detectedEmployer 必須逐字填入扣繳單位/給付單位/雇主名稱；不可推測、不可填使用者選擇公司
 - employerEvidenceQuote 必須逐字填入包含雇主名稱的原文片段；若沒有清楚看到，isEmployeeId 為 false
@@ -148,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 判斷標準：
 - 可接受正式員工識別證、薪資單、扣繳憑單、報稅/薪資資料；但必須能看出使用者是台積電或聯發科正式員工
-- 若是扣繳憑單，detectedName 必須取自「所得人姓名」（或同義欄位「納稅義務人」、「姓名」），company 必須依「扣繳單位」、「給付單位」、「雇主名稱」判斷
+- 若是扣繳憑單，detectedName 必須取自「所得人姓名」（或同義欄位「納稅義務人」、「姓名」）的繁體中文，忽略英文／羅馬拼音；company 必須依「扣繳單位」、「給付單位」、「雇主名稱」判斷
 - 使用者選擇公司可能選錯；只要文件實際雇主/公司是台積電或聯發科正式員工文件即可通過，company 請回文件實際公司
 - 若是扣繳憑單或薪資單，detectedEmployer 必須逐字抄出文件上的扣繳單位/給付單位/雇主名稱；不得根據使用者選擇公司或文件外資訊推測
 - 若 detectedEmployer 逐字內容不是台積電/TSMC/台灣積體電路或聯發科/MediaTek/MTK，isEmployeeId 必須為 false，company 必須為 null
@@ -159,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 如果證件、職稱、備註、公司欄位、識別證類別出現「廠商」、「承攬商」、「外包」、「駐廠」、「vendor」、「contractor」、「外部人員」等字眼，必須 isEmployeeId 為 false
 - 如果只是台積電/聯發科廠區通行證、訪客證、廠商工作證、施工證、臨時證，而非正式員工證，必須 isEmployeeId 為 false
 - 文件上的姓名必須與使用者姓名「${normalizedClaimedName}」相同或高度一致（員工證若中英文並列，只要中文姓名與使用者姓名一致即可通過 nameMatches）
-- detectedName 必須填入你從文件上看到的使用者姓名；員工識別證請優先抄錄中文姓名，並與英文並列時使用「中文／英文」格式；扣繳憑單請填「所得人姓名」；若看不到姓名，detectedName 為 null 且 nameMatches 為 false
+- detectedName 必須填入你從文件上看到的使用者姓名；員工識別證請優先抄錄中文姓名，並與英文並列時使用「中文／英文」格式；扣繳憑單與薪資單只填中文姓名；若看不到中文姓名，detectedName 為 null 且 nameMatches 為 false
 - detectedEmployer 必須填入你從文件上看到的公司、扣繳單位、給付單位或雇主名稱
 - 若年收入 200–299 萬，suggestedIncomeTier 為 silver；300–399 萬為 gold；400 萬以上為 diamond；低於 200 萬或無法判斷為 null
 - 若只能看到公司 logo 但看不到姓名與正式員工身份，不可通過
@@ -219,8 +199,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reason: string
     }
 
+    const docTypeForMatch = docType as VerificationDocTypeHint | undefined
     const serverNameMatches = normalizedClaimedName
-      ? claimedNameMatchesDetected(normalizedClaimedName, parsed.detectedName)
+      ? claimedNameMatchesDetected(normalizedClaimedName, parsed.detectedName, { docType: docTypeForMatch })
       : false
     const isLowConfidenceEmployment = verificationKind === 'employment' && parsed.confidence !== 'high'
     const employmentNameMismatch = verificationKind === 'employment' && Boolean(normalizedClaimedName) && !serverNameMatches

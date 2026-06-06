@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ChevronRight, ChevronLeft, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getProfile } from '@/lib/db'
 import { REGION_LABELS, type Region } from '@/lib/types'
+import {
+  loadOnboardingJsonDraft,
+  saveOnboardingJsonDraft,
+  useOnboardingForegroundRepair,
+} from '@/lib/onboardingDraft'
 
 interface Props {
   userId?: string
@@ -57,36 +62,45 @@ export default function ProfileSetupScreen({
     preferredRegion: '',
   })
   const [profileLoaded, setProfileLoaded] = useState(!userId)
+  const formRef = useRef(form)
+  formRef.current = form
+
+  useOnboardingForegroundRepair(true)
 
   useEffect(() => {
     if (!userId) return
     let cancelled = false
     void (async () => {
+      const draft = loadOnboardingJsonDraft<ProfileSetupData>(userId, 'profile-setup')
       const p = await getProfile(userId)
-      if (cancelled || !p) {
-        if (!cancelled) setProfileLoaded(true)
-        return
-      }
-      const approxBirthYear =
-        p.age != null && p.age > 0 ? String(new Date().getFullYear() - p.age) : ''
-      setForm({
-        name: p.name?.trim() ?? '',
-        nickname: p.nickname?.trim() ?? '',
-        gender: p.gender === 'female' ? 'female' : 'male',
-        birthYear: approxBirthYear,
-        birthMonth: '',
-        interests: p.interests ?? [],
-        bio: p.bio?.trim() ?? '',
-        workRegion: p.work_region ?? '',
-        homeRegion: p.home_region ?? '',
-        preferredRegion: p.preferred_region ?? '',
-      })
+      if (cancelled) return
+      const fromServer: ProfileSetupData = p
+        ? {
+            name: p.name?.trim() ?? '',
+            nickname: p.nickname?.trim() ?? '',
+            gender: p.gender === 'female' ? 'female' : 'male',
+            birthYear: p.age != null && p.age > 0 ? String(new Date().getFullYear() - p.age) : '',
+            birthMonth: '',
+            interests: p.interests ?? [],
+            bio: p.bio?.trim() ?? '',
+            workRegion: p.work_region ?? '',
+            homeRegion: p.home_region ?? '',
+            preferredRegion: p.preferred_region ?? '',
+          }
+        : formRef.current
+      const merged = draft ? { ...fromServer, ...draft } : fromServer
+      setForm(merged)
       setProfileLoaded(true)
     })()
     return () => {
       cancelled = true
     }
   }, [userId])
+
+  useEffect(() => {
+    if (!profileLoaded) return
+    saveOnboardingJsonDraft(userId, 'profile-setup', form)
+  }, [form, profileLoaded, userId])
 
   const set = <K extends keyof ProfileSetupData>(key: K, val: ProfileSetupData[K]) =>
     setForm((f) => ({ ...f, [key]: val }))

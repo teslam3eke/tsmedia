@@ -24,6 +24,11 @@ import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type 
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
+import {
+  loadOnboardingJsonDraft,
+  saveOnboardingJsonDraft,
+  useOnboardingForegroundRepair,
+} from '@/lib/onboardingDraft'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 
 interface Props {
@@ -48,6 +53,26 @@ interface ProofItem {
 const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（選填）']
 /** 女生 onboarding 僅生活照；收入／薪資認證改由站內「編輯個人資訊」處理 */
 const STEPS_FEMALE = ['生活照上傳']
+
+const EMPLOYMENT_DOC_TYPES: { value: 'employee_id' | 'tax_return' | 'payslip'; label: string }[] = [
+  { value: 'employee_id', label: '員工證 / 識別證' },
+  { value: 'tax_return', label: '扣繳憑單' },
+  { value: 'payslip', label: '薪資單' },
+]
+
+type VerifyDraftSnapshot = {
+  step: number
+  employmentDocType: 'employee_id' | 'tax_return' | 'payslip' | ''
+  selectedTier: IncomeTier | null
+  proof?: { name: string; type: string; dataUrl: string }
+  incomeDoc?: { name: string; type: string; dataUrl: string }
+}
+
+async function dataUrlToFile(dataUrl: string, name: string, type: string): Promise<File> {
+  const res = await fetch(dataUrl)
+  const blob = await res.blob()
+  return new File([blob], name, { type: type || blob.type })
+}
 
 const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
   { tier: 'silver',  range: '200萬+', desc: '銀皇冠標章' },
@@ -113,7 +138,11 @@ export default function IdentityVerifyScreen({
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<LifePhotoSlot[]>([])
   const [proofs, setProofs] = useState<ProofItem[]>([])
+  const [employmentDocType, setEmploymentDocType] = useState<'employee_id' | 'tax_return' | 'payslip' | ''>('')
   const [submitting, setSubmitting] = useState(false)
+  const [draftHydrated, setDraftHydrated] = useState(false)
+
+  useOnboardingForegroundRepair(true)
 
   // ── Income verification state ────────────────────────────────────
   const [selectedTier, setSelectedTier] = useState<IncomeTier | null>(null)
@@ -138,6 +167,7 @@ export default function IdentityVerifyScreen({
 
   /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
   const employmentSubmittedRef = useRef(false)
+  const draftProofAiQueuedRef = useRef(false)
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
 
@@ -145,12 +175,17 @@ export default function IdentityVerifyScreen({
     if (!userId) {
       setPhotos([])
       if (gender !== 'male') setMaleVerifyGate(null)
+      setDraftHydrated(true)
       return
     }
     let cancelled = false
     void (async () => {
+      const draft = loadOnboardingJsonDraft<VerifyDraftSnapshot>(userId, 'identity-verify')
       const p = await getProfile(userId)
-      if (cancelled || !p) return
+      if (cancelled || !p) {
+        if (!cancelled) setDraftHydrated(true)
+        return
+      }
 
       const storedPaths = (p.photo_urls ?? []).filter(Boolean)
       if (storedPaths.length > 0) {
@@ -196,6 +231,47 @@ export default function IdentityVerifyScreen({
       } else {
         setMaleVerifyGate(null)
       }
+
+      if (draft && !cancelled) {
+        if (typeof draft.step === 'number') setStep(draft.step)
+        if (draft.employmentDocType) setEmploymentDocType(draft.employmentDocType)
+        if (draft.selectedTier) setSelectedTier(draft.selectedTier)
+        if (draft.proof?.dataUrl) {
+          try {
+            const file = await dataUrlToFile(draft.proof.dataUrl, draft.proof.name, draft.proof.type)
+            if (!cancelled) {
+              setProofs([{
+                id: `draft-${Date.now()}`,
+                name: draft.proof.name,
+                type: draft.proof.type,
+                file,
+                previewUrl: URL.createObjectURL(file),
+              }])
+              draftProofAiQueuedRef.current = true
+            }
+          } catch {
+            /* 草稿損壞時略過 */
+          }
+        }
+        if (draft.incomeDoc?.dataUrl) {
+          try {
+            const file = await dataUrlToFile(draft.incomeDoc.dataUrl, draft.incomeDoc.name, draft.incomeDoc.type)
+            if (!cancelled) {
+              setIncomeDoc({
+                id: `draft-income-${Date.now()}`,
+                name: draft.incomeDoc.name,
+                type: draft.incomeDoc.type,
+                file,
+                previewUrl: URL.createObjectURL(file),
+              })
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      if (!cancelled) setDraftHydrated(true)
     })()
     return () => { cancelled = true }
   }, [userId, gender])
@@ -272,12 +348,16 @@ export default function IdentityVerifyScreen({
       reader.readAsDataURL(file)
     })
 
-  const fetchEmploymentAiOutcome = async (file: File) => {
+  const fetchEmploymentAiOutcome = async (
+    file: File,
+    docTypeOverride?: 'employee_id' | 'tax_return' | 'payslip',
+  ) => {
     employmentAiOutcomeRef.current = null
     try {
       const imageBase64 = await fileToBase64(file)
-      const docTypeHint: 'employee_id' | 'tax_return' | 'other' =
-        file.type === 'application/pdf' ? 'tax_return' : file.type.startsWith('image/') ? 'employee_id' : 'other'
+      const docTypeHint: 'employee_id' | 'tax_return' | 'payslip' | 'other' =
+        docTypeOverride
+        ?? (file.type === 'application/pdf' ? 'tax_return' : 'employee_id')
       const res = await fetch('/api/verify-id', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,7 +415,7 @@ export default function IdentityVerifyScreen({
           verificationKind: 'income',
           claimedIncomeTier: tier,
           claimedName: claimedName?.trim() || undefined,
-          docType: 'other',
+          docType: file.type === 'application/pdf' ? 'tax_return' : 'payslip',
         }),
       })
       const { data, failureReason } = await parseVerifyIdResponse(res)
@@ -409,6 +489,53 @@ export default function IdentityVerifyScreen({
     return () => { cancelled = true }
   }, [incomeHold])
 
+  useEffect(() => {
+    if (!draftProofAiQueuedRef.current) return
+    draftProofAiQueuedRef.current = false
+    const file = proofs[0]?.file
+    if (!file?.type.startsWith('image/')) return
+    void fetchEmploymentAiOutcome(
+      file,
+      employmentDocType || (file.type === 'application/pdf' ? 'tax_return' : undefined),
+    )
+  }, [proofs, employmentDocType])
+
+  useEffect(() => {
+    if (!draftHydrated || !userId) return
+    let cancelled = false
+    void (async () => {
+      const snapshot: VerifyDraftSnapshot = {
+        step,
+        employmentDocType,
+        selectedTier,
+      }
+      if (proofs[0]) {
+        try {
+          snapshot.proof = {
+            name: proofs[0].name,
+            type: proofs[0].type,
+            dataUrl: await fileToBase64(proofs[0].file),
+          }
+        } catch {
+          /* 略過過大檔案 */
+        }
+      }
+      if (incomeDoc) {
+        try {
+          snapshot.incomeDoc = {
+            name: incomeDoc.name,
+            type: incomeDoc.type,
+            dataUrl: await fileToBase64(incomeDoc.file),
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!cancelled) saveOnboardingJsonDraft(userId, 'identity-verify', snapshot)
+    })()
+    return () => { cancelled = true }
+  }, [draftHydrated, userId, step, employmentDocType, selectedTier, proofs, incomeDoc])
+
   const addIncomeDoc = (files: FileList | null) => {
     if (!files || files.length === 0) return
     const f = files[0]
@@ -434,6 +561,11 @@ export default function IdentityVerifyScreen({
 
   const addProof = (files: FileList | null) => {
     if (!files) return
+    if (!employmentDocType) {
+      setAiStatus('fail')
+      setAiMessage('請先選擇文件類型（員工證、扣繳憑單或薪資單），再上傳。')
+      return
+    }
     proofs.forEach((p) => URL.revokeObjectURL(p.previewUrl))
     const newProofs: ProofItem[] = Array.from(files)
       .slice(0, 1)
@@ -451,7 +583,7 @@ export default function IdentityVerifyScreen({
     employmentAiOutcomeRef.current = null
     const file = newProofs[0]?.file
     if (file?.type.startsWith('image/')) {
-      void fetchEmploymentAiOutcome(file)
+      void fetchEmploymentAiOutcome(file, employmentDocType)
     }
   }
 
@@ -552,11 +684,9 @@ export default function IdentityVerifyScreen({
       return { ok: false, error: proofResult.error ?? '文件上傳失敗，請再試一次。' }
     }
 
-    const docTypeMap: Record<string, DocType> = {
-      'image/jpeg': 'employee_id', 'image/png': 'employee_id',
-      'image/heic': 'employee_id', 'application/pdf': 'tax_return',
-    }
-    const docType: DocType = docTypeMap[proofs[0].type] ?? 'payslip'
+    const docType: DocType = employmentDocType || (
+      proofFile.type === 'application/pdf' ? 'tax_return' : 'payslip'
+    )
     const submitResult = await submitVerificationDoc(
       userId,
       companyForSubmit,
@@ -881,11 +1011,50 @@ export default function IdentityVerifyScreen({
                   </div>
                 </div>
 
+                <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                    文件類型 <span className="text-red-400">*</span>
+                  </p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {EMPLOYMENT_DOC_TYPES.map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          setEmploymentDocType(value)
+                          if (proofs.length > 0) removeProof()
+                        }}
+                        className={cn(
+                          'rounded-xl border-2 px-3 py-2.5 text-left text-sm font-semibold transition-all',
+                          employmentDocType === value
+                            ? 'border-slate-900 bg-slate-900 text-white'
+                            : 'border-slate-200 bg-white text-slate-600',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                    上傳扣繳憑單或薪資單時請選對類型；AI 會以中文姓名比對，避免誤讀英文拼音。
+                  </p>
+                </div>
+
                 {/* Upload area */}
                 {proofs.length === 0 ? (
                   <button
-                    onClick={() => clickFileInputWithGrace(proofInputRef.current)}
-                    className="w-full rounded-3xl p-6 flex flex-col items-center gap-3 transition-all bg-white ring-1 ring-slate-100 shadow-sm hover:ring-slate-300"
+                    onClick={() => {
+                      if (!employmentDocType) {
+                        setAiStatus('fail')
+                        setAiMessage('請先選擇文件類型，再上傳。')
+                        return
+                      }
+                      clickFileInputWithGrace(proofInputRef.current)
+                    }}
+                    className={cn(
+                      'w-full rounded-3xl p-6 flex flex-col items-center gap-3 transition-all bg-white ring-1 shadow-sm hover:ring-slate-300',
+                      employmentDocType ? 'ring-slate-100' : 'ring-amber-200 opacity-90',
+                    )}
                   >
                     <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center">
                       <Upload className="w-6 h-6 text-slate-400" />

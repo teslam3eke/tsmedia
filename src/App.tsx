@@ -28,6 +28,7 @@ import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionn
 import { signOut, consumeSupabaseAuthCallbackFromUrl, shouldShowIosSafariAuthGuide } from '@/lib/auth'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
+import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
@@ -245,6 +246,12 @@ export default function App() {
     }
     window.addEventListener(CONNECTION_REPAIR_EVENT, listener)
     return () => window.removeEventListener(CONNECTION_REPAIR_EVENT, listener)
+  }, [screen])
+
+  /** 註冊／填資料流程：回前景只做連線修復，禁止整頁 reload 清掉草稿。 */
+  useEffect(() => {
+    setOnboardingResumeProtect(isOnboardingFlowScreen(screen))
+    return () => setOnboardingResumeProtect(false)
   }, [screen])
 
   // ── iOS PWA layout recalc hack ────────────────────────────────────

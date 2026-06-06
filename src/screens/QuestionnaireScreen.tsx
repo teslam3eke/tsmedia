@@ -1,9 +1,14 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, MessageSquare, Cpu } from 'lucide-react'
 import { getQuestionnaireQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
 import { getProfile } from '@/lib/db'
 import { cn } from '@/lib/utils'
+import {
+  loadOnboardingJsonDraft,
+  saveOnboardingJsonDraft,
+  useOnboardingForegroundRepair,
+} from '@/lib/onboardingDraft'
 
 interface Props {
   onComplete: (answers: Record<number, string>, questions: Question[]) => void
@@ -35,29 +40,46 @@ export default function QuestionnaireScreen({
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
   const [answersLoaded, setAnswersLoaded] = useState(!userId)
+  const answersRef = useRef(answers)
+  answersRef.current = answers
+
+  useOnboardingForegroundRepair(true)
 
   useEffect(() => {
     if (!userId) return
     let cancelled = false
     void (async () => {
+      const draft = loadOnboardingJsonDraft<{ answers: Record<number, string>; current: number }>(
+        userId,
+        'questionnaire',
+      )
       const p = await getProfile(userId)
       if (cancelled) return
+      const seeded: Record<number, string> = {}
       const entries = p?.questionnaire
       if (Array.isArray(entries) && entries.length > 0) {
-        const seeded: Record<number, string> = {}
         for (const e of entries) {
           if (typeof e.id === 'number' && typeof e.answer === 'string' && e.answer.trim()) {
             seeded[e.id] = e.answer
           }
         }
-        if (Object.keys(seeded).length > 0) setAnswers(seeded)
+      }
+      const mergedAnswers = draft?.answers ? { ...seeded, ...draft.answers } : seeded
+      if (Object.keys(mergedAnswers).length > 0) setAnswers(mergedAnswers)
+      if (typeof draft?.current === 'number' && draft.current >= 0) {
+        setCurrent(Math.min(draft.current, questions.length - 1))
       }
       setAnswersLoaded(true)
     })()
     return () => {
       cancelled = true
     }
-  }, [userId])
+  }, [userId, questions.length])
+
+  useEffect(() => {
+    if (!answersLoaded) return
+    saveOnboardingJsonDraft(userId, 'questionnaire', { answers, current })
+  }, [answers, current, answersLoaded, userId])
 
   if (!answersLoaded) {
     return (

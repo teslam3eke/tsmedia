@@ -7,6 +7,7 @@
  */
 
 import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
+import { isOnboardingResumeProtectActive } from './onboardingDraft'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from './instantMatchUnloadGuard'
 
 const MIN_PROBE_INTERVAL_MS = 20_000
@@ -65,6 +66,7 @@ export async function checkRemoteBuildIdAndReload(): Promise<void> {
     if (!remote || remote === embedded) return
     await unregisterSwAndClearSiteCaches()
     if (isWithinMediaPickerGracePeriod()) return
+    if (isOnboardingResumeProtectActive()) return
     markSkipInstantMatchLeaveOnNextFullUnload()
     window.location.reload()
   } catch {
