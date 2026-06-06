@@ -4035,6 +4035,9 @@ function EditProfileScreen({
   const [uploadingIncome, setUploadingIncome] = useState(false)
   const [incomeSubmitMsg, setIncomeSubmitMsg] = useState('')
   const [incomeReviewCountdown, setIncomeReviewCountdown] = useState(0)
+  /** 送出收入認證後全螢幕等待（與公司認證 submitted 相同體驗） */
+  const [incomeWaitOverlay, setIncomeWaitOverlay] = useState(false)
+  const [incomeWaitMessage, setIncomeWaitMessage] = useState('')
   const incomeAiFinalizePendingRef = useRef(false)
   const incomeDocRef = useRef<HTMLInputElement>(null)
   const canSubmitIncomeVerification =
@@ -4060,6 +4063,7 @@ function EditProfileScreen({
         const r = row as { status: 'pending' | 'approved' | 'rejected'; claimed_income_tier: IncomeTier | null }
         setIncomeStatus({ status: r.status, claimed: r.claimed_income_tier })
       }
+      setIncomeWaitOverlay(false)
       if (latestProfile) {
         onSaved(latestProfile)
         if (latestProfile.income_tier) {
@@ -4072,7 +4076,7 @@ function EditProfileScreen({
       }
     })()
     return () => { cancelled = true }
-  }, [incomeReviewCountdown, userId])
+  }, [incomeReviewCountdown, userId, onSaved])
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -4169,6 +4173,19 @@ function EditProfileScreen({
     }
   }
 
+  const revertIncomeWaitState = async () => {
+    incomeAiFinalizePendingRef.current = false
+    setIncomeReviewCountdown(0)
+    setIncomeWaitOverlay(false)
+    const row = await getIncomeVerification(userId)
+    if (row && typeof row === 'object' && 'status' in row && 'claimed_income_tier' in row) {
+      const r = row as { status: 'pending' | 'approved' | 'rejected'; claimed_income_tier: IncomeTier | null }
+      setIncomeStatus({ status: r.status, claimed: r.claimed_income_tier })
+    } else {
+      setIncomeStatus(null)
+    }
+  }
+
   const submitIncome = async () => {
     if (!incomeUploadTier || !incomeUploadFile) return
     setIncomeSubmitMsg('')
@@ -4184,28 +4201,36 @@ function EditProfileScreen({
       return
     }
 
-    const optimisticIncomeTier = incomeUploadTier
-    incomeAiFinalizePendingRef.current = false
-    setIncomeStatus({ status: 'pending', claimed: optimisticIncomeTier })
-    setIncomeReviewCountdown(0)
-    setIncomeSubmitMsg('正在儲存並送審⋯')
-
     if (!(await save(undefined, { silent: true }))) {
       setIncomeSubmitMsg('請先完成必填資料（姓名、暱稱、生活照、興趣）後再送審。')
       setUploadingIncome(false)
       return
     }
 
+    const tier = incomeUploadTier
+    const file = incomeUploadFile
+    const isImage = file.type.startsWith('image/')
+
+    /** 與公司認證相同：先軟切到等待頁，背景再跑 AI／上傳 */
+    incomeAiFinalizePendingRef.current = false
+    setIncomeStatus({ status: 'pending', claimed: tier })
+    setIncomeReviewCountdown(0)
+    setIncomeWaitOverlay(true)
+    setIncomeWaitMessage(isImage ? `AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒` : '正在上傳並送審⋯')
+    if (isImage) {
+      incomeAiFinalizePendingRef.current = true
+      setIncomeReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
+    }
+
     let aiResult: Awaited<ReturnType<typeof reviewIncomeWithAI>>
     let reviewMode: 'ai_auto' | 'manual' = 'manual'
     let manualReason = ''
     try {
-      aiResult = await reviewIncomeWithAI(incomeUploadFile, incomeUploadTier)
+      aiResult = await reviewIncomeWithAI(file, tier)
       if (aiResult.passed) {
         reviewMode = 'ai_auto'
       } else {
         manualReason = resolveManualReviewReason(aiResult.reason)
-        setIncomeSubmitMsg(manualReason)
       }
     } catch (err) {
       console.error('[EditProfile] reviewIncomeWithAI failed:', err)
@@ -4218,25 +4243,44 @@ function EditProfileScreen({
         reason,
       }
       manualReason = reason
-      setIncomeSubmitMsg(reason)
     }
 
-    const res = await uploadProofDoc(userId, incomeUploadFile)
-    if (res.ok) {
-      await submitIncomeVerification(userId, incomeUploadTier, 'payslip', res.path, aiResult, reviewMode, manualReason)
-      setIncomeUploadFile(null)
-      setIncomeUploadTier(null)
-      if (reviewMode === 'ai_auto') {
-        incomeAiFinalizePendingRef.current = true
-        setIncomeReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
-        setIncomeSubmitMsg(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
-      }
-    } else {
-      incomeAiFinalizePendingRef.current = false
-      setIncomeStatus(null)
-      setIncomeReviewCountdown(0)
+    const res = await uploadProofDoc(userId, file)
+    if (!res.ok) {
+      await revertIncomeWaitState()
       setIncomeSubmitMsg(`文件上傳失敗：${res.error ?? '請稍後再試'}`)
+      setUploadingIncome(false)
+      return
     }
+
+    const submitResult = await submitIncomeVerification(
+      userId,
+      tier,
+      'payslip',
+      res.path,
+      aiResult,
+      reviewMode,
+      manualReason || undefined,
+    )
+    if (!submitResult.ok) {
+      await revertIncomeWaitState()
+      setIncomeSubmitMsg(submitResult.error ?? '送審失敗，請稍後再試。')
+      setUploadingIncome(false)
+      return
+    }
+
+    setIncomeUploadFile(null)
+    setIncomeUploadTier(null)
+
+    if (reviewMode !== 'ai_auto') {
+      incomeAiFinalizePendingRef.current = false
+      setIncomeReviewCountdown(0)
+      setIncomeWaitOverlay(false)
+      setIncomeSubmitMsg(
+        manualReason || `已送審，若 AI 無法確認將轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
+      )
+    }
+
     setUploadingIncome(false)
   }
 
@@ -4329,7 +4373,9 @@ function EditProfileScreen({
 
   const uploadedPhotoCount = photos.length
 
-  return createPortal(
+  return (
+    <>
+    {createPortal(
     <motion.div
       className="fixed inset-0 z-[100] bg-[#fafafa] flex flex-col"
       initial={{ x: '100%' }}
@@ -4707,6 +4753,29 @@ function EditProfileScreen({
       </div>
     </motion.div>,
     document.body,
+    )}
+    {incomeWaitOverlay
+      ? createPortal(
+          <div className="fixed inset-0 z-[200] bg-[#fafafa]/95 backdrop-blur-sm flex flex-col items-center justify-center px-6 pt-safe pb-safe">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+              className="mb-5"
+            >
+              <Cpu className="w-10 h-10 text-slate-400" />
+            </motion.div>
+            <p className="text-lg font-bold text-slate-900 mb-2">收入認證審核中</p>
+            {incomeReviewCountdown > 0 && (
+              <p className="text-5xl font-black text-slate-900 tabular-nums mb-3">{incomeReviewCountdown}</p>
+            )}
+            <p className="text-sm text-slate-500 text-center leading-relaxed max-w-[280px]">
+              {incomeWaitMessage || `AI 審核時間為 ${AI_AUTO_REVIEW_UI_SECONDS} 秒；完成後會回到編輯頁。`}
+            </p>
+          </div>,
+          document.body,
+        )
+      : null}
+    </>
   )
 }
 

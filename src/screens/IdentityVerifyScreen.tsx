@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import {
   uploadProofDoc, submitVerificationDoc,
   submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
-  getProfile, finalizeDueAiReviews, resolvePhotoUrls,
+  getProfile, getIncomeVerification, finalizeDueAiReviews, resolvePhotoUrls,
   type AiResult,
 } from '@/lib/db'
 import { parseCompany, resolveEmploymentCompany, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
@@ -164,6 +164,8 @@ export default function IdentityVerifyScreen({
   const [employmentManualWait, setEmploymentManualWait] = useState(false)
   /** employmentManualWait overlay 動態訊息 */
   const [employmentWaitMessage, setEmploymentWaitMessage] = useState('職業驗證審核中')
+  const [incomeApprovalWait, setIncomeApprovalWait] = useState(false)
+  const [incomeApprovalWaitMessage, setIncomeApprovalWaitMessage] = useState('等待收入認證審核…')
 
   /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
   const employmentSubmittedRef = useRef(false)
@@ -317,6 +319,22 @@ export default function IdentityVerifyScreen({
       if (p?.verification_status === 'rejected') {
         employmentSubmittedRef.current = false
         return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
+      }
+      await new Promise((r) => setTimeout(r, 800))
+    }
+  }
+
+  const waitForIncomeApproval = async (
+    setPhase?: (msg: string) => void,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!userId) return { ok: false, error: '請先登入。' }
+    setPhase?.('等待收入認證通過…')
+    while (true) {
+      await finalizeDueAiReviews()
+      const row = await getIncomeVerification(userId)
+      if (row?.status === 'approved') return { ok: true }
+      if (row?.status === 'rejected') {
+        return { ok: false, error: '收入認證未通過，請重新上傳文件。' }
       }
       await new Promise((r) => setTimeout(r, 800))
     }
@@ -812,6 +830,16 @@ export default function IdentityVerifyScreen({
         if (!incomeSubmit.ok) {
           setAiStatus('fail')
           setAiMessage(incomeSubmit.error ?? '收入認證送審失敗，請稍後再試。')
+          return
+        }
+
+        setIncomeApprovalWait(true)
+        setIncomeApprovalWaitMessage('等待收入認證審核…')
+        const incomeApproved = await waitForIncomeApproval((msg) => setIncomeApprovalWaitMessage(msg))
+        setIncomeApprovalWait(false)
+        if (!incomeApproved.ok) {
+          setAiStatus('fail')
+          setAiMessage(incomeApproved.error ?? '收入認證未通過，請重新上傳。')
           return
         }
       }
@@ -1314,7 +1342,7 @@ export default function IdentityVerifyScreen({
               setStep(step + 1)
             }
           }}
-          disabled={submitting || !canAdvance || employmentManualWait}
+          disabled={submitting || !canAdvance || employmentManualWait || incomeApprovalWait}
           className={cn(
             'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
             canAdvance && !submitting
@@ -1357,6 +1385,32 @@ export default function IdentityVerifyScreen({
               <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
               <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
                 審核完成後會自動進入下一步；若需人工複核，可能需要超過 12 小時。
+              </p>
+            </div>
+            <VerifyWaitActions
+              onEditProfile={onEditProfile}
+              onEditQuestionnaire={onEditQuestionnaire}
+              onSignOut={onSignOut}
+              className="mx-auto pb-2"
+            />
+          </div>,
+          document.body,
+        )
+      : null}
+    {incomeApprovalWait
+      ? createPortal(
+          <div className="fixed inset-0 z-[200] bg-[#fafafa] flex flex-col px-6 pt-safe pb-safe">
+            <div className="flex-1 flex flex-col items-center justify-center text-center">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                className="mb-5"
+              >
+                <Cpu className="w-10 h-10 text-slate-400" />
+              </motion.div>
+              <p className="text-lg font-bold text-slate-900 mb-2">{incomeApprovalWaitMessage}</p>
+              <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
+                收入認證通過後會自動完成註冊；若需人工複核，可能需要超過 12 小時。
               </p>
             </div>
             <VerifyWaitActions
