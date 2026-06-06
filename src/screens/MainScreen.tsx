@@ -75,7 +75,7 @@ import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSl
 import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 import { uuidToGradients } from '@/lib/profileGradients'
 import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
-import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
+import { AI_AUTO_REVIEW_UI_SECONDS, INCOME_WAIT_OVERLAY_MAX_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
@@ -4038,45 +4038,59 @@ function EditProfileScreen({
   /** 送出收入認證後全螢幕等待（與公司認證 submitted 相同體驗） */
   const [incomeWaitOverlay, setIncomeWaitOverlay] = useState(false)
   const [incomeWaitMessage, setIncomeWaitMessage] = useState('')
-  const incomeAiFinalizePendingRef = useRef(false)
   const incomeDocRef = useRef<HTMLInputElement>(null)
   const canSubmitIncomeVerification =
     profile.gender === 'female' || profile.verification_status === 'approved'
 
-  useEffect(() => {
-    if (incomeReviewCountdown <= 0) return
-    const timer = window.setTimeout(() => setIncomeReviewCountdown((value) => Math.max(0, value - 1)), 1000)
-    return () => window.clearTimeout(timer)
-  }, [incomeReviewCountdown])
+  const finishIncomeWaitOverlay = async (
+    outcome: 'approved' | 'rejected' | 'pending',
+    manualReasonText?: string,
+  ) => {
+    setIncomeReviewCountdown(0)
+    setIncomeWaitOverlay(false)
+    await finalizeDueAiReviews()
+    const latestProfile = await getProfile(userId)
+    const row = await getIncomeVerification(userId)
+    if (row && typeof row === 'object' && 'status' in row && 'claimed_income_tier' in row) {
+      const r = row as { status: 'pending' | 'approved' | 'rejected'; claimed_income_tier: IncomeTier | null }
+      setIncomeStatus({ status: r.status, claimed: r.claimed_income_tier })
+    }
+    if (latestProfile) {
+      onSaved(latestProfile)
+    }
+    if (outcome === 'approved') {
+      setIncomeSubmitMsg('AI 審核已通過，收入認證完成。')
+    } else if (outcome === 'rejected') {
+      setIncomeSubmitMsg('收入認證未通過，請重新上傳更清晰的文件。')
+    } else {
+      setIncomeSubmitMsg(
+        manualReasonText || `已送審，若 AI 無法確認將轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
+      )
+    }
+  }
 
-  useEffect(() => {
-    if (incomeReviewCountdown > 0) return
-    if (!incomeAiFinalizePendingRef.current) return
-    incomeAiFinalizePendingRef.current = false
-    let cancelled = false
-    ;(async () => {
+  const waitForIncomeOverlayResult = async (): Promise<'approved' | 'rejected' | 'pending'> => {
+    const deadline = Date.now() + INCOME_WAIT_OVERLAY_MAX_SECONDS * 1000
+    setIncomeReviewCountdown(INCOME_WAIT_OVERLAY_MAX_SECONDS)
+    setIncomeWaitMessage('等待審核結果…')
+
+    while (Date.now() < deadline) {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      setIncomeReviewCountdown(remaining)
+
       await finalizeDueAiReviews()
-      const latestProfile = await getProfile(userId)
       const row = await getIncomeVerification(userId)
-      if (cancelled) return
-      if (row && typeof row === 'object' && 'status' in row && 'claimed_income_tier' in row) {
-        const r = row as { status: 'pending' | 'approved' | 'rejected'; claimed_income_tier: IncomeTier | null }
-        setIncomeStatus({ status: r.status, claimed: r.claimed_income_tier })
+      if (row && typeof row === 'object' && 'status' in row) {
+        const status = (row as { status: string }).status
+        if (status === 'approved') return 'approved'
+        if (status === 'rejected') return 'rejected'
       }
-      setIncomeWaitOverlay(false)
-      if (latestProfile) {
-        onSaved(latestProfile)
-        if (latestProfile.income_tier) {
-          setIncomeSubmitMsg('AI 審核已通過，收入認證完成。')
-        } else {
-          setIncomeSubmitMsg((prev) =>
-            prev.trim() !== '' ? prev : '若 AI 無法確認將轉人工審核，人工審核時間可能大於 12 小時。',
-          )
-        }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [incomeReviewCountdown, userId, onSaved])
+
+      await new Promise((r) => setTimeout(r, 800))
+    }
+
+    return 'pending'
+  }
 
   const fileToBase64 = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -4175,7 +4189,6 @@ function EditProfileScreen({
   }
 
   const revertIncomeWaitState = async () => {
-    incomeAiFinalizePendingRef.current = false
     setIncomeReviewCountdown(0)
     setIncomeWaitOverlay(false)
     const row = await getIncomeVerification(userId)
@@ -4212,16 +4225,11 @@ function EditProfileScreen({
     const file = incomeUploadFile
     const isImage = file.type.startsWith('image/')
 
-    /** 與公司認證相同：先軟切到等待頁，背景再跑 AI／上傳 */
-    incomeAiFinalizePendingRef.current = false
+    /** 先切到等待頁；送審完成後再開始最長 60 秒輪詢，核准則提早返回 */
     setIncomeStatus({ status: 'pending', claimed: tier })
     setIncomeReviewCountdown(0)
     setIncomeWaitOverlay(true)
-    setIncomeWaitMessage(isImage ? `AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒` : '正在上傳並送審⋯')
-    if (isImage) {
-      incomeAiFinalizePendingRef.current = true
-      setIncomeReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
-    }
+    setIncomeWaitMessage(isImage ? 'AI 正在辨識文件…' : '正在上傳並送審⋯')
 
     let aiResult: Awaited<ReturnType<typeof reviewIncomeWithAI>>
     let reviewMode: 'ai_auto' | 'manual' = 'manual'
@@ -4273,13 +4281,11 @@ function EditProfileScreen({
     setIncomeUploadFile(null)
     setIncomeUploadTier(null)
 
-    if (reviewMode !== 'ai_auto') {
-      incomeAiFinalizePendingRef.current = false
-      setIncomeReviewCountdown(0)
-      setIncomeWaitOverlay(false)
-      setIncomeSubmitMsg(
-        manualReason || `已送審，若 AI 無法確認將轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
-      )
+    if (reviewMode === 'ai_auto') {
+      const outcome = await waitForIncomeOverlayResult()
+      await finishIncomeWaitOverlay(outcome)
+    } else {
+      await finishIncomeWaitOverlay('pending', manualReason || undefined)
     }
 
     setUploadingIncome(false)
@@ -4607,7 +4613,7 @@ function EditProfileScreen({
                 收入認證審核中
               </p>
               <p className="text-xs text-amber-700/70 mt-1 leading-relaxed">
-                你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。{incomeReviewCountdown > 0 ? `AI 審核倒數 ${incomeReviewCountdown} 秒。` : `AI 審核時間為 ${AI_AUTO_REVIEW_UI_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`}
+                你申請的 {incomeStatus.claimed ? INCOME_TIER_META[incomeStatus.claimed].label : '收入'} 正在審核。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
               </p>
             </div>
           ) : (
@@ -4629,7 +4635,7 @@ function EditProfileScreen({
                   上傳收入證明文件
                 </p>
                 <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">
-                  可上傳薪資單、扣繳憑單、銀行對帳單等。AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒；送出後會顯示倒數。若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
+                  可上傳薪資單、扣繳憑單、銀行對帳單等。送出後會顯示等待頁（最多 {INCOME_WAIT_OVERLAY_MAX_SECONDS} 秒），核准後自動返回；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。
                 </p>
 
                 {/* Tier picker */}
@@ -4684,7 +4690,7 @@ function EditProfileScreen({
                     <>
                       <Upload className="w-5 h-5 text-slate-300" />
                       <p className="text-xs text-slate-400 font-medium">點擊上傳照片或 PDF</p>
-                      <p className="text-[10px] text-slate-300">AI 審核時間為 {AI_AUTO_REVIEW_UI_SECONDS} 秒，送出後倒數</p>
+                      <p className="text-[10px] text-slate-300">送出後最多等待 {INCOME_WAIT_OVERLAY_MAX_SECONDS} 秒</p>
                     </>
                   )}
                 </button>
@@ -4770,7 +4776,7 @@ function EditProfileScreen({
               <p className="text-5xl font-black text-slate-900 tabular-nums mb-3">{incomeReviewCountdown}</p>
             )}
             <p className="text-sm text-slate-500 text-center leading-relaxed max-w-[280px]">
-              {incomeWaitMessage || `AI 審核時間為 ${AI_AUTO_REVIEW_UI_SECONDS} 秒；完成後會回到編輯頁。`}
+              {incomeWaitMessage || `最多等待 ${INCOME_WAIT_OVERLAY_MAX_SECONDS} 秒；核准後會自動回到編輯頁。`}
             </p>
           </div>,
           document.body,
