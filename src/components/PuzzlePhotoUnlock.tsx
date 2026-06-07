@@ -200,9 +200,12 @@ export function PuzzlePhotoUnlock({
   const globalSet = new Set(progress.globalUnlockedTiles)
   const unlocked = new Set(progress.unlockedTiles)
   const globalKey = progress.globalUnlockedTiles.join(',')
+  const manualKey = manualUnlockedTiles.join(',')
   const previousUnlockedKeyRef = useRef<string | null>(null)
+  const previousManualKeyRef = useRef<string | null>(null)
   const [recentlyUnlockedTiles, setRecentlyUnlockedTiles] = useState<number[]>([])
   const [unlockBurstCount, setUnlockBurstCount] = useState(0)
+  const [unlockBurstKey, setUnlockBurstKey] = useState('')
   const [showCompletionBurst, setShowCompletionBurst] = useState(false)
   const recentlyUnlocked = new Set(recentlyUnlockedTiles)
   const puzzleUrls = collectConversationPhotoUrls(conversation)
@@ -224,27 +227,61 @@ export function PuzzlePhotoUnlock({
   puzzleSlotCompleteCbRef.current = onPuzzleSlotComplete
 
   useEffect(() => {
-    const previousKey = previousUnlockedKeyRef.current
+    const previousGlobalKey = previousUnlockedKeyRef.current
+    const previousManualKey = previousManualKeyRef.current
     previousUnlockedKeyRef.current = globalKey
-    if (previousKey === null) return
+    previousManualKeyRef.current = manualKey
+    if (previousGlobalKey === null) return
 
-    const prevGlobals = previousKey
+    let addedGlobals: number[] = []
+    if (previousManualKey !== null) {
+      const prevManual = new Set(
+        previousManualKey
+          .split(',')
+          .filter(Boolean)
+          .map((tile) => Number(tile)),
+      )
+      const manualAdded = manualUnlockedTiles.filter((g) => !prevManual.has(g))
+      if (manualAdded.length > 0) {
+        // 道具一次解多格時，global 合併會因聊天推導重算而少算；以 manual 增量為準
+        addedGlobals = manualAdded
+      }
+    }
+    if (addedGlobals.length === 0) {
+      const prevGlobals = previousGlobalKey
+        .split(',')
+        .filter(Boolean)
+        .map((tile) => Number(tile))
+      const prevSet = new Set(prevGlobals)
+      addedGlobals = progress.globalUnlockedTiles.filter((g) => !prevSet.has(g))
+    }
+    // 初次從 DB hydrate manual 格位時略過動畫（非使用者剛解鎖）
+    if (
+      addedGlobals.length > 0 &&
+      previousManualKey === '' &&
+      manualUnlockedTiles.length > 0 &&
+      manualUnlockedTiles.every((g) => addedGlobals.includes(g))
+    ) {
+      return
+    }
+    if (addedGlobals.length === 0) return
+
+    const prevGlobalsForComplete = previousGlobalKey
       .split(',')
       .filter(Boolean)
       .map((tile) => Number(tile))
-    const prevSet = new Set(prevGlobals)
-    const addedGlobals = progress.globalUnlockedTiles.filter((g) => !prevSet.has(g))
-    if (addedGlobals.length === 0) return
+    const prevSetForComplete = new Set(prevGlobalsForComplete)
 
     const addedLocals = addedGlobals
       .filter((g) => Math.floor(g / 16) === progress.activePhotoIndex)
       .map((g) => g % 16)
     setRecentlyUnlockedTiles(addedLocals.length > 0 ? addedLocals : [])
     setUnlockBurstCount(addedGlobals.length)
+    setUnlockBurstKey(`${addedGlobals.join('-')}-${Date.now()}`)
     const nowSet = new Set(progress.globalUnlockedTiles)
     let anyComplete = false
     for (let s = 0; s < progress.photoSlotCount; s += 1) {
-      if (puzzleCountPerSlot(prevSet, s) < 16 && puzzleCountPerSlot(nowSet, s) >= 16) {
+      if (puzzleCountPerSlot(prevSetForComplete, s) < 16 && puzzleCountPerSlot(nowSet, s) >= 16) {
         anyComplete = true
         puzzleSlotCompleteCbRef.current?.(s)
       }
@@ -255,10 +292,11 @@ export function PuzzlePhotoUnlock({
     const timer = window.setTimeout(() => {
       setRecentlyUnlockedTiles([])
       setUnlockBurstCount(0)
+      setUnlockBurstKey('')
       setShowCompletionBurst(false)
     }, 1400)
     return () => window.clearTimeout(timer)
-  }, [globalKey])
+  }, [globalKey, manualKey, manualUnlockedTiles, progress.globalUnlockedTiles, progress.activePhotoIndex, progress.photoSlotCount])
 
   if (isKeyboardOpen) {
     return (
@@ -376,7 +414,7 @@ export function PuzzlePhotoUnlock({
           <AnimatePresence mode="popLayout">
             {unlockBurstCount > 0 && (
               <motion.div
-                key={`kb-burst-${unlockBurstCount}-${globalKey}`}
+                key={`kb-burst-${unlockBurstKey || unlockBurstCount}`}
                 layout
                 initial={{ opacity: 0, scale: 0.45, rotate: -10 }}
                 animate={{ opacity: 1, scale: 1, rotate: 0 }}
@@ -498,7 +536,7 @@ export function PuzzlePhotoUnlock({
             <AnimatePresence>
               {unlockBurstCount > 0 && (
                 <motion.div
-                  key={unlockBurstCount}
+                  key={unlockBurstKey || `burst-${unlockBurstCount}`}
                   className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[12px] font-black text-sky-600 shadow-lg shadow-sky-900/20"
                   initial={{ opacity: 0, scale: 0.72, y: 8 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -562,13 +600,14 @@ export function PuzzlePhotoUnlock({
           </p>
           {progress.boostActive && (
             <div className="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50/90 px-2.5 py-2 shadow-sm ring-1 ring-amber-100/80">
-              <p className="text-[9px] font-semibold leading-tight text-amber-800/90">
+              <p className="text-[11px] font-black leading-tight text-amber-900">
                 配對完成後 30 分鐘內
               </p>
-              <p className="mt-1 text-[10px] font-black leading-tight text-amber-700">
-                聊天每 3 則解 2 格 · 道具 1 次解 2 片
-              </p>
-              <p className="mt-0.5 text-[9px] font-semibold tabular-nums text-amber-700/90">
+              <div className="mt-1 space-y-0.5 text-[8px] font-semibold leading-snug text-amber-700/95">
+                <p>聊天每 3 則解 2 格</p>
+                <p>道具 1 次解 2 片</p>
+              </div>
+              <p className="mt-1 text-[9px] font-semibold tabular-nums text-amber-700/90">
                 剩餘 {formatPuzzleBoostCountdown(progress.boostRemainingMs)}
               </p>
             </div>
