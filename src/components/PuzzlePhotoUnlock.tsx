@@ -265,9 +265,16 @@ export function PuzzlePhotoUnlock({
 
   useEffect(() => {
     setShowCompletionBurst(false)
+    setRecentlyUnlockedTiles([])
+    setUnlockBurstCount(0)
+    setUnlockBurstKey('')
     if (completionBurstTimerRef.current != null) {
       window.clearTimeout(completionBurstTimerRef.current)
       completionBurstTimerRef.current = null
+    }
+    if (unlockAnimTimerRef.current != null) {
+      window.clearTimeout(unlockAnimTimerRef.current)
+      unlockAnimTimerRef.current = null
     }
   }, [progress.activePhotoIndex])
 
@@ -279,7 +286,7 @@ export function PuzzlePhotoUnlock({
     if (previousGlobalKey === null) return
 
     let addedGlobals: number[] = []
-    if (previousManualKey !== null) {
+    if (previousManualKey !== null && previousManualKey !== '') {
       const prevManual = new Set(
         previousManualKey
           .split(',')
@@ -350,13 +357,7 @@ export function PuzzlePhotoUnlock({
       setUnlockBurstKey('')
       unlockAnimTimerRef.current = null
     }, 1400)
-    return () => {
-      if (unlockAnimTimerRef.current != null) {
-        window.clearTimeout(unlockAnimTimerRef.current)
-        unlockAnimTimerRef.current = null
-      }
-    }
-  }, [globalKey, manualKey, manualUnlockedTiles, progress.globalUnlockedTiles, progress.activePhotoIndex, progress.photoSlotCount])
+  }, [globalKey, manualKey, progress.activePhotoIndex, progress.photoSlotCount])
 
   if (isKeyboardOpen) {
     return (
