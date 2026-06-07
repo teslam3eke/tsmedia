@@ -1339,6 +1339,7 @@ function DiscoverTab({
   discoverDeckDayKey,
   discoverDeckRolloverTick,
   foregroundReloadNonce,
+  incomingSuperLikeDeckBump,
   currentUserGender,
   preferredRegion,
   contentScrollRef,
@@ -1356,6 +1357,8 @@ function DiscoverTab({
   discoverDeckRolloverTick: number
   /** 回前景喚醒 auth 後遞增；搭配 deckRefresh bump 重抓探索並重設卡片進度 */
   foregroundReloadNonce: number
+  /** 收到 super_like_received 通知後遞增，探索 tab 重抓 deck（6→7 超喜追加） */
+  incomingSuperLikeDeckBump: number
   currentUserGender: 'male' | 'female'
   preferredRegion: import('@/lib/types').Region | null
   contentScrollRef?: React.RefObject<HTMLDivElement | null>
@@ -1516,6 +1519,11 @@ function DiscoverTab({
       }
     }
   }, [foregroundReloadNonce])
+
+  useEffect(() => {
+    if (incomingSuperLikeDeckBump === 0) return
+    setDeckRefresh((r) => r + 1)
+  }, [incomingSuperLikeDeckBump])
 
   useEffect(() => {
     if (visibleProfiles.length === 0) return
@@ -6146,6 +6154,7 @@ export default function MainScreen({
   const [photoGateToast, setPhotoGateToast] = useState(false)
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
+  const [incomingSuperLikeDeckBump, setIncomingSuperLikeDeckBump] = useState(0)
   /** `removeAllChannels` 後延遲 500ms 廣播：重綁 matches／聊天 Realtime postgres_changes（見 `supabase.ts`）。 */
   const [physicalChannelResubscribeNonce, setPhysicalChannelResubscribeNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
@@ -6350,6 +6359,9 @@ export default function MainScreen({
           continue
         }
         appNotifQueuedOnceIdsRef.current.add(n.id)
+        if (n.kind === 'super_like_received') {
+          setIncomingSuperLikeDeckBump((b) => b + 1)
+        }
         if (APP_NOTIF_POPUP_KINDS.has(n.kind)) {
           appNotifPopupQueueRef.current.push(n)
         }
@@ -7034,6 +7046,7 @@ export default function MainScreen({
         discoverDeckDayKey={discoverDeckDayKey}
         discoverDeckRolloverTick={discoverDeckRolloverTick}
         foregroundReloadNonce={foregroundReloadNonce}
+        incomingSuperLikeDeckBump={incomingSuperLikeDeckBump}
         currentUserGender={currentUserGender}
         preferredRegion={currentUserPreferredRegion}
         contentScrollRef={contentScrollRef}
