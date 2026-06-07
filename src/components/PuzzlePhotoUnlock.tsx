@@ -158,6 +158,34 @@ export function getPuzzleProgress(
   }
 }
 
+/** 與聊天室拼圖進度一致：回傳已解完 16 格的相片索引（0-based）。 */
+export function listCompletedPuzzlePhotoSlots(
+  messages: PuzzleChatMessage[],
+  manualUnlockedTiles: number[] = [],
+  matchedAt: number | undefined,
+  puzzleSeedKey: string,
+  photoSlotCount: number,
+  recentMatchBoostEnabled: boolean,
+  now = Date.now(),
+): number[] {
+  const progress = getPuzzleProgress(
+    messages,
+    manualUnlockedTiles,
+    matchedAt,
+    now,
+    puzzleSeedKey,
+    photoSlotCount,
+    false,
+    recentMatchBoostEnabled,
+  )
+  const globalSet = new Set(progress.globalUnlockedTiles)
+  const completed: number[] = []
+  for (let s = 0; s < progress.photoSlotCount; s += 1) {
+    if (puzzleSlotIsComplete(globalSet, s)) completed.push(s)
+  }
+  return completed
+}
+
 export function PuzzlePhotoUnlock({
   conversation,
   messages,
@@ -203,6 +231,8 @@ export function PuzzlePhotoUnlock({
   const manualKey = manualUnlockedTiles.join(',')
   const previousUnlockedKeyRef = useRef<string | null>(null)
   const previousManualKeyRef = useRef<string | null>(null)
+  const unlockAnimTimerRef = useRef<number | null>(null)
+  const completionBurstTimerRef = useRef<number | null>(null)
   const [recentlyUnlockedTiles, setRecentlyUnlockedTiles] = useState<number[]>([])
   const [unlockBurstCount, setUnlockBurstCount] = useState(0)
   const [unlockBurstKey, setUnlockBurstKey] = useState('')
@@ -225,6 +255,21 @@ export function PuzzlePhotoUnlock({
 
   const puzzleSlotCompleteCbRef = useRef(onPuzzleSlotComplete)
   puzzleSlotCompleteCbRef.current = onPuzzleSlotComplete
+
+  useEffect(() => {
+    return () => {
+      if (unlockAnimTimerRef.current != null) window.clearTimeout(unlockAnimTimerRef.current)
+      if (completionBurstTimerRef.current != null) window.clearTimeout(completionBurstTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    setShowCompletionBurst(false)
+    if (completionBurstTimerRef.current != null) {
+      window.clearTimeout(completionBurstTimerRef.current)
+      completionBurstTimerRef.current = null
+    }
+  }, [progress.activePhotoIndex])
 
   useEffect(() => {
     const previousGlobalKey = previousUnlockedKeyRef.current
@@ -288,14 +333,29 @@ export function PuzzlePhotoUnlock({
     }
     if (anyComplete) {
       setShowCompletionBurst(true)
+      if (completionBurstTimerRef.current != null) {
+        window.clearTimeout(completionBurstTimerRef.current)
+      }
+      completionBurstTimerRef.current = window.setTimeout(() => {
+        setShowCompletionBurst(false)
+        completionBurstTimerRef.current = null
+      }, 1400)
     }
-    const timer = window.setTimeout(() => {
+    if (unlockAnimTimerRef.current != null) {
+      window.clearTimeout(unlockAnimTimerRef.current)
+    }
+    unlockAnimTimerRef.current = window.setTimeout(() => {
       setRecentlyUnlockedTiles([])
       setUnlockBurstCount(0)
       setUnlockBurstKey('')
-      setShowCompletionBurst(false)
+      unlockAnimTimerRef.current = null
     }, 1400)
-    return () => window.clearTimeout(timer)
+    return () => {
+      if (unlockAnimTimerRef.current != null) {
+        window.clearTimeout(unlockAnimTimerRef.current)
+        unlockAnimTimerRef.current = null
+      }
+    }
   }, [globalKey, manualKey, manualUnlockedTiles, progress.globalUnlockedTiles, progress.activePhotoIndex, progress.photoSlotCount])
 
   if (isKeyboardOpen) {

@@ -93,6 +93,7 @@ import {
   PuzzlePhotoUnlock,
   collectConversationPhotoUrls,
   getPuzzleProgress,
+  listCompletedPuzzlePhotoSlots,
   puzzleRecentMatchBoostEnabled,
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
@@ -2638,6 +2639,10 @@ interface PersonSummary {
   peerUserId?: string | null
   /** 已登入：matches 列 id，供開啟聊天室 */
   matchId?: string | null
+  /** 拼圖進度（與聊天室一致） */
+  matchedAt?: number
+  instantCarrySessionId?: string | null
+  instantPuzzleMatchedAtMs?: number
 }
 
 function MatchesTab({
@@ -2711,6 +2716,9 @@ function MatchesTab({
                   subtitle: conv.subtitle,
                   peerUserId: conv.peerUserId ?? null,
                   matchId: chatId,
+                  matchedAt: conv.matchedAt,
+                  instantCarrySessionId: conv.instantCarrySessionId ?? null,
+                  instantPuzzleMatchedAtMs: conv.instantPuzzleMatchedAtMs,
                 })
               return (
                 <motion.div
@@ -2855,12 +2863,14 @@ function MatchesTab({
 
 function PersonDetailView({
   person,
+  currentUserId,
   onClose,
   onStartChat,
   onMatchEnded,
   clearedPhotoSlots = [],
 }: {
   person: PersonSummary
+  currentUserId?: string | null
   onClose: () => void
   onStartChat?: (id: number | string) => void
   /** 解除配對成功後（刷新列表、關閉聊天等） */
@@ -2869,6 +2879,7 @@ function PersonDetailView({
   clearedPhotoSlots?: number[]
 }) {
   const [liveProfile, setLiveProfile] = useState<Profile | null>(null)
+  const [liveClearedPhotoSlots, setLiveClearedPhotoSlots] = useState<number[]>([])
   const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [endMatchOpen, setEndMatchOpen] = useState(false)
@@ -2894,6 +2905,57 @@ function PersonDetailView({
   const profile = person.peerUserId ? liveProfile : findFullProfile(person.id)
   const liveMatchId = typeof person.matchId === 'string' && person.matchId.trim() ? person.matchId.trim() : null
   const displayName = profile ? getPublicName(profile) : person.name
+  const profilePhotoCount = profile
+    ? Math.min(PUZZLE_MAX_PHOTO_SLOTS, Math.max(1, collectProfilePhotoUrls(profile).length))
+    : PUZZLE_MAX_PHOTO_SLOTS
+
+  useEffect(() => {
+    if (!liveMatchId || !currentUserId || !person.peerUserId) {
+      setLiveClearedPhotoSlots([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const [rows, unlockState] = await Promise.all([
+        getMatchMessages(liveMatchId),
+        getPhotoUnlockState(liveMatchId),
+      ])
+      if (cancelled || rows === null) return
+      const chatMessages = rows.map((r) => formatChatMessageFromRow(r, currentUserId))
+      const manual = Array.isArray(unlockState?.unlocked_tiles) ? unlockState.unlocked_tiles : []
+      const puzzleSeedKey = person.instantCarrySessionId
+        ? `instant:${String(person.instantCarrySessionId).trim().toLowerCase()}`
+        : liveMatchId
+      const matchedAtForPuzzle = person.instantPuzzleMatchedAtMs ?? person.matchedAt
+      const recentBoost = puzzleRecentMatchBoostEnabled({
+        id: liveMatchId,
+        instantCarrySessionId: person.instantCarrySessionId ?? null,
+      })
+      const completed = listCompletedPuzzlePhotoSlots(
+        chatMessages,
+        manual,
+        matchedAtForPuzzle,
+        puzzleSeedKey,
+        profilePhotoCount,
+        recentBoost,
+      )
+      if (!cancelled) setLiveClearedPhotoSlots(completed)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    liveMatchId,
+    currentUserId,
+    person.peerUserId,
+    person.matchedAt,
+    person.instantCarrySessionId,
+    person.instantPuzzleMatchedAtMs,
+    profilePhotoCount,
+  ])
+
+  const effectiveClearedPhotoSlots =
+    liveMatchId && currentUserId && person.peerUserId ? liveClearedPhotoSlots : clearedPhotoSlots
 
   return createPortal(
     <motion.div
@@ -2950,7 +3012,7 @@ function PersonDetailView({
                 gradientTo={profile.gradientTo}
                 variant="detail"
                 compatScore={profile.compatScore}
-                unblockedIndices={clearedPhotoSlots}
+                unblockedIndices={effectiveClearedPhotoSlots}
                 onReportClick={() => setReportTarget({
                   profileKey: profile ? profile.profileKey : `person:${person.id}`,
                   displayName: person.name,
@@ -7325,7 +7387,8 @@ export default function MainScreen({
           <PersonDetailView
             key={viewingPerson.peerUserId ?? String(viewingPerson.id)}
             person={viewingPerson}
-            clearedPhotoSlots={viewingPerson.peerUserId ? [] : (demoPuzzleClearedByProfile[viewingPerson.id] ?? [])}
+            currentUserId={user?.id ?? null}
+            clearedPhotoSlots={viewingPerson.matchId ? [] : (demoPuzzleClearedByProfile[viewingPerson.id] ?? [])}
             onClose={() => setViewingPerson(null)}
             onStartChat={startChatWith}
             onMatchEnded={handleMatchEnded}
