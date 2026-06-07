@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Flag, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
 import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import { profilePhotoCoverClassName } from '@/lib/profilePhotoDisplay'
 
 export function BlurredProfilePhotoSlideshow({
   profileKey,
@@ -133,7 +134,8 @@ export function BlurredProfilePhotoSlideshow({
                     : undefined
                 }
                 className={cn(
-                  'absolute inset-0 h-full w-full object-cover scale-[1.04] transition-opacity duration-200',
+                  profilePhotoCoverClassName(!clearSet.has(i)),
+                  'transition-opacity duration-200',
                   i === visibleIndex ? 'z-[1]' : 'z-0 pointer-events-none',
                   loaded && i === visibleIndex ? 'opacity-100' : 'opacity-0',
                 )}

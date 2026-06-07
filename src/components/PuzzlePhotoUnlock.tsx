@@ -6,6 +6,11 @@ import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
 import {
+  PROFILE_PHOTO_ASPECT_INNER_CLASS,
+  PROFILE_PHOTO_SVG_PRESERVE,
+  profilePhotoCoverClassName,
+} from '@/lib/profilePhotoDisplay'
+import {
   clampPuzzlePhotoSlots,
   computeChatUnlockedGlobalTiles,
   getRecentMatchBoostState,
@@ -508,8 +513,8 @@ export function PuzzlePhotoUnlock({
 
   return (
     <div className="bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
-      <div className="flex h-[238px] w-full items-stretch justify-center gap-1 sm:gap-1.5">
-        <div className="flex w-[76px] shrink-0 flex-col justify-center sm:w-[82px]">
+      <div className="flex w-full items-center justify-center gap-1 sm:gap-1.5">
+        <div className="flex w-[76px] shrink-0 flex-col justify-center self-stretch sm:w-[82px]">
           <button
             type="button"
             onClick={onSpendUnlock}
@@ -524,14 +529,21 @@ export function PuzzlePhotoUnlock({
             隨機解 1 片
           </button>
         </div>
-        <div className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]">
+        <div
+          className={cn(
+            PROFILE_PHOTO_ASPECT_BOX_CLASS,
+            'w-[150px] shrink-0 rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]',
+          )}
+          style={{ paddingBottom: '150%' }}
+        >
+          <div className={cn(PROFILE_PHOTO_ASPECT_INNER_CLASS, 'overflow-hidden rounded-3xl')}>
           <>
             {photoUrl ? (
               <>
                 <img
                   src={photoUrl}
                   alt={conversation.name}
-                  className="absolute inset-0 h-full w-full object-contain object-center blur-2xl opacity-45"
+                  className={cn(profilePhotoCoverClassName(true), 'blur-2xl opacity-45')}
                 />
                 <div className="absolute inset-0 bg-slate-950/20" />
               </>
@@ -543,13 +555,13 @@ export function PuzzlePhotoUnlock({
                 src={tileImageHref}
                 alt=""
                 aria-hidden
-                className="absolute inset-0 h-full w-full object-contain object-center"
-                initial={{ opacity: 0, scale: 1.08 }}
+                className={profilePhotoCoverClassName(false)}
+                initial={{ opacity: 0, scale: 1.04 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.55, ease: 'easeOut' }}
               />
             ) : (
-              <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
+              <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio={PROFILE_PHOTO_SVG_PRESERVE} aria-hidden>
                 <defs>
                   <filter id={`${puzzleSvgId}-blur`}>
                     <feGaussianBlur stdDeviation={PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD} />
@@ -572,7 +584,7 @@ export function PuzzlePhotoUnlock({
                           y="0"
                           width="400"
                           height="600"
-                          preserveAspectRatio="xMidYMid meet"
+                          preserveAspectRatio={PROFILE_PHOTO_SVG_PRESERVE}
                           opacity={isUnlocked ? 1 : 0.26}
                           filter={isUnlocked ? undefined : `url(#${puzzleSvgId}-blur)`}
                         />
@@ -636,6 +648,7 @@ export function PuzzlePhotoUnlock({
               )}
             </AnimatePresence>
           </>
+          </div>
         </div>
         <div className="flex min-w-0 flex-1 basis-0 max-w-[118px] flex-col justify-center gap-2.5 pl-0.5 sm:max-w-[124px]">
           <div className="space-y-1">
