@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   computeChatUnlockedGlobalTiles,
+  getRecentMatchBoostState,
+  pickBlurUnlockGlobalTiles,
   pickOnePuzzleTileLocal,
   pickPuzzleTilesLocalBatch,
   puzzleMulberry32,
   puzzleTilesAdjacent,
+  RECENT_MATCH_BOOST_MS,
 } from '@/lib/puzzleUnlockPick'
 
 describe('pickOnePuzzleTileLocal', () => {
@@ -62,6 +65,49 @@ describe('computeChatUnlockedGlobalTiles', () => {
     const next = pickOnePuzzleTileLocal(occupied, 5, rng)
     expect(next).not.toBeNull()
     expect(occupied.has(next!)).toBe(false)
+  })
+})
+
+describe('getRecentMatchBoostState', () => {
+  it('配對後 30 分鐘內 mult 為 2', () => {
+    const matchedAt = 1_700_000_000_000
+    const state = getRecentMatchBoostState(matchedAt, true, matchedAt + 5 * 60 * 1000)
+    expect(state.boostActive).toBe(true)
+    expect(state.mult).toBe(2)
+    expect(state.boostRemainingMs).toBe(RECENT_MATCH_BOOST_MS - 5 * 60 * 1000)
+  })
+
+  it('超過 30 分鐘或即時升格關閉時 mult 為 1', () => {
+    const matchedAt = 1_700_000_000_000
+    expect(getRecentMatchBoostState(matchedAt, true, matchedAt + RECENT_MATCH_BOOST_MS + 1).mult).toBe(1)
+    expect(getRecentMatchBoostState(matchedAt, false, matchedAt).mult).toBe(1)
+  })
+})
+
+describe('pickBlurUnlockGlobalTiles', () => {
+  it('boost 期間一次解 2 片且第二片不與第一片相鄰', () => {
+    const tiles = pickBlurUnlockGlobalTiles({
+      chatTilesOrdered: [],
+      manualUnlockedTiles: [],
+      activePhotoIndex: 0,
+      puzzleSeedKey: 'boost-blur',
+      matchedAt: 1_700_000_000_000,
+      boostActive: true,
+    })
+    expect(tiles).toHaveLength(2)
+    expect(puzzleTilesAdjacent(tiles[0]! % 16, tiles[1]! % 16)).toBe(false)
+  })
+
+  it('非 boost 期間只解 1 片', () => {
+    const tiles = pickBlurUnlockGlobalTiles({
+      chatTilesOrdered: [],
+      manualUnlockedTiles: [],
+      activePhotoIndex: 0,
+      puzzleSeedKey: 'normal-blur',
+      matchedAt: 1_700_000_000_000,
+      boostActive: false,
+    })
+    expect(tiles).toHaveLength(1)
   })
 })
 

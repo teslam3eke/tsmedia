@@ -8,8 +8,10 @@ import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlu
 import {
   clampPuzzlePhotoSlots,
   computeChatUnlockedGlobalTiles,
+  getRecentMatchBoostState,
   puzzleCountPerSlot,
   puzzleSlotIsComplete,
+  RECENT_MATCH_BOOST_MS,
 } from '@/lib/puzzleUnlockPick'
 
 export type PuzzleChatMessage = {
@@ -45,7 +47,7 @@ export function collectConversationPhotoUrls(c: Pick<PuzzleConversation, 'photoU
   return []
 }
 
-/** 即時房／即時升格配對：不配對後 30 分鐘解鎖加倍（僅前端顯示與進度推演；matchedAt 仍用於 puzzle seed）。 */
+/** 即時房／即時升格配對：不配對後 30 分鐘解鎖加倍（聊天＋道具；matchedAt 仍用於 puzzle seed）。 */
 export function puzzleRecentMatchBoostEnabled(
   c: Pick<PuzzleConversation, 'id' | 'instantCarrySessionId'>,
 ): boolean {
@@ -54,7 +56,7 @@ export function puzzleRecentMatchBoostEnabled(
   return true
 }
 
-const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
+export { RECENT_MATCH_BOOST_MS }
 
 
 /** 無對方照片 URL 時仍渲染 16 格（解鎖與右側計數一致）；勿用大號首字遮住拼圖 */
@@ -93,11 +95,12 @@ export function getPuzzleProgress(
 
   const meCount = messages.filter((message) => message.from === 'me').length
   const themCount = messages.filter((message) => message.from === 'them').length
-  const boostRemainingMs =
-    matchedAt && recentMatchBoostEnabled ? Math.max(0, RECENT_MATCH_BOOST_MS - (now - matchedAt)) : 0
-  const boostActive = boostRemainingMs > 0
+  const { boostActive, boostRemainingMs, mult } = getRecentMatchBoostState(
+    matchedAt,
+    recentMatchBoostEnabled,
+    now,
+  )
   const round = Math.floor(Math.min(meCount, themCount) / 3)
-  const mult = boostActive ? 2 : 1
   const chatUnlocks = round * mult
 
   let globalSorted: number[]
@@ -563,7 +566,10 @@ export function PuzzlePhotoUnlock({
                 配對完成後 30 分鐘內
               </p>
               <p className="mt-1 text-[10px] font-black leading-tight text-amber-700">
-                拼圖解鎖加倍剩餘 {formatPuzzleBoostCountdown(progress.boostRemainingMs)}
+                聊天每 3 則解 2 格 · 道具 1 次解 2 片
+              </p>
+              <p className="mt-0.5 text-[9px] font-semibold tabular-nums text-amber-700/90">
+                剩餘 {formatPuzzleBoostCountdown(progress.boostRemainingMs)}
               </p>
             </div>
           )}

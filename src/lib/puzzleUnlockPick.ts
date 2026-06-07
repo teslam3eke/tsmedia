@@ -1,5 +1,19 @@
 import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 
+/** 一般探索配對成功後 30 分鐘內：聊天解鎖與道具解鎖皆加倍（即時升格配對除外）。 */
+export const RECENT_MATCH_BOOST_MS = 30 * 60 * 1000
+
+export function getRecentMatchBoostState(
+  matchedAt: number | undefined,
+  recentMatchBoostEnabled: boolean,
+  now = Date.now(),
+): { boostActive: boolean; boostRemainingMs: number; mult: 1 | 2 } {
+  const boostRemainingMs =
+    matchedAt && recentMatchBoostEnabled ? Math.max(0, RECENT_MATCH_BOOST_MS - (now - matchedAt)) : 0
+  const boostActive = boostRemainingMs > 0
+  return { boostActive, boostRemainingMs, mult: boostActive ? 2 : 1 }
+}
+
 export function puzzleTileManhattan(a: number, b: number): number {
   const ra = Math.floor(a / 4)
   const ca = a % 4
@@ -189,6 +203,34 @@ export function pickNextBlurUnlockGlobalTile(params: {
     puzzleHashSeed(`${puzzleSeedKey}|blur|${matchedAt ?? 0}|${spendIndex}|${extraOccupiedGlobal?.size ?? 0}`),
   )
   return pickOnePuzzleTileGlobalInSlot(occupiedGlobal, slot, avoidLocal, rng)
+}
+
+/** 道具解鎖：boost 期間一次解 2 片（第二片不與第一片相鄰；仍只扣 1 次道具）。 */
+export function pickBlurUnlockGlobalTiles(params: {
+  chatTilesOrdered: number[]
+  manualUnlockedTiles: number[]
+  activePhotoIndex: number
+  puzzleSeedKey: string
+  matchedAt?: number
+  boostActive: boolean
+  extraOccupiedGlobal?: ReadonlySet<number>
+}): number[] {
+  const { boostActive, manualUnlockedTiles, extraOccupiedGlobal } = params
+  const spendBase = manualUnlockedTiles.length + (extraOccupiedGlobal?.size ?? 0)
+  const first = pickNextBlurUnlockGlobalTile({
+    ...params,
+    spendIndex: spendBase,
+  })
+  if (first == null) return []
+  if (!boostActive) return [first]
+
+  const second = pickNextBlurUnlockGlobalTile({
+    ...params,
+    manualUnlockedTiles: [...manualUnlockedTiles, first],
+    spendIndex: spendBase + 1,
+  })
+  if (second == null) return [first]
+  return [first, second]
 }
 
 /** 探索示意：依序解鎖 need 格（同一 slot）。 */

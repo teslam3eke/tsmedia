@@ -87,7 +87,7 @@ import {
 } from '@/lib/discoverDemoPhotoUrls'
 import {
   computeChatUnlockedGlobalTiles,
-  pickNextBlurUnlockGlobalTile,
+  pickBlurUnlockGlobalTiles,
 } from '@/lib/puzzleUnlockPick'
 import {
   PuzzlePhotoUnlock,
@@ -3601,38 +3601,54 @@ function ChatRoomView({
       matchedAt: matchedAtForPuzzle,
     })
     const rejectedTiles = new Set<number>()
-    let nextGlobal: number | null = null
     for (let attempt = 0; attempt < 16; attempt += 1) {
-      nextGlobal = pickNextBlurUnlockGlobalTile({
+      const picked = pickBlurUnlockGlobalTiles({
         chatTilesOrdered: chatTiles,
         manualUnlockedTiles,
         activePhotoIndex: progress.activePhotoIndex,
         puzzleSeedKey,
         matchedAt: matchedAtForPuzzle,
-        spendIndex: manualUnlockedTiles.length + attempt,
+        boostActive: progress.boostActive,
         extraOccupiedGlobal: rejectedTiles,
       })
-      if (nextGlobal == null) break
+      if (picked.length === 0) break
+      const [firstGlobal, secondGlobal] = picked
       if (!isLive || !conversation.matchId) break
       const prevLen = manualUnlockedTiles.length
-      const res = await spendBlurUnlockTile(conversation.matchId, nextGlobal)
+      const res = await spendBlurUnlockTile(
+        conversation.matchId,
+        firstGlobal,
+        secondGlobal ?? null,
+      )
       await refreshCredits()
       if (res.ok) {
-        setManualUnlockedTiles((tiles) => [...tiles, nextGlobal!])
-        if (manualUnlockedTiles.length + 1 > prevLen) {
+        const unlockedFromServer = Array.isArray(res.state?.unlocked_tiles)
+          ? res.state!.unlocked_tiles
+          : [...manualUnlockedTiles, ...picked]
+        setManualUnlockedTiles(unlockedFromServer)
+        if (unlockedFromServer.length > prevLen) {
           onBlurUnlockSpent?.()
         }
-        setSendWarning('')
+        setSendWarning(
+          progress.boostActive && picked.length >= 2
+            ? '已使用 1 次解除拼圖，隨機解鎖 2 片（配對後加倍）。'
+            : '已使用 1 次解除拼圖，隨機解鎖 1 片。',
+        )
         return
       }
-      if ((res.error ?? '').toLowerCase().includes('already unlocked')) {
-        rejectedTiles.add(nextGlobal)
-        setManualUnlockedTiles((tiles) =>
-          tiles.includes(nextGlobal!) ? tiles : [...tiles, nextGlobal!],
-        )
+      const errLower = (res.error ?? '').toLowerCase()
+      if (errLower.includes('already unlocked')) {
+        for (const g of picked) rejectedTiles.add(g)
+        setManualUnlockedTiles((tiles) => {
+          let next = tiles
+          for (const g of picked) {
+            if (!next.includes(g)) next = [...next, g]
+          }
+          return next
+        })
         continue
       }
-      if ((res.error ?? '').toLowerCase().includes('insufficient')) {
+      if (errLower.includes('insufficient')) {
         onNeedSubscription()
       } else {
         setSendWarning(res.error ?? '解鎖失敗')
@@ -3640,14 +3656,27 @@ function ChatRoomView({
       return
     }
     if (isLive && conversation.matchId) {
-      setSendWarning(nextGlobal == null ? '目前沒有可解鎖的拼圖格' : '解鎖失敗，請稍後再試')
+      setSendWarning('目前沒有可解鎖的拼圖格')
       return
     }
-    if (nextGlobal == null) return
-    setManualUnlockedTiles((tiles) => [...tiles, nextGlobal])
+    const demoPicked = pickBlurUnlockGlobalTiles({
+      chatTilesOrdered: chatTiles,
+      manualUnlockedTiles,
+      activePhotoIndex: progress.activePhotoIndex,
+      puzzleSeedKey,
+      matchedAt: matchedAtForPuzzle,
+      boostActive: progress.boostActive,
+      extraOccupiedGlobal: rejectedTiles,
+    })
+    if (demoPicked.length === 0) return
+    setManualUnlockedTiles((tiles) => [...tiles, ...demoPicked])
     onDemoBlurSpent()
     onBlurUnlockSpent?.()
-    setSendWarning('已使用 1 次解除拼圖，隨機解鎖 1 片。')
+    setSendWarning(
+      progress.boostActive && demoPicked.length >= 2
+        ? '已使用 1 次解除拼圖，隨機解鎖 2 片（配對後加倍）。'
+        : '已使用 1 次解除拼圖，隨機解鎖 1 片。',
+    )
   }
 
   // Group consecutive messages from the same sender to suppress repeated avatars
