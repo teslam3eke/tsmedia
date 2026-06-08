@@ -4,14 +4,14 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { readAuthedUserId } from './_utils/tappayPayByPrime'
-import { buildCheckMacValue } from './_utils/ecpayCrypto'
-import { readEcpayConfig } from './_utils/ecpayConfig'
+import { readAuthedUserId } from './_utils/tappayPayByPrime.js'
+import { buildCheckMacValue } from './_utils/ecpayCrypto.js'
+import { readEcpayConfig } from './_utils/ecpayConfig.js'
 import {
   CREDIT_PACKS,
   formatEcpayMerchantTradeDate,
   makeMerchantTradeNo,
-} from './_utils/paymentProducts'
+} from './_utils/paymentProducts.js'
 
 type Body = {
   productType?: 'membership' | 'credit_pack'

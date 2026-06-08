@@ -3,9 +3,9 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { verifyCheckMacValue } from './_utils/ecpayCrypto'
-import { readEcpayConfig } from './_utils/ecpayConfig'
-import { fulfillEcpayOrder } from './_utils/ecpayFulfill'
+import { verifyCheckMacValue } from './_utils/ecpayCrypto.js'
+import { readEcpayConfig } from './_utils/ecpayConfig.js'
+import { fulfillEcpayOrder } from './_utils/ecpayFulfill.js'
 
 function readFormBody(req: VercelRequest): Record<string, string> {
   if (typeof req.body === 'string') {

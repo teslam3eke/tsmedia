@@ -2,7 +2,7 @@
  * GET：前端查詢綠界是否已設定（不含金鑰）
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { readEcpayConfig } from './_utils/ecpayConfig'
+import { readEcpayConfig } from './_utils/ecpayConfig.js'
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*')

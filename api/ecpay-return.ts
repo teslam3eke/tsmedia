@@ -2,8 +2,8 @@
  * 綠界 OrderResultURL：前景導回 PWA（入帳仍靠 PaymentInfoURL）
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { verifyCheckMacValue } from './_utils/ecpayCrypto'
-import { readEcpayConfig } from './_utils/ecpayConfig'
+import { verifyCheckMacValue } from './_utils/ecpayCrypto.js'
+import { readEcpayConfig } from './_utils/ecpayConfig.js'
 
 function readFormBody(req: VercelRequest): Record<string, string> {
   if (typeof req.body === 'string') {
