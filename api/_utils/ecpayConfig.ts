@@ -30,16 +30,26 @@ export function readEcpayConfig(requireSupabase = true):
   const sandbox = process.env.ECPAY_SANDBOX !== 'false'
   const siteUrl = getSiteUrl()
 
-  const supabaseUrl = process.env.SUPABASE_URL?.trim()
-  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY?.trim()
+  const supabaseUrl =
+    process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim()
+  const supabaseAnonKey =
+    process.env.SUPABASE_ANON_KEY?.trim() || process.env.VITE_SUPABASE_ANON_KEY?.trim()
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
 
   if (!merchantId || !hashKey || !hashIV) {
     return { ok: false, error: '伺服器未設定綠界金流（ECPAY_* 環境變數）。' }
   }
 
-  if (requireSupabase && (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey)) {
-    return { ok: false, error: '伺服器未設定 Supabase 環境變數。' }
+  if (requireSupabase) {
+    if (!supabaseServiceKey) {
+      return { ok: false, error: '伺服器未設定 SUPABASE_SERVICE_ROLE_KEY（Vercel 環境變數）。' }
+    }
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return {
+        ok: false,
+        error: '伺服器未設定 Supabase URL／ANON（SUPABASE_URL 或 VITE_SUPABASE_URL 等）。',
+      }
+    }
   }
 
   const gatewayUrl = sandbox
