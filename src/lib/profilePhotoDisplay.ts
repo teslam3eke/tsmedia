@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 
-/** 探索／個人檔案／拼圖完成後：2:3 直式 object-cover（同一裁切邏輯） */
+/** 探索／個人檔案：2:3 直式 object-cover（聊天室拼圖維持獨立版型） */
 export const PROFILE_PHOTO_COVER_CLASS =
   'absolute inset-0 h-full w-full object-cover object-center'
 
@@ -13,5 +13,5 @@ export function profilePhotoCoverClassName(privacyBlurred: boolean): string {
   return cn(PROFILE_PHOTO_COVER_CLASS, privacyBlurred && 'scale-[1.04]')
 }
 
-/** 拼圖 SVG 內嵌圖與 object-cover 對齊 */
+/** 探索／個人檔案 SVG 內嵌圖與 object-cover 對齊 */
 export const PROFILE_PHOTO_SVG_PRESERVE = 'xMidYMid slice'
