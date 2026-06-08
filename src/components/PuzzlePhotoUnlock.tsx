@@ -6,6 +6,7 @@ import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
 import {
+  PROFILE_PHOTO_ASPECT_BOX_CLASS,
   PROFILE_PHOTO_ASPECT_INNER_CLASS,
   PROFILE_PHOTO_SVG_PRESERVE,
   profilePhotoCoverClassName,

@@ -24,7 +24,7 @@ import {
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
 import { paymentModeLabel } from '@/lib/paymentProvider'
-import { startNewebPayCheckout } from '@/lib/newebpayCheckout'
+import { startEcpayCheckout } from '@/lib/ecpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export type MembershipUpdateEvent =
@@ -135,8 +135,8 @@ export default function MembershipManagementScreen({
         onUpdated({ type: 'pack', subtitle: creditLabel })
         return
       }
-      if (paymentMode === 'newebpay') {
-        await startNewebPayCheckout({
+      if (paymentMode === 'ecpay') {
+        await startEcpayCheckout({
           productType: 'credit_pack',
           packKey,
           email: holderEmail.trim() || userEmail,
@@ -192,11 +192,11 @@ export default function MembershipManagementScreen({
     }
   }
 
-  const subscribeNewebPay = async () => {
+  const subscribeEcpay = async () => {
     setBusy(true)
     setError(null)
     try {
-      await startNewebPayCheckout({
+      await startEcpayCheckout({
         productType: 'membership',
         email: holderEmail.trim() || userEmail,
       })
@@ -362,14 +362,14 @@ export default function MembershipManagementScreen({
             </ul>
           </section>
 
-          {paymentMode === 'newebpay' && (
+          {paymentMode === 'ecpay' && (
             <div className="space-y-3 rounded-2xl bg-white/[0.07] p-4 ring-1 ring-white/10">
               <p className="text-[11px] font-bold tracking-wider text-slate-500">
-                信用卡（{paymentModeLabel('newebpay')}
+                信用卡（{paymentModeLabel('ecpay')}
                 {paymentSandbox ? ' · 測試' : ''}）
               </p>
               <p className="text-xs font-semibold leading-relaxed text-slate-400">
-                將前往藍新安全付款頁完成刷卡。單次購買 30 天 VIP，到期後需再手動付款（非自動續扣）。
+                將前往綠界安全付款頁完成刷卡。單次購買 30 天 VIP，到期後需再手動付款（非自動續扣）。
               </p>
               <input
                 type="email"
@@ -451,11 +451,11 @@ export default function MembershipManagementScreen({
         className="flex-shrink-0 border-t border-white/10 bg-slate-950/90 px-5 pt-3 backdrop-blur-md"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
       >
-        {paymentMode === 'newebpay' ? (
+        {paymentMode === 'ecpay' ? (
           <button
             type="button"
             disabled={busy || paymentLoading}
-            onClick={() => void subscribeNewebPay()}
+            onClick={() => void subscribeEcpay()}
             className={cn(
               'w-full rounded-2xl py-4 text-base font-black shadow-lg transition active:scale-[0.99]',
               busy || paymentLoading
@@ -463,7 +463,7 @@ export default function MembershipManagementScreen({
                 : 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-amber-900/30',
             )}
           >
-            {busy ? '前往付款頁⋯' : `前往藍新付款 ${monthlyPrice} 元／30 天`}
+            {busy ? '前往付款頁⋯' : `前往綠界付款 ${monthlyPrice} 元／30 天`}
           </button>
         ) : paymentMode === 'tappay' ? (
           <button

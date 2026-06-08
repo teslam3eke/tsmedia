@@ -1,4 +1,4 @@
-export type PaymentProviderMode = 'newebpay' | 'tappay' | 'mock'
+export type PaymentProviderMode = 'ecpay' | 'tappay' | 'mock'
 
 export type PaymentProviderState = {
   mode: PaymentProviderMode
@@ -16,11 +16,11 @@ export function isTapPayClientConfigured(): boolean {
 
 export async function fetchPaymentProvider(): Promise<Omit<PaymentProviderState, 'loading'>> {
   try {
-    const res = await fetch('/api/newebpay-config', { cache: 'no-store' })
+    const res = await fetch('/api/ecpay-config', { cache: 'no-store' })
     if (res.ok) {
       const json = (await res.json()) as { configured?: boolean; sandbox?: boolean | null }
       if (json.configured) {
-        return { mode: 'newebpay', sandbox: json.sandbox ?? null }
+        return { mode: 'ecpay', sandbox: json.sandbox ?? null }
       }
     }
   } catch {
@@ -35,7 +35,7 @@ export async function fetchPaymentProvider(): Promise<Omit<PaymentProviderState,
 }
 
 export function paymentModeLabel(mode: PaymentProviderMode): string {
-  if (mode === 'newebpay') return '藍新金流'
+  if (mode === 'ecpay') return '綠界金流'
   if (mode === 'tappay') return 'TapPay'
   return '模擬付款'
 }

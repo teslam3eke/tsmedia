@@ -63,9 +63,9 @@ import MembershipManagementScreen, {
 import { CREDIT_PACK_PRODUCTS } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
-  pollNewebPayOrderPaid,
+  pollEcpayOrderPaid,
   readPaymentReturnQuery,
-} from '@/lib/newebpayCheckout'
+} from '@/lib/ecpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
@@ -6594,7 +6594,7 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 藍新付款完成返回 PWA：輪詢 Notify 入帳後顯示獎勵 */
+  /** 綠界付款完成返回 PWA：輪詢 PaymentInfoURL 入帳後顯示獎勵 */
   useEffect(() => {
     if (!user?.id) return
     const query = readPaymentReturnQuery()
@@ -6621,7 +6621,7 @@ export default function MainScreen({
 
     let cancelled = false
     ;(async () => {
-      const paid = await pollNewebPayOrderPaid(query.orderNo!)
+      const paid = await pollEcpayOrderPaid(query.orderNo!)
       if (cancelled) return
 
       if (!paid?.paid) {
