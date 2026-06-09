@@ -15,7 +15,7 @@ import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 
-import { supabase, ensureConnectionWithBudget, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
+import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
   resumeHardReloadDisabledGlobally,
   resumeHardReloadEnabled,
@@ -151,6 +151,7 @@ export default function App() {
     typeof window !== 'undefined' && hasPendingPaymentReturn() ? Date.now() + 15_000 : 0,
   )
   const [paymentReturnRecoveryExhausted, setPaymentReturnRecoveryExhausted] = useState(false)
+  const routeSignedInUserFlightRef = useRef<Promise<void> | null>(null)
 
   const getActiveUser = async () => {
     if (user) return user
@@ -562,20 +563,39 @@ export default function App() {
   }, [])
 
   const routeSignedInUser = useCallback(async (u: User) => {
-    /** 付費返回：已 onboarding 者先進主殼，避免 splash 無內容白屏 */
-    if (
-      hasPendingPaymentReturn() &&
-      !needsPwaEncapsulationGate() &&
-      readSecurityOnboardingDone(u.id) &&
-      !readPasswordRecoveryPending()
-    ) {
-      go('main')
+    if (routeSignedInUserFlightRef.current) {
+      await routeSignedInUserFlightRef.current
+      return
     }
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-      await ensureConnectionWithBudget()
+
+    const flight = (async () => {
+      const paymentReturn = hasPendingPaymentReturn()
+
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (paymentReturn) {
+          await restorePersistedAuthSession(4_000)
+        }
+        await repairAuthAfterResume()
+        await ensureConnectionWithBudget(paymentReturn ? 12_000 : 6_000)
+      }
+
+      let profile = await getProfile(u.id)
+      if (!profile && paymentReturn) {
+        await ensureConnectionWithBudget(8_000)
+        profile = await getProfile(u.id)
+      }
+
+      routeByProfile(profile, u.id)
+    })()
+
+    routeSignedInUserFlightRef.current = flight
+    try {
+      await flight
+    } finally {
+      if (routeSignedInUserFlightRef.current === flight) {
+        routeSignedInUserFlightRef.current = null
+      }
     }
-    const profile = await getProfile(u.id)
-    routeByProfile(profile, u.id)
   }, [go]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const routeToPasswordRecovery = useCallback(() => {

@@ -6,8 +6,8 @@ import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persist
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.tsx'
-import { consumeSupabaseAuthCallbackFromUrl } from '@/lib/auth'
-import { capturePaymentReturnFromUrl } from '@/lib/ecpayCheckout'
+import { consumeSupabaseAuthCallbackFromUrl, restorePersistedAuthSession } from '@/lib/auth'
+import { capturePaymentReturnFromUrl, hasPendingPaymentReturn } from '@/lib/ecpayCheckout'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
 import { maybeInitEruda } from '@/lib/erudaBootstrap'
 import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
@@ -159,6 +159,12 @@ const queryPersister = createSyncStoragePersister({
 /** 信箱確認 ?code= 須先換 session 再掛載 React，否則首屏常誤判未登入而卡住 */
 async function boot() {
   capturePaymentReturnFromUrl()
+  if (hasPendingPaymentReturn()) {
+    await restorePersistedAuthSession(10_000)
+    await repairAuthAfterResume()
+    await ensureConnectionWithBudget(12_000)
+    void queryClient.invalidateQueries()
+  }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

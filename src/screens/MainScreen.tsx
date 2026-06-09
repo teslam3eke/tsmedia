@@ -63,6 +63,7 @@ import MembershipManagementScreen, {
 import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
+  hasPendingPaymentReturn,
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
 } from '@/lib/ecpayCheckout'
@@ -6290,19 +6291,23 @@ export default function MainScreen({
   /**
    * 首次進入主殼（SPA 內導航無新 `pageshow`）：使用者在 onboarding／驗證頁停留過久時 JWT 可能已過期；
    * 僅依賴「背景↔前景」wake 會漏掉此情況（iOS 特別明顯）。
+   * 綠界全頁跳轉回站亦同：須先 await 連線再 bump，否則探索／個資 RPC 會全掛直到重開 App。
    */
   useEffect(() => {
     if (!user?.id) return
     if (document.visibilityState !== 'visible') return
-    void repairAuthAfterResume()
-    void queryClient.invalidateQueries()
-    setForegroundReloadNonce((n) => n + 1)
     let cancelled = false
-    void ensureConnection().finally(() => {
+    void (async () => {
+      const paymentReturn = hasPendingPaymentReturn()
+      await repairAuthAfterResume()
       if (cancelled) return
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
-    })
+      await ensureConnectionWithBudget(paymentReturn ? 12_000 : 8_000)
+      if (cancelled) return
+      void queryClient.invalidateQueries()
+      setForegroundReloadNonce((n) => n + 1)
+    })()
     return () => {
       cancelled = true
     }
