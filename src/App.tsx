@@ -226,9 +226,24 @@ export default function App() {
   }
 
   // After security check, decide where to go based on profile completeness.
-  const routeAfterSecurityCheck = (profile: import('@/lib/types').ProfileRow | null) => {
+  const routeAfterSecurityCheck = (
+    profile: import('@/lib/types').ProfileRow | null,
+    userId: string,
+  ) => {
     if (needsIosSafariBrowserGate()) return
-    if (!hasAcceptedLatestTerms(profile)) return go('terms-consent')
+    if (!hasAcceptedLatestTerms(profile)) {
+      /** 付費返回／主殼已開：getProfile 暫時 null 勿誤判成未同意條款 */
+      if (
+        !profile &&
+        (readSecurityOnboardingDone(userId) ||
+          screenRef.current === 'main' ||
+          hasPendingPaymentReturn())
+      ) {
+        launchMainFromProfile(null)
+        return
+      }
+      return go('terms-consent')
+    }
     if (!profile?.name) return go('profile-setup')
     setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
@@ -248,7 +263,7 @@ export default function App() {
       return
     }
     if (readSecurityOnboardingDone(userId)) {
-      routeAfterSecurityCheck(profile)
+      routeAfterSecurityCheck(profile, userId)
       return
     }
     go('security-check')
@@ -587,9 +602,10 @@ export default function App() {
         ])
       }
 
-      /** 付費返回且已 onboarding：先進主殼，避免 splash「正在進入」卡到 getProfile 結束 */
+      /** 付費返回且已 onboarding：直接進主殼，勿再 routeByProfile（null profile 會誤跳同意書） */
       if (paymentReturn && onboarded) {
         go('main')
+        return
       }
 
       const profile = await Promise.race([
@@ -598,10 +614,6 @@ export default function App() {
           globalThis.setTimeout(() => resolve(null), paymentReturn ? 6_000 : 10_000),
         ),
       ])
-
-      if (paymentReturn && onboarded && !profile) {
-        return
-      }
 
       routeByProfile(profile, u.id)
     })()
@@ -1060,7 +1072,7 @@ export default function App() {
                 writeSecurityOnboardingDone(activeUser.id)
               }
               const profile = await getProfile(activeUser.id)
-              routeAfterSecurityCheck(profile)
+              routeAfterSecurityCheck(profile, activeUser.id)
             }}
           />
         )}
