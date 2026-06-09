@@ -30,6 +30,7 @@ import {
   signOut,
   consumeSupabaseAuthCallbackFromUrl,
   restorePersistedAuthSession,
+  readSessionUserWithBudget,
   shouldShowIosSafariAuthGuide,
   markPasswordRecoveryPending,
   readPasswordRecoveryPending,
@@ -648,29 +649,32 @@ export default function App() {
         clearPasswordResetFlowStarted()
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
+      let u = await readSessionUserWithBudget(2_500)
       if (cancelled) return
-      let u = session?.user ?? null
 
-      /** 綠界全頁跳轉回站：首輪 getSession 常為 null，多試換發再決定是否 landing */
+      /** 綠界全頁跳轉回站：首輪 getSession 常為 null，多試換發 */
       if (!u && pendingPaymentReturn) {
-        u = await restorePersistedAuthSession()
+        u = await restorePersistedAuthSession(5_000)
       }
 
       if (cancelled) return
       setUser(u)
+
       if (needsRecoveryScreen()) {
         if (u) markPasswordRecoveryPending()
         routeToPasswordRecovery()
         setReady(true)
         return
       }
+
+      /** 先解除 splash 鎖，避免 getProfile／ensure 卡住時整頁像當機 */
       setReady(true)
+
       if (u) {
-        await routeSignedInUser(u)
-      } else if (!pendingPaymentReturn) {
+        void routeSignedInUser(u)
+      } else if (pendingPaymentReturn) {
+        if (tryAlternateOriginForPaymentReturn()) return
+      } else {
         go('landing')
       }
     })()
@@ -757,12 +761,19 @@ export default function App() {
     }
   }, [authReady, screen, go, paymentReturnRecoveryExhausted]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** user 狀態補上後（auth 事件晚於 landing）立即導回主畫面 */
+  /** 付款返回且 user 已還原：勿卡在 splash 等 getProfile */
   useEffect(() => {
     if (!authReady || !user?.id || !hasPendingPaymentReturn()) return
-    if (screen !== 'landing' && screen !== 'splash' && screen !== 'auth') return
+    if (screen === 'main') return
     void getProfile(user.id).then((profile) => routeByProfile(profile, user.id))
   }, [authReady, user?.id, screen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** auth init 異常時勿永遠停在藍底 splash */
+  useEffect(() => {
+    if (authReady) return
+    const t = window.setTimeout(() => setReady(true), 9_000)
+    return () => window.clearTimeout(t)
+  }, [authReady])
 
   const handleSignOut = async () => {
     setVerifyWaitRevisit(false)
@@ -864,7 +875,11 @@ export default function App() {
     return (
       <SplashScreen
         subtitle={
-          paymentReturnRecovering ? '付款完成，正在恢復登入…' : undefined
+          paymentReturnRecovering
+            ? '付款完成，正在恢復登入…'
+            : hasPendingPaymentReturn()
+              ? '付款完成，正在載入…'
+              : undefined
         }
       />
     )
