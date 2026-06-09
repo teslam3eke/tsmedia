@@ -263,6 +263,23 @@ export default function App() {
     launchMainFromProfile(profile)
   }
 
+  const routeSignedInUser = useCallback(async (u: User) => {
+    /** 付費返回：已 onboarding 者先進主殼，避免 splash 無內容白屏 */
+    if (
+      hasPendingPaymentReturn() &&
+      !needsPwaEncapsulationGate() &&
+      readSecurityOnboardingDone(u.id) &&
+      !readPasswordRecoveryPending()
+    ) {
+      go('main')
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      await ensureConnectionWithBudget()
+    }
+    const profile = await getProfile(u.id)
+    routeByProfile(profile, u.id)
+  }, [go]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const listener: EventListener = (e: Event) => {
       const d = (e as CustomEvent<ConnectionRepairDetail>).detail
@@ -572,13 +589,8 @@ export default function App() {
     let cancelled = false
     const pendingPaymentReturn = hasPendingPaymentReturn()
 
-    const routeSignedInUser = async (u: User) => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        await ensureConnectionWithBudget()
-      }
-      const profile = await getProfile(u.id)
-      if (cancelled) return
-      routeByProfile(profile, u.id)
+    const routeSignedInUserScoped = async (u: User) => {
+      await routeSignedInUser(u)
     }
 
     const maybeRoutePaymentReturnSession = async (u: User | null, event: string) => {
@@ -594,7 +606,7 @@ export default function App() {
         event === 'TOKEN_REFRESHED' ||
         (event === 'INITIAL_SESSION' && onGuestScreen)
       ) {
-        await routeSignedInUser(u)
+        await routeSignedInUserScoped(u)
       }
     }
 
@@ -671,7 +683,7 @@ export default function App() {
       setReady(true)
 
       if (u) {
-        void routeSignedInUser(u)
+        void routeSignedInUserScoped(u)
       } else if (pendingPaymentReturn) {
         if (tryAlternateOriginForPaymentReturn()) return
       } else {
@@ -680,7 +692,7 @@ export default function App() {
     })()
 
     return () => { cancelled = true; subscription.unsubscribe() }
-  }, [go, routeToPasswordRecovery]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [go, routeToPasswordRecovery, routeSignedInUser]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** authReady 後若仍停在 splash（早期 return 漏設 screen）→ 避免空白頁 */
   useEffect(() => {
@@ -690,12 +702,12 @@ export default function App() {
       return
     }
     if (user?.id && hasPendingPaymentReturn()) {
-      void getProfile(user.id).then((profile) => routeByProfile(profile, user.id))
+      void routeSignedInUser(user)
       return
     }
-    if (hasPendingPaymentReturn() && !paymentReturnRecoveryExhausted) return
+    if (hasPendingPaymentReturn() && !paymentReturnRecoveryExhausted && !user?.id) return
     go('landing')
-  }, [authReady, screen, go, routeToPasswordRecovery, user?.id, paymentReturnRecoveryExhausted]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authReady, screen, go, routeToPasswordRecovery, user?.id, paymentReturnRecoveryExhausted, routeSignedInUser]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 付款返回：僅在尚未登入的 guest 畫面還原 session（勿干擾 security-check／onboarding） */
   useEffect(() => {
@@ -765,8 +777,8 @@ export default function App() {
   useEffect(() => {
     if (!authReady || !user?.id || !hasPendingPaymentReturn()) return
     if (screen === 'main') return
-    void getProfile(user.id).then((profile) => routeByProfile(profile, user.id))
-  }, [authReady, user?.id, screen]) // eslint-disable-line react-hooks/exhaustive-deps
+    void routeSignedInUser(user)
+  }, [authReady, user?.id, screen, routeSignedInUser])
 
   /** auth init 異常時勿永遠停在藍底 splash */
   useEffect(() => {
@@ -887,6 +899,19 @@ export default function App() {
 
   if (needsIosSafariBrowserGate()) {
     return <IosSafariRequiredScreen exchangeFailed={authSafariExchangeFailed} />
+  }
+
+  /** splash 無對應 AnimatePresence 分支；authReady 後勿留空白頁 */
+  if (screen === 'splash') {
+    return (
+      <SplashScreen
+        subtitle={
+          hasPendingPaymentReturn()
+            ? '付款完成，正在進入…'
+            : '載入中…'
+        }
+      />
+    )
   }
 
   // Main screen is rendered OUTSIDE AnimatePresence/motion.div so it is not
