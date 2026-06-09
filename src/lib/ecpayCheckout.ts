@@ -1,3 +1,4 @@
+import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -119,6 +120,34 @@ export type PaymentReturnQuery = {
 
 const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
 const PAYMENT_RETURN_ORIGIN_TRIED_KEY = 'tm_payment_return_origin_tried_v1'
+const PAYMENT_RETURN_RELOAD_KEY = 'tm_payment_return_did_reload_v1'
+
+export function clearPaymentReturnReloadFlag(): void {
+  try {
+    sessionStorage.removeItem(PAYMENT_RETURN_RELOAD_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 綠界全頁跳回後硬重開 PWA 一次，避免 Supabase／profile 卡在半死狀態。
+ * 每筆付款返回只 reload 一次；回 true 表示已觸發 reload（caller 勿再 mount React）。
+ */
+export function reloadOnceAfterPaymentReturn(): boolean {
+  if (typeof window === 'undefined') return false
+  const query = readEffectivePaymentReturnQuery()
+  if (query.kind !== 'return') return false
+  try {
+    if (sessionStorage.getItem(PAYMENT_RETURN_RELOAD_KEY) === '1') return false
+    sessionStorage.setItem(PAYMENT_RETURN_RELOAD_KEY, '1')
+  } catch {
+    return false
+  }
+  markSkipInstantMatchLeaveOnNextFullUnload()
+  window.location.reload()
+  return true
+}
 
 /** apex 付完卻無 session 時，改試 www（或反向）一次 */
 export function tryAlternateOriginForPaymentReturn(): boolean {
@@ -153,6 +182,7 @@ export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
     try {
       sessionStorage.removeItem(PAYMENT_RETURN_STORAGE_KEY)
       sessionStorage.removeItem(PAYMENT_RETURN_ORIGIN_TRIED_KEY)
+      sessionStorage.removeItem(PAYMENT_RETURN_RELOAD_KEY)
     } catch {
       /* ignore */
     }
@@ -212,6 +242,7 @@ export function clearPaymentReturnQuery() {
   } catch {
     /* ignore */
   }
+  clearPaymentReturnReloadFlag()
   const url = new URL(window.location.href)
   url.searchParams.delete('payment')
   url.searchParams.delete('order')
