@@ -6615,13 +6615,21 @@ export default function MainScreen({
       return
     }
 
-    if (query.status === 'fail' || !query.orderNo) {
+    if (!query.orderNo) {
       setRewardFlash({
         variant: 'grant',
         title: '付款未完成',
         subtitle: '若已扣款請聯絡客服並保留交易紀錄',
       })
       return
+    }
+
+    if (query.status === 'fail') {
+      setRewardFlash({
+        variant: 'grant',
+        title: '付款確認中',
+        subtitle: '已收到付款，入帳可能需要數十秒，請稍候在會員管理查看',
+      })
     }
 
     let cancelled = false

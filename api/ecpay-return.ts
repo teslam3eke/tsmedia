@@ -50,21 +50,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const merchantTradeNo = body.MerchantTradeNo?.trim() ?? ''
   const paidAtGateway = body.RtnCode?.trim() === '1' && Boolean(merchantTradeNo)
-  let fulfilled = false
 
   if (paidAtGateway) {
     const admin = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey)
     const result = await fulfillEcpayOrder(admin, body)
     if (!result.ok) {
+      /** 綠界已扣款但 return 入帳失敗時仍導 ok+order，由前端輪詢 notify／重試；勿誤顯「付款未完成」。 */
       console.error('[ecpay-return] fulfill', result.error, merchantTradeNo)
-    } else {
-      fulfilled = true
     }
   }
 
   return redirect({
     payment: 'return',
-    status: paidAtGateway && fulfilled ? 'ok' : 'fail',
+    status: paidAtGateway ? 'ok' : 'fail',
     ...(merchantTradeNo ? { order: merchantTradeNo } : {}),
   })
 }
