@@ -7,7 +7,7 @@ import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.tsx'
 import { consumeSupabaseAuthCallbackFromUrl, restorePersistedAuthSession } from '@/lib/auth'
-import { capturePaymentReturnFromUrl, hasPendingPaymentReturn } from '@/lib/ecpayCheckout'
+import { capturePaymentReturnFromUrl, hasPendingPaymentReturn, tryAlternateOriginForPaymentReturn } from '@/lib/ecpayCheckout'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
 import { maybeInitEruda } from '@/lib/erudaBootstrap'
 import { checkRemoteBuildIdAndReload } from '@/lib/appVersion'
@@ -160,7 +160,8 @@ const queryPersister = createSyncStoragePersister({
 async function boot() {
   capturePaymentReturnFromUrl()
   if (hasPendingPaymentReturn()) {
-    await restorePersistedAuthSession(10_000)
+    const u = await restorePersistedAuthSession(6_000)
+    if (!u) tryAlternateOriginForPaymentReturn()
   }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(

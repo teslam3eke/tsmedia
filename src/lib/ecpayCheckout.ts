@@ -116,6 +116,33 @@ export type PaymentReturnQuery = {
 }
 
 const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
+const PAYMENT_RETURN_ORIGIN_TRIED_KEY = 'tm_payment_return_origin_tried_v1'
+
+/** apex 付完卻無 session 時，改試 www（或反向）一次 */
+export function tryAlternateOriginForPaymentReturn(): boolean {
+  if (typeof window === 'undefined') return false
+  if (!hasPendingPaymentReturn()) return false
+  try {
+    if (sessionStorage.getItem(PAYMENT_RETURN_ORIGIN_TRIED_KEY) === '1') return false
+    sessionStorage.setItem(PAYMENT_RETURN_ORIGIN_TRIED_KEY, '1')
+  } catch {
+    return false
+  }
+
+  const host = window.location.hostname
+  const alt =
+    host === 'tsmedia.tw'
+      ? 'www.tsmedia.tw'
+      : host === 'www.tsmedia.tw'
+        ? 'tsmedia.tw'
+        : null
+  if (!alt) return false
+
+  const next = new URL(window.location.href)
+  next.hostname = alt
+  window.location.replace(next.toString())
+  return true
+}
 
 /** boot 最早呼叫：綠界 302 回 `/?payment=return` 時保留意圖（MainScreen 掛載前 URL 可能被清掉） */
 export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {

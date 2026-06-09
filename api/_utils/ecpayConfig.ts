@@ -21,6 +21,16 @@ export function getSiteUrl(): string {
   return raw.replace(/\/$/, '')
 }
 
+/** 付款完成前景導回（OrderResultURL／ClientBackURL）；可與幕後 notify 不同 origin */
+export function getReturnSiteUrl(): string {
+  const explicit = process.env.ECPAY_RETURN_SITE_URL?.trim()
+  if (explicit) return explicit.replace(/\/$/, '')
+  const site = getSiteUrl()
+  /** 過渡：使用者多在 www 登入，綠界鎖 apex；付完導回 www 才讀得到 session */
+  if (site === 'https://tsmedia.tw') return 'https://www.tsmedia.tw'
+  return site
+}
+
 export function readEcpayConfig(requireSupabase = true):
   | { ok: true; cfg: EcpayConfig }
   | { ok: false; error: string } {
@@ -29,6 +39,7 @@ export function readEcpayConfig(requireSupabase = true):
   const hashIV = process.env.ECPAY_HASH_IV?.trim()
   const sandbox = process.env.ECPAY_SANDBOX !== 'false'
   const siteUrl = getSiteUrl()
+  const returnSiteUrl = getReturnSiteUrl()
 
   const supabaseUrl =
     process.env.SUPABASE_URL?.trim() || process.env.VITE_SUPABASE_URL?.trim()
@@ -66,8 +77,8 @@ export function readEcpayConfig(requireSupabase = true):
       siteUrl,
       gatewayUrl,
       notifyUrl: `${siteUrl}/api/ecpay-notify`,
-      returnUrl: `${siteUrl}/api/ecpay-return`,
-      clientBackUrl: `${siteUrl}/?payment=cancel`,
+      returnUrl: `${returnSiteUrl}/api/ecpay-return`,
+      clientBackUrl: `${returnSiteUrl}/?payment=cancel`,
       supabaseUrl: supabaseUrl ?? '',
       supabaseAnonKey: supabaseAnonKey ?? '',
       supabaseServiceKey: supabaseServiceKey ?? '',

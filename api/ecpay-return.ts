@@ -14,12 +14,18 @@ export const config = {
   },
 }
 
+function appBaseFromConfig(cfg: { clientBackUrl: string; returnUrl: string }): string {
+  const fromCancel = cfg.clientBackUrl.replace(/\/?\?payment=cancel$/, '')
+  if (fromCancel) return fromCancel
+  return cfg.returnUrl.replace(/\/api\/ecpay-return$/, '')
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cfgRes = readEcpayConfig(true)
-  const siteUrl = cfgRes.ok ? cfgRes.cfg.siteUrl : 'https://tsmedia.tw'
+  const appBase = cfgRes.ok ? appBaseFromConfig(cfgRes.cfg) : 'https://www.tsmedia.tw'
 
   const redirect = (params: Record<string, string>) => {
-    const url = new URL('/', siteUrl)
+    const url = new URL('/', appBase)
     for (const [k, v] of Object.entries(params)) {
       url.searchParams.set(k, v)
     }

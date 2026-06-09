@@ -1,4 +1,12 @@
 {
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.tsmedia.tw" }],
+      "destination": "https://tsmedia.tw/:path*",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/reset-password",

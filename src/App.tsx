@@ -37,7 +37,7 @@ import {
   clearPasswordResetFlowStarted,
   isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
-import { hasPendingPaymentReturn } from '@/lib/ecpayCheckout'
+import { hasPendingPaymentReturn, tryAlternateOriginForPaymentReturn } from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
@@ -696,11 +696,19 @@ export default function App() {
   /** 付款返回：session 晚到或誤入 landing 時持續還原並導入主畫面 */
   useEffect(() => {
     if (!authReady || !hasPendingPaymentReturn()) return
+    if (paymentReturnRecoveryExhausted) return
     if (screen === 'main') return
 
     let cancelled = false
     let attempts = 0
-    const maxAttempts = 8
+    const maxAttempts = 4
+    let ticking = false
+
+    const finishExhausted = () => {
+      if (cancelled) return
+      setPaymentReturnRecoveryExhausted(true)
+      go('landing')
+    }
 
     const tryRoute = async (u: User) => {
       setUser(u)
@@ -710,35 +718,40 @@ export default function App() {
     }
 
     const tick = async () => {
-      if (cancelled || screenRef.current === 'main') return
+      if (cancelled || ticking || screenRef.current === 'main') return
+      ticking = true
+      try {
+        if (userRef.current?.id) {
+          await tryRoute(userRef.current)
+          return
+        }
 
-      if (userRef.current?.id) {
-        await tryRoute(userRef.current)
-        return
-      }
+        const u = await restorePersistedAuthSession(2_500)
+        if (cancelled) return
+        if (u) {
+          await tryRoute(u)
+          return
+        }
 
-      const u = await restorePersistedAuthSession(4_000)
-      if (cancelled) return
-      if (u) {
-        await tryRoute(u)
-        return
-      }
+        attempts += 1
+        if (attempts === 2 && tryAlternateOriginForPaymentReturn()) return
 
-      attempts += 1
-      if (attempts >= maxAttempts) {
-        setPaymentReturnRecoveryExhausted(true)
-        if (screenRef.current === 'splash') go('landing')
+        if (attempts >= maxAttempts) finishExhausted()
+      } finally {
+        ticking = false
       }
     }
 
     void tick()
-    const intervalId = window.setInterval(() => void tick(), 2_500)
+    const intervalId = window.setInterval(() => void tick(), 2_000)
+    const hardCapId = window.setTimeout(finishExhausted, 12_000)
 
     return () => {
       cancelled = true
       window.clearInterval(intervalId)
+      window.clearTimeout(hardCapId)
     }
-  }, [authReady, screen, go]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authReady, screen, go, paymentReturnRecoveryExhausted]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** user 狀態補上後（auth 事件晚於 landing）立即導回主畫面 */
   useEffect(() => {
@@ -840,8 +853,8 @@ export default function App() {
   const paymentReturnRecovering =
     hasPendingPaymentReturn() &&
     !paymentReturnRecoveryExhausted &&
-    screen !== 'main' &&
-    (screen === 'splash' || screen === 'landing' || !user?.id)
+    !user?.id &&
+    screen !== 'main'
 
   if (!authReady || paymentReturnRecovering) {
     return (
