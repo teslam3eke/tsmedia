@@ -60,7 +60,7 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
-import { CREDIT_PACK_PRODUCTS } from '@/lib/membershipProducts'
+import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
   pollEcpayOrderPaid,
@@ -6645,6 +6645,11 @@ export default function MainScreen({
         return
       }
 
+      const profile = await getProfile(user.id)
+      const expiresAt =
+        paid.subscriptionExpiresAt ?? profile?.subscription_expires_at ?? null
+      const expiryLabel = formatMembershipExpiryZhTw(expiresAt)
+
       const beforeSnap = preSubscriptionCreditsRef.current
       preSubscriptionCreditsRef.current = null
       const after = await getCreditBalance(user.id)
@@ -6658,10 +6663,15 @@ export default function MainScreen({
           parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
         }
       }
+      const rewardLine = parts.length > 0 ? parts.join(' · ') : null
       setRewardFlash({
         variant: 'grant',
-        title: parts.length > 0 ? '訂閱獎勵已入帳' : 'VIP 購買成功',
-        subtitle: parts.length > 0 ? parts.join(' · ') : '會員權益已啟用',
+        title: parts.length > 0 ? 'VIP 已開通' : 'VIP 購買成功',
+        subtitle: rewardLine
+          ? `${rewardLine} · 到期 ${expiryLabel}`
+          : expiryLabel !== '尚未訂閱'
+            ? `會員到期：${expiryLabel}`
+            : '若會員管理仍顯示未訂閱，請稍後重新整理',
       })
     })()
 

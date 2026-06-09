@@ -13,6 +13,8 @@ export type EcpayOrderStatus = {
   productType?: string
   packKey?: string | null
   amountNtd?: number
+  paidAt?: string | null
+  subscriptionExpiresAt?: string | null
   error?: string
 }
 

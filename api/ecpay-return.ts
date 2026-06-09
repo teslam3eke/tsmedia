@@ -49,19 +49,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const merchantTradeNo = body.MerchantTradeNo?.trim() ?? ''
-  const ok = body.RtnCode?.trim() === '1' && Boolean(merchantTradeNo)
+  const paidAtGateway = body.RtnCode?.trim() === '1' && Boolean(merchantTradeNo)
+  let fulfilled = false
 
-  if (ok) {
+  if (paidAtGateway) {
     const admin = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey)
     const result = await fulfillEcpayOrder(admin, body)
     if (!result.ok) {
       console.error('[ecpay-return] fulfill', result.error, merchantTradeNo)
+    } else {
+      fulfilled = true
     }
   }
 
   return redirect({
     payment: 'return',
-    status: ok ? 'ok' : 'fail',
+    status: paidAtGateway && fulfilled ? 'ok' : 'fail',
     ...(merchantTradeNo ? { order: merchantTradeNo } : {}),
   })
 }

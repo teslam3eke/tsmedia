@@ -39,12 +39,24 @@ export async function fulfillEcpayOrder(
   }
 
   if (order.product_type === 'membership') {
-    const { error: grantErr } = await admin.rpc('grant_monthly_membership_for_user', {
+    const { data: grantData, error: grantErr } = await admin.rpc('grant_monthly_membership_for_user', {
       p_user_id: order.user_id,
     })
     if (grantErr) {
-      console.error('[ecpay] grant membership', grantErr)
-      return { ok: false, error: '入帳失敗' }
+      console.error('[ecpay] grant membership', {
+        merchantTradeNo,
+        userId: order.user_id,
+        message: grantErr.message,
+        details: grantErr.details,
+        hint: grantErr.hint,
+        code: grantErr.code,
+      })
+      return { ok: false, error: 'VIP 入帳失敗' }
+    }
+    const grant = grantData as { subscription_expires_at?: string } | null
+    if (!grant?.subscription_expires_at) {
+      console.error('[ecpay] grant membership missing expiry', { merchantTradeNo, grantData })
+      return { ok: false, error: 'VIP 入帳資料不完整' }
     }
 
     const { error: logErr } = await admin.from('subscription_payment_events').insert({

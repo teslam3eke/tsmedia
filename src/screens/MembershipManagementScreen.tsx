@@ -76,6 +76,14 @@ export default function MembershipManagementScreen({
   }, [reloadProfile])
 
   useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void reloadProfile()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [reloadProfile])
+
+  useEffect(() => {
     if (paymentMode !== 'tappay') return
     let cancelled = false
     ;(async () => {

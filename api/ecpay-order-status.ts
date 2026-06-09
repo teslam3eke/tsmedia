@@ -57,6 +57,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ ok: false, error: '無權查看此訂單' })
   }
 
+  let subscriptionExpiresAt: string | null = null
+  if (order.status === 'paid' && order.product_type === 'membership') {
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('subscription_expires_at')
+      .eq('id', auth.userId)
+      .maybeSingle()
+    subscriptionExpiresAt = profile?.subscription_expires_at ?? null
+  }
+
   return res.status(200).json({
     ok: true,
     status: order.status,
@@ -65,5 +75,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     packKey: order.pack_key,
     amountNtd: order.amount_ntd,
     paidAt: order.paid_at,
+    subscriptionExpiresAt,
   })
 }
