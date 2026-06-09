@@ -263,23 +263,6 @@ export default function App() {
     launchMainFromProfile(profile)
   }
 
-  const routeSignedInUser = useCallback(async (u: User) => {
-    /** 付費返回：已 onboarding 者先進主殼，避免 splash 無內容白屏 */
-    if (
-      hasPendingPaymentReturn() &&
-      !needsPwaEncapsulationGate() &&
-      readSecurityOnboardingDone(u.id) &&
-      !readPasswordRecoveryPending()
-    ) {
-      go('main')
-    }
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-      await ensureConnectionWithBudget()
-    }
-    const profile = await getProfile(u.id)
-    routeByProfile(profile, u.id)
-  }, [go]) // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     const listener: EventListener = (e: Event) => {
       const d = (e as CustomEvent<ConnectionRepairDetail>).detail
@@ -577,6 +560,23 @@ export default function App() {
     setPrev((prev) => prev)
     setScreen((prev) => { setPrev(prev); return next })
   }, [])
+
+  const routeSignedInUser = useCallback(async (u: User) => {
+    /** 付費返回：已 onboarding 者先進主殼，避免 splash 無內容白屏 */
+    if (
+      hasPendingPaymentReturn() &&
+      !needsPwaEncapsulationGate() &&
+      readSecurityOnboardingDone(u.id) &&
+      !readPasswordRecoveryPending()
+    ) {
+      go('main')
+    }
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      await ensureConnectionWithBudget()
+    }
+    const profile = await getProfile(u.id)
+    routeByProfile(profile, u.id)
+  }, [go]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const routeToPasswordRecovery = useCallback(() => {
     markPasswordRecoveryPending()
