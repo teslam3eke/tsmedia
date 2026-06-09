@@ -131,8 +131,8 @@ export function clearPaymentReturnReloadFlag(): void {
 }
 
 /**
- * 綠界全頁跳回後硬重開 PWA 一次，避免 Supabase／profile 卡在半死狀態。
- * 每筆付款返回只 reload 一次；回 true 表示已觸發 reload（caller 勿再 mount React）。
+ * 綠界全頁跳回後硬重開 PWA 一次（在 App auth 還原 session 後觸發，勿在 boot 最早呼叫）。
+ * 每筆付款返回只 reload 一次；回 true 表示已觸發 reload。
  */
 export function reloadOnceAfterPaymentReturn(): boolean {
   if (typeof window === 'undefined') return false
