@@ -693,11 +693,15 @@ export default function App() {
     go('landing')
   }, [authReady, screen, go, routeToPasswordRecovery, user?.id, paymentReturnRecoveryExhausted]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** 付款返回：session 晚到或誤入 landing 時持續還原並導入主畫面 */
+  /** 付款返回：僅在尚未登入的 guest 畫面還原 session（勿干擾 security-check／onboarding） */
   useEffect(() => {
     if (!authReady || !hasPendingPaymentReturn()) return
     if (paymentReturnRecoveryExhausted) return
     if (screen === 'main') return
+    const guestOnly =
+      screen === 'splash' || screen === 'landing' || screen === 'auth'
+    if (!guestOnly) return
+    if (user?.id) return
 
     let cancelled = false
     let attempts = 0

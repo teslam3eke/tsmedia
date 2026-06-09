@@ -144,10 +144,18 @@ export function tryAlternateOriginForPaymentReturn(): boolean {
   return true
 }
 
-/** boot 最早呼叫：綠界 302 回 `/?payment=return` 時保留意圖（MainScreen 掛載前 URL 可能被清掉） */
+/** boot 最早呼叫：綠界 302 回 `/?payment=return` 時保留意圖；無 URL 參數則清掉舊 storage 避免一般登入誤觸 */
 export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
   const query = readPaymentReturnQuery()
-  if (!query.kind) return null
+  if (!query.kind) {
+    try {
+      sessionStorage.removeItem(PAYMENT_RETURN_STORAGE_KEY)
+      sessionStorage.removeItem(PAYMENT_RETURN_ORIGIN_TRIED_KEY)
+    } catch {
+      /* ignore */
+    }
+    return null
+  }
   try {
     sessionStorage.setItem(PAYMENT_RETURN_STORAGE_KEY, JSON.stringify(query))
   } catch {

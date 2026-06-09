@@ -1,6 +1,6 @@
 import { isIosNonSafariBrowser } from '@/lib/authBrowser'
 
-const SITE_FALLBACK = 'https://tsmedia.tw/'
+const SITE_FALLBACK = 'https://www.tsmedia.tw/'
 
 /** 要交給 Safari 開啟的 https 網址（含確認信 ?code= 等）。 */
 export function resolveTsMediaOpenUrl(preferred?: string): string {

@@ -26,6 +26,18 @@ export async function hasActiveWebPushSubscription(): Promise<boolean> {
   }
 }
 
+async function serviceWorkerReadyWithTimeout(ms = 12_000): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => globalThis.setTimeout(() => resolve(null), ms)),
+    ])
+  } catch {
+    return null
+  }
+}
+
 /** 使用者已允許通知且環境有 VAPID 公鑰時，註冊 Push 並寫入 `push_subscriptions`。 */
 export async function subscribeWebPushForCurrentUser(userId: string): Promise<boolean> {
   if (!VAPID?.trim()) return false
@@ -34,7 +46,11 @@ export async function subscribeWebPushForCurrentUser(userId: string): Promise<bo
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false
 
   try {
-    const reg = await navigator.serviceWorker.ready
+    const reg = await serviceWorkerReadyWithTimeout()
+    if (!reg) {
+      console.warn('[webPush] serviceWorker.ready timeout')
+      return false
+    }
     let sub = await reg.pushManager.getSubscription()
     if (!sub) {
       sub = await subscribeFresh(reg)
