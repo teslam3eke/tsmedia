@@ -159,11 +159,9 @@ const queryPersister = createSyncStoragePersister({
 /** 信箱確認 ?code= 須先換 session 再掛載 React，否則首屏常誤判未登入而卡住 */
 async function boot() {
   capturePaymentReturnFromUrl()
+  /** 僅快速還原 session；連線修復留給 App／MainScreen（避免 boot + route 重複 await 30s+） */
   if (hasPendingPaymentReturn()) {
-    await restorePersistedAuthSession(10_000)
-    await repairAuthAfterResume()
-    await ensureConnectionWithBudget(12_000)
-    void queryClient.invalidateQueries()
+    await restorePersistedAuthSession(6_000)
   }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(

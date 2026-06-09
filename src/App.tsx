@@ -570,19 +570,37 @@ export default function App() {
 
     const flight = (async () => {
       const paymentReturn = hasPendingPaymentReturn()
+      const onboarded =
+        !needsPwaEncapsulationGate() &&
+        readSecurityOnboardingDone(u.id) &&
+        !readPasswordRecoveryPending()
 
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        if (paymentReturn) {
-          await restorePersistedAuthSession(4_000)
-        }
-        await repairAuthAfterResume()
-        await ensureConnectionWithBudget(paymentReturn ? 12_000 : 6_000)
+        await Promise.race([
+          (async () => {
+            await repairAuthAfterResume()
+            await ensureConnectionWithBudget(paymentReturn ? 6_000 : 5_500)
+          })(),
+          new Promise<void>((resolve) =>
+            globalThis.setTimeout(resolve, paymentReturn ? 8_000 : 6_000),
+          ),
+        ])
       }
 
-      let profile = await getProfile(u.id)
-      if (!profile && paymentReturn) {
-        await ensureConnectionWithBudget(8_000)
-        profile = await getProfile(u.id)
+      /** 付費返回且已 onboarding：先進主殼，避免 splash「正在進入」卡到 getProfile 結束 */
+      if (paymentReturn && onboarded) {
+        go('main')
+      }
+
+      const profile = await Promise.race([
+        getProfile(u.id),
+        new Promise<Awaited<ReturnType<typeof getProfile>>>((resolve) =>
+          globalThis.setTimeout(() => resolve(null), paymentReturn ? 6_000 : 10_000),
+        ),
+      ])
+
+      if (paymentReturn && onboarded && !profile) {
+        return
       }
 
       routeByProfile(profile, u.id)
@@ -799,6 +817,21 @@ export default function App() {
     if (screen === 'main') return
     void routeSignedInUser(user)
   }, [authReady, user?.id, screen, routeSignedInUser])
+
+  /** 付費返回 splash 逾時保底：仍進主殼，探索／個資由 MainScreen 前景 reload 補 */
+  useEffect(() => {
+    if (!authReady || screen !== 'splash' || !hasPendingPaymentReturn()) return
+    const uid = user?.id
+    if (!uid) return
+    if (!readSecurityOnboardingDone(uid) || readPasswordRecoveryPending()) return
+
+    const t = window.setTimeout(() => {
+      if (screenRef.current !== 'splash') return
+      go('main')
+    }, 10_000)
+
+    return () => window.clearTimeout(t)
+  }, [authReady, screen, user?.id, go])
 
   /** auth init 異常時勿永遠停在藍底 splash */
   useEffect(() => {
