@@ -8,24 +8,28 @@ export type CreditPackProduct = {
   creditLabel: string
 }
 
+/** 金流測試用；上線前改回 false */
+const PAYMENT_TEST_ONE_NTD = true
+
 export const CREDIT_PACK_PRODUCTS: CreditPackProduct[] = [
   {
     key: 'super_like_5',
     title: '超級喜歡 x5',
     subtitle: '探索送出超級喜歡時消耗',
-    priceNtd: 199,
+    priceNtd: PAYMENT_TEST_ONE_NTD ? 1 : 199,
     creditLabel: '5 次超級喜歡',
   },
   {
     key: 'blur_unlock_16',
     title: '解除拼圖 x16',
     subtitle: '配對聊天隨機解鎖對方照片拼圖',
-    priceNtd: 99,
+    priceNtd: PAYMENT_TEST_ONE_NTD ? 1 : 99,
     creditLabel: '16 次解除拼圖',
   },
 ]
 
 export function membershipMonthlyPriceNtd(gender: 'male' | 'female'): number {
+  if (PAYMENT_TEST_ONE_NTD) return 1
   return gender === 'male' ? 399 : 299
 }
 

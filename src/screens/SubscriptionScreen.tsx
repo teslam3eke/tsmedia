@@ -10,6 +10,7 @@ import {
   getCardPrime,
   type TPDirectAPI,
 } from '@/lib/tappayClient'
+import { membershipMonthlyPriceNtd } from '@/lib/membershipProducts'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export default function SubscriptionScreen({
@@ -71,7 +72,7 @@ export default function SubscriptionScreen({
     }
   }, [tapConfigured])
 
-  const price = gender === 'male' ? 399 : 299
+  const price = membershipMonthlyPriceNtd(gender)
 
   const subscribeMock = async () => {
     setBusy(true)

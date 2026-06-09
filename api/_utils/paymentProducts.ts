@@ -1,14 +1,24 @@
+/** 金流測試用；上線前改回正式價（男 399／女 299、道具 199／99） */
+export const PAYMENT_TEST_ONE_NTD = true
+
+export const MEMBERSHIP_PRICE_NTD = { male: 1, female: 1 } as const
+
 export const CREDIT_PACKS: Record<string, { amount: number; details: string; itemName: string }> = {
   super_like_5: {
-    amount: 199,
+    amount: PAYMENT_TEST_ONE_NTD ? 1 : 199,
     details: 'tsMedia 加購：超級喜歡 x5',
     itemName: '超級喜歡 x5',
   },
   blur_unlock_16: {
-    amount: 99,
+    amount: PAYMENT_TEST_ONE_NTD ? 1 : 99,
     details: 'tsMedia 加購：解除拼圖 x16',
     itemName: '解除拼圖 x16',
   },
+}
+
+export function membershipAmountNtd(gender: 'male' | 'female'): number {
+  if (PAYMENT_TEST_ONE_NTD) return 1
+  return gender === 'male' ? 399 : 299
 }
 
 /** 綠界 MerchantTradeNo 上限 20 字元（英數） */

@@ -11,6 +11,7 @@ import {
   CREDIT_PACKS,
   formatEcpayMerchantTradeDate,
   makeMerchantTradeNo,
+  membershipAmountNtd,
 } from './_utils/paymentProducts.js'
 
 type Body = {
@@ -66,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
     }
 
-    amount = profile.gender === 'male' ? 399 : 299
+    amount = membershipAmountNtd(profile.gender as 'male' | 'female')
     itemDesc = 'tsMedia VIP 月卡 30 天'
     itemName = 'tsMedia VIP 月卡 30 天'
   } else if (productType === 'credit_pack') {
