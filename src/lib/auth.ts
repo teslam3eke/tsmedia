@@ -369,6 +369,44 @@ export async function ensureRecoveryAuthSession(): Promise<User | null> {
   return null
 }
 
+/**
+ * 從外部金流全頁跳轉回 PWA 時，WebKit 偶發首輪 `getSession()` 為 null（storage 尚未就緒）。
+ * 付款返回等場景在導向 landing 前先多試換發／讀取，避免誤判登出。
+ */
+export async function restorePersistedAuthSession(budgetMs = 8_000): Promise<User | null> {
+  if (typeof window === 'undefined') return null
+
+  try {
+    await supabase.auth.initialize()
+  } catch {
+    /* ignore */
+  }
+
+  const deadline = Date.now() + budgetMs
+  while (Date.now() < deadline) {
+    try {
+      const { data: refreshed } = await supabase.auth.refreshSession()
+      if (refreshed.session?.user) return refreshed.session.user
+    } catch {
+      /* ignore */
+    }
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    if (session?.user) return session.user
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user) return user
+
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 280))
+  }
+
+  return null
+}
+
 // ── 登出 ──────────────────────────────────────────────────────
 export async function signOut(): Promise<void> {
   await unsubscribeWebPushOnSignOut()

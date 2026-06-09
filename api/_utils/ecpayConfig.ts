@@ -17,7 +17,7 @@ export function getSiteUrl(): string {
   const raw =
     process.env.ECPAY_SITE_URL?.trim() ||
     process.env.VITE_SITE_URL?.trim() ||
-    'https://www.tsmedia.tw'
+    'https://tsmedia.tw'
   return raw.replace(/\/$/, '')
 }
 

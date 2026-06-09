@@ -115,6 +115,43 @@ export type PaymentReturnQuery = {
   status: 'ok' | 'fail' | null
 }
 
+const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
+
+/** boot 最早呼叫：綠界 302 回 `/?payment=return` 時保留意圖（MainScreen 掛載前 URL 可能被清掉） */
+export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
+  const query = readPaymentReturnQuery()
+  if (!query.kind) return null
+  try {
+    sessionStorage.setItem(PAYMENT_RETURN_STORAGE_KEY, JSON.stringify(query))
+  } catch {
+    /* private mode */
+  }
+  return query
+}
+
+export function hasPendingPaymentReturn(): boolean {
+  return Boolean(readEffectivePaymentReturnQuery().kind)
+}
+
+export function readEffectivePaymentReturnQuery(): PaymentReturnQuery {
+  const fromUrl = readPaymentReturnQuery()
+  if (fromUrl.kind) return fromUrl
+  if (typeof window === 'undefined') {
+    return { kind: null, orderNo: null, status: null }
+  }
+  try {
+    const raw = sessionStorage.getItem(PAYMENT_RETURN_STORAGE_KEY)
+    if (!raw) return { kind: null, orderNo: null, status: null }
+    const parsed = JSON.parse(raw) as PaymentReturnQuery
+    if (parsed.kind !== 'return' && parsed.kind !== 'cancel') {
+      return { kind: null, orderNo: null, status: null }
+    }
+    return parsed
+  } catch {
+    return { kind: null, orderNo: null, status: null }
+  }
+}
+
 export function readPaymentReturnQuery(): PaymentReturnQuery {
   if (typeof window === 'undefined') {
     return { kind: null, orderNo: null, status: null }
@@ -133,6 +170,11 @@ export function readPaymentReturnQuery(): PaymentReturnQuery {
 
 export function clearPaymentReturnQuery() {
   if (typeof window === 'undefined') return
+  try {
+    sessionStorage.removeItem(PAYMENT_RETURN_STORAGE_KEY)
+  } catch {
+    /* ignore */
+  }
   const url = new URL(window.location.href)
   url.searchParams.delete('payment')
   url.searchParams.delete('order')

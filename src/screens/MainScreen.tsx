@@ -64,7 +64,7 @@ import { CREDIT_PACK_PRODUCTS } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
   pollEcpayOrderPaid,
-  readPaymentReturnQuery,
+  readEffectivePaymentReturnQuery,
 } from '@/lib/ecpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
@@ -6597,7 +6597,7 @@ export default function MainScreen({
   /** 綠界付款完成返回 PWA：輪詢 PaymentInfoURL 入帳後顯示獎勵 */
   useEffect(() => {
     if (!user?.id) return
-    const query = readPaymentReturnQuery()
+    const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
     clearPaymentReturnQuery()
 

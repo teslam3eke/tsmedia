@@ -5,20 +5,13 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { verifyCheckMacValue } from './_utils/ecpayCrypto.js'
 import { readEcpayConfig } from './_utils/ecpayConfig.js'
+import { readEcpayFormBody } from './_utils/ecpayFormBody.js'
 import { fulfillEcpayOrder } from './_utils/ecpayFulfill.js'
 
-function readFormBody(req: VercelRequest): Record<string, string> {
-  if (typeof req.body === 'string') {
-    return Object.fromEntries(new URLSearchParams(req.body))
-  }
-  if (req.body && typeof req.body === 'object') {
-    const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(req.body as Record<string, unknown>)) {
-      if (v !== undefined && v !== null) out[k] = String(v)
-    }
-    return out
-  }
-  return {}
+export const config = {
+  api: {
+    bodyParser: false,
+  },
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -33,7 +26,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const { cfg } = cfgRes
 
-  const body = readFormBody(req)
+  const body = await readEcpayFormBody(req)
+
+  if (!body.MerchantTradeNo?.trim()) {
+    console.warn('[ecpay-notify] missing MerchantTradeNo')
+    return res.status(400).send('0|Missing MerchantTradeNo')
+  }
 
   if (!verifyCheckMacValue(body, cfg.hashKey, cfg.hashIV)) {
     console.warn('[ecpay-notify] CheckMacValue mismatch', body.MerchantTradeNo)

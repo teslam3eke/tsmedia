@@ -29,6 +29,7 @@ import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionn
 import {
   signOut,
   consumeSupabaseAuthCallbackFromUrl,
+  restorePersistedAuthSession,
   shouldShowIosSafariAuthGuide,
   markPasswordRecoveryPending,
   readPasswordRecoveryPending,
@@ -36,6 +37,7 @@ import {
   clearPasswordResetFlowStarted,
   isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
+import { hasPendingPaymentReturn } from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
@@ -137,6 +139,8 @@ export default function App() {
   const [authSafariExchangeFailed, setAuthSafariExchangeFailed] = useState(false)
   /** 信箱連結換券失敗時顯示於 landing */
   const [authCallbackError, setAuthCallbackError] = useState<string | null>(null)
+  const screenRef = useRef(screen)
+  screenRef.current = screen
 
   const getActiveUser = async () => {
     if (user) return user
@@ -556,6 +560,7 @@ export default function App() {
   // ── Auth init: read existing session first, then listen for changes ─────────
   useEffect(() => {
     let cancelled = false
+    const pendingPaymentReturn = hasPendingPaymentReturn()
 
     const routeSignedInUser = async (u: User) => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
@@ -564,6 +569,23 @@ export default function App() {
       const profile = await getProfile(u.id)
       if (cancelled) return
       routeByProfile(profile, u.id)
+    }
+
+    const maybeRoutePaymentReturnSession = async (u: User | null, event: string) => {
+      if (!pendingPaymentReturn || !u) return
+      if (event === 'SIGNED_OUT') return
+      if (needsRecoveryScreen()) return
+      const onGuestScreen =
+        screenRef.current === 'splash' ||
+        screenRef.current === 'landing' ||
+        screenRef.current === 'auth'
+      if (
+        event === 'SIGNED_IN' ||
+        event === 'TOKEN_REFRESHED' ||
+        (event === 'INITIAL_SESSION' && onGuestScreen)
+      ) {
+        await routeSignedInUser(u)
+      }
     }
 
     const needsRecoveryScreen = () =>
@@ -580,6 +602,7 @@ export default function App() {
         return
       }
       if (event === 'SIGNED_OUT') go('landing')
+      await maybeRoutePaymentReturnSession(session?.user ?? null, event)
       /** 首屏路由由下方 init 負責；勿在此處 SIGNED_IN → main，會搶在 recovery 判斷之前。 */
     })
 
@@ -611,7 +634,14 @@ export default function App() {
         data: { session },
       } = await supabase.auth.getSession()
       if (cancelled) return
-      const u = session?.user ?? null
+      let u = session?.user ?? null
+
+      /** 綠界全頁跳轉回站：首輪 getSession 常為 null，多試換發再決定是否 landing */
+      if (!u && pendingPaymentReturn) {
+        u = await restorePersistedAuthSession()
+      }
+
+      if (cancelled) return
       setUser(u)
       if (needsRecoveryScreen()) {
         if (u) markPasswordRecoveryPending()
@@ -637,8 +667,12 @@ export default function App() {
       routeToPasswordRecovery()
       return
     }
+    if (user?.id && hasPendingPaymentReturn()) {
+      void getProfile(user.id).then((profile) => routeByProfile(profile, user.id))
+      return
+    }
     go('landing')
-  }, [authReady, screen, go, routeToPasswordRecovery])
+  }, [authReady, screen, go, routeToPasswordRecovery, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSignOut = async () => {
     setVerifyWaitRevisit(false)
