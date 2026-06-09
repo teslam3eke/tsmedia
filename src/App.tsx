@@ -102,9 +102,9 @@ function readPreferredMainShellTab(): MainScreenTab | null {
 }
 
 // ── Splash loader ─────────────────────────────────────────────────────────────
-function SplashScreen() {
+function SplashScreen({ subtitle }: { subtitle?: string }) {
   return (
-    <div className="min-h-dvh flex items-center justify-center bg-[#0f172a]">
+    <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-[#0f172a] px-6 text-center">
       <motion.div
         animate={{ opacity: [0.3, 1, 0.3] }}
         transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
@@ -113,6 +113,9 @@ function SplashScreen() {
       >
         tsMedia
       </motion.div>
+      {subtitle ? (
+        <p className="max-w-xs text-sm font-medium text-white/70">{subtitle}</p>
+      ) : null}
     </div>
   )
 }
@@ -141,6 +144,12 @@ export default function App() {
   const [authCallbackError, setAuthCallbackError] = useState<string | null>(null)
   const screenRef = useRef(screen)
   screenRef.current = screen
+  const userRef = useRef(user)
+  userRef.current = user
+  const paymentReturnGraceUntilRef = useRef(
+    typeof window !== 'undefined' && hasPendingPaymentReturn() ? Date.now() + 15_000 : 0,
+  )
+  const [paymentReturnRecoveryExhausted, setPaymentReturnRecoveryExhausted] = useState(false)
 
   const getActiveUser = async () => {
     if (user) return user
@@ -595,14 +604,23 @@ export default function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return
-      setUser(session?.user ?? null)
+      const nextUser = session?.user ?? null
+      if (
+        !(event === 'INITIAL_SESSION' && pendingPaymentReturn && !nextUser && userRef.current)
+      ) {
+        setUser(nextUser)
+      }
       if (needsIosSafariBrowserGate()) return
       if (event === 'PASSWORD_RECOVERY') {
         routeToPasswordRecovery()
         return
       }
-      if (event === 'SIGNED_OUT') go('landing')
-      await maybeRoutePaymentReturnSession(session?.user ?? null, event)
+      if (event === 'SIGNED_OUT') {
+        if (Date.now() < paymentReturnGraceUntilRef.current) return
+        go('landing')
+        return
+      }
+      await maybeRoutePaymentReturnSession(nextUser ?? userRef.current, event)
       /** 首屏路由由下方 init 負責；勿在此處 SIGNED_IN → main，會搶在 recovery 判斷之前。 */
     })
 
@@ -652,7 +670,7 @@ export default function App() {
       setReady(true)
       if (u) {
         await routeSignedInUser(u)
-      } else {
+      } else if (!pendingPaymentReturn) {
         go('landing')
       }
     })()
@@ -671,8 +689,63 @@ export default function App() {
       void getProfile(user.id).then((profile) => routeByProfile(profile, user.id))
       return
     }
+    if (hasPendingPaymentReturn() && !paymentReturnRecoveryExhausted) return
     go('landing')
-  }, [authReady, screen, go, routeToPasswordRecovery, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authReady, screen, go, routeToPasswordRecovery, user?.id, paymentReturnRecoveryExhausted]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 付款返回：session 晚到或誤入 landing 時持續還原並導入主畫面 */
+  useEffect(() => {
+    if (!authReady || !hasPendingPaymentReturn()) return
+    if (screen === 'main') return
+
+    let cancelled = false
+    let attempts = 0
+    const maxAttempts = 8
+
+    const tryRoute = async (u: User) => {
+      setUser(u)
+      const profile = await getProfile(u.id)
+      if (cancelled) return
+      routeByProfile(profile, u.id)
+    }
+
+    const tick = async () => {
+      if (cancelled || screenRef.current === 'main') return
+
+      if (userRef.current?.id) {
+        await tryRoute(userRef.current)
+        return
+      }
+
+      const u = await restorePersistedAuthSession(4_000)
+      if (cancelled) return
+      if (u) {
+        await tryRoute(u)
+        return
+      }
+
+      attempts += 1
+      if (attempts >= maxAttempts) {
+        setPaymentReturnRecoveryExhausted(true)
+        if (screenRef.current === 'splash') go('landing')
+      }
+    }
+
+    void tick()
+    const intervalId = window.setInterval(() => void tick(), 2_500)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [authReady, screen, go]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** user 狀態補上後（auth 事件晚於 landing）立即導回主畫面 */
+  useEffect(() => {
+    if (!authReady || !user?.id || !hasPendingPaymentReturn()) return
+    if (screen !== 'landing' && screen !== 'splash' && screen !== 'auth') return
+    void getProfile(user.id).then((profile) => routeByProfile(profile, user.id))
+  }, [authReady, user?.id, screen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSignOut = async () => {
     setVerifyWaitRevisit(false)
@@ -764,7 +837,21 @@ export default function App() {
       </div>
     ) : null
 
-  if (!authReady) return <SplashScreen />
+  const paymentReturnRecovering =
+    hasPendingPaymentReturn() &&
+    !paymentReturnRecoveryExhausted &&
+    screen !== 'main' &&
+    (screen === 'splash' || screen === 'landing' || !user?.id)
+
+  if (!authReady || paymentReturnRecovering) {
+    return (
+      <SplashScreen
+        subtitle={
+          paymentReturnRecovering ? '付款完成，正在恢復登入…' : undefined
+        }
+      />
+    )
+  }
 
   if (needsIosSafariBrowserGate()) {
     return <IosSafariRequiredScreen exchangeFailed={authSafariExchangeFailed} />
@@ -807,7 +894,11 @@ export default function App() {
       >
         {screen === 'landing' && (
           <LandingScreen
-            authNotice={authCallbackError}
+            authNotice={
+              paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
+                ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
+                : authCallbackError
+            }
             onStart={() => go('auth')}
             onOpenPaymentInfo={() => go('membership-payment-info')}
           />
