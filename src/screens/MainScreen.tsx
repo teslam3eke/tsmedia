@@ -35,6 +35,8 @@ import {
   ensureConnectionWithBudget,
   repairAuthAfterResume,
   prepareSupabaseForProfileReads,
+  paymentReturnAuthRepairPending,
+  clearPaymentReturnAuthRepairPending,
   awaitRealtimeWsSignalWithin,
   PROFILE_TAB_REALTIME_SIGNAL_MS,
   supabase,
@@ -1567,6 +1569,12 @@ function DiscoverTab({
       setLiveDeck([])
       setDeckLoadDiagnostic(null)
       clearDiscoverFailAutoReloadFlag()
+      return
+    }
+
+    /** 付費返回：須等 MainScreen 換發 JWT 後再打 RPC，否則與背景切換相同「全空」假死 */
+    if (paymentReturnAuthRepairPending()) {
+      if (liveDeckRef.current.length === 0) setLiveDeckStatus('loading')
       return
     }
 
@@ -5598,6 +5606,7 @@ function ProfileTab({
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
+      if (paymentReturnAuthRepairPending()) return
       const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       try {
         actionTrace('profileTab', 'load:開始', {
@@ -6288,19 +6297,23 @@ export default function MainScreen({
   }, [user?.id])
 
   /**
-   * 首次進入主殼：先 bump 探索／配對重抓，連線暖機放背景（勿 await 12s 擋 deck RPC）。
+   * 首次進入主殼：付費返回須先 await 換發＋ensure 再 bump（探索／個資 RPC）；一般進入可先 bump。
    */
   useEffect(() => {
     if (!user?.id) return
     if (document.visibilityState !== 'visible') return
     let cancelled = false
-    void queryClient.invalidateQueries()
-    setForegroundReloadNonce((n) => n + 1)
     void (async () => {
+      const paymentWarm = paymentReturnAuthRepairPending()
+      if (!paymentWarm) {
+        void queryClient.invalidateQueries()
+        setForegroundReloadNonce((n) => n + 1)
+      }
       await repairAuthAfterResume()
       if (cancelled) return
-      await ensureConnectionWithBudget(5_000)
+      await ensureConnectionWithBudget(paymentWarm ? 10_000 : 5_000)
       if (cancelled) return
+      if (paymentWarm) clearPaymentReturnAuthRepairPending()
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
     })()

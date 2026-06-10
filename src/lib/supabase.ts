@@ -330,12 +330,30 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
  * （不依賴單一分頁／effect 競態。）
  */
 const IOS_RESUME_AUTH_REPAIR_KEY = 'tm_ios_resume_needs_full_auth'
+/** 綠界全頁跳回：冷啟 document 常為 visible，不會走 hidden→visible，須另打 deep auth repair 記號。 */
+const PAYMENT_RETURN_AUTH_REPAIR_KEY = 'tm_payment_return_needs_auth_repair_v1'
 
 function markIosNeedsFullAuthRepairAfterHiddenOrCache(): void {
   try {
     sessionStorage.setItem(IOS_RESUME_AUTH_REPAIR_KEY, '1')
   } catch {
     /* private mode／quota */
+  }
+}
+
+export function markPaymentReturnAuthRepairPending(): void {
+  try {
+    sessionStorage.setItem(PAYMENT_RETURN_AUTH_REPAIR_KEY, '1')
+  } catch {
+    /* private mode／quota */
+  }
+}
+
+export function paymentReturnAuthRepairPending(): boolean {
+  try {
+    return sessionStorage.getItem(PAYMENT_RETURN_AUTH_REPAIR_KEY) === '1'
+  } catch {
+    return false
   }
 }
 
@@ -347,12 +365,29 @@ function iosResumeFullAuthRepairPending(): boolean {
   }
 }
 
+function needsFullAuthRepairPending(): boolean {
+  return iosResumeFullAuthRepairPending() || paymentReturnAuthRepairPending()
+}
+
+export function clearPaymentReturnAuthRepairPending(): void {
+  try {
+    sessionStorage.removeItem(PAYMENT_RETURN_AUTH_REPAIR_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 function clearIosResumeFullAuthRepairFlag(): void {
   try {
     sessionStorage.removeItem(IOS_RESUME_AUTH_REPAIR_KEY)
   } catch {
     /* ignore */
   }
+}
+
+function clearFullAuthRepairFlags(): void {
+  clearIosResumeFullAuthRepairFlag()
+  clearPaymentReturnAuthRepairPending()
 }
 
 /** 前一個 visibility，用來偵測 `hidden`→`visible`（冷啟整頁常為 visible，不視為「從 hidden 回来」）。 */
@@ -686,7 +721,7 @@ export async function prepareSupabaseForProfileReads(mode: 'load' | 'poll'): Pro
   if (document.visibilityState !== 'visible') return
   if (!navigator.onLine) return
 
-  const deep = mode === 'load' || iosResumeFullAuthRepairPending()
+  const deep = mode === 'load' || needsFullAuthRepairPending()
   if (deep) {
     await repairAuthAfterResume()
     await ensureConnectionWithBudget(PROFILE_TAB_READ_ENSURE_DEEP_MS)
@@ -729,7 +764,7 @@ async function runEnsureWithRetries(): Promise<boolean> {
 async function ensureConnectionOnce(): Promise<boolean> {
   if (!navigator.onLine) return false
 
-  const resumedFromIosSuspend = iosResumeFullAuthRepairPending()
+  const resumedFromIosSuspend = needsFullAuthRepairPending()
 
   type Tagged =
     | { tag: 'ok'; session: Session | null; err: unknown }
@@ -754,7 +789,7 @@ async function ensureConnectionOnce(): Promise<boolean> {
   }
 
   if (peek.tag === 'ok' && !peek.err && !peek.session) {
-    clearIosResumeFullAuthRepairFlag()
+    clearFullAuthRepairFlags()
     return true
   }
 
@@ -774,14 +809,14 @@ async function ensureConnectionOnce(): Promise<boolean> {
   if (refErr) {
     const { data: after } = await supabase.auth.getSession()
     if (!after.session) {
-      clearIosResumeFullAuthRepairFlag()
+      clearFullAuthRepairFlags()
       return true
     }
     return false
   }
 
   await wakeSupabaseAuthFromBackground()
-  clearIosResumeFullAuthRepairFlag()
+  clearFullAuthRepairFlags()
   return true
 }
 

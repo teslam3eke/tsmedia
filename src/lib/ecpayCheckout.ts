@@ -1,5 +1,5 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
-import { supabase } from '@/lib/supabase'
+import { markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
   productType: 'membership' | 'credit_pack'
@@ -175,6 +175,7 @@ export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
     }
     return null
   }
+  markPaymentReturnAuthRepairPending()
   try {
     sessionStorage.setItem(PAYMENT_RETURN_STORAGE_KEY, JSON.stringify(query))
   } catch {

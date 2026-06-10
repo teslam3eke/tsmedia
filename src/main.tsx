@@ -169,8 +169,7 @@ async function boot() {
       restorePersistedAuthSession(4_000),
       new Promise<void>((resolve) => globalThis.setTimeout(resolve, 4_200)),
     ])
-    /** 連線暖機與 React 掛載並行，勿再阻塞 splash（Stripe／Checkout.com 建議：先回 App 再背景確認） */
-    void repairAuthAfterResume().then(() => ensureConnectionWithBudget(4_000))
+    /** JWT／Realtime 暖機由 MainScreen 付費返回單次序列負責，避免與探索 RPC 競態 */
   }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(

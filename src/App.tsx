@@ -593,10 +593,9 @@ export default function App() {
         readSecurityOnboardingDone(u.id) &&
         !readPasswordRecoveryPending()
 
-      /** 付費返回且已 onboarding：先進主殼，連線暖機放背景（勿串 8s ensure 擋 splash） */
+      /** 付費返回且已 onboarding：快進主殼；JWT 暖機由 MainScreen 付費返回序列負責 */
       if (paymentReturn && onboarded) {
         go('main')
-        void repairAuthAfterResume().then(() => ensureConnectionWithBudget(4_000))
         return
       }
 
