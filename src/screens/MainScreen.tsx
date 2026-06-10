@@ -65,14 +65,12 @@ import MembershipManagementScreen, {
 import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
-  hasPaymentReturnRewardShown,
+  hardReloadOnceAfterPaymentReturn,
   isPaymentReturnPostReloadPass,
-  markPaymentReturnRewardShown,
   paymentReturnHardReloadPending,
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
   releasePaymentReturnRewardEffect,
-  triggerPaymentReturnResumeReload,
   tryClaimPaymentReturnRewardEffect,
 } from '@/lib/ecpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
@@ -107,7 +105,7 @@ import {
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
-import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod, RESUME_MIN_VISIBILITY_HIDDEN_MS } from '@/lib/resumeHardReload'
+import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
@@ -6267,6 +6265,8 @@ export default function MainScreen({
   const [physicalChannelResubscribeNonce, setPhysicalChannelResubscribeNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
+  /** 付費返回：道具提示關閉後才 hard reload；避免被 pageshow 前景流程清掉 flash */
+  const postPaymentRewardReloadOrderRef = useRef<string | null>(null)
 
   /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒（Safari 分頁改由安全檢測頁引導）。 */
   useEffect(() => {
@@ -6354,7 +6354,7 @@ export default function MainScreen({
         debounceTimer = null
         void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
-          setRewardFlash(null)
+          if (!postPaymentRewardReloadOrderRef.current) setRewardFlash(null)
           setMatchSplash(null)
           setShowDiscoverPuzzleIntro(false)
           void queryClient.invalidateQueries()
@@ -6517,57 +6517,20 @@ export default function MainScreen({
     }
   }, [user?.id, foregroundReloadNonce, ingestUnreadAppNotifications])
 
-  const clearRewardFlash = useCallback(() => {
-    setRewardFlash(null)
+  const armHardReloadAfterRewardDismiss = useCallback((orderNo: string | null | undefined) => {
+    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
+    postPaymentRewardReloadOrderRef.current = orderNo
   }, [])
 
-  /** 付費返回第二輪：預設探索分頁 */
-  useEffect(() => {
-    if (!user?.id) return
-    const q = readEffectivePaymentReturnQuery()
-    if (isPaymentReturnPostReloadPass(q)) setActiveTab('discover')
-  }, [user?.id])
-
-  /**
-   * 付費返回首輪：進入主殼後整頁重載（與 PWA 背景切回前景相同），恢復「我的」等 RPC。
-   * 須在 main + user 就緒後觸發，勿在 splash 擋住主殼。
-   */
-  useEffect(() => {
-    if (!user?.id) return
-    const q = readEffectivePaymentReturnQuery()
-    if (q.kind !== 'return' || !q.orderNo || !paymentReturnHardReloadPending(q.orderNo)) return
-
-    const t = window.setTimeout(() => {
-      triggerPaymentReturnResumeReload(q.orderNo)
-    }, RESUME_MIN_VISIBILITY_HIDDEN_MS)
-
-    return () => window.clearTimeout(t)
-  }, [user?.id])
-
-  /** 付費返回第二輪：主殼就緒後先 prepare profile reads，再 bump 讓「我的」重抓 */
-  useEffect(() => {
-    if (!user?.id) return
-    const q = readEffectivePaymentReturnQuery()
-    if (!isPaymentReturnPostReloadPass(q)) return
-
-    let cancelled = false
-    void (async () => {
-      await prepareSupabaseForProfileReads('load')
-      if (cancelled) return
-      setForegroundReloadNonce((n) => n + 1)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [user?.id])
-
-  /** 付費返回第二輪：切到「我的」時再 bump 一次（ProfileTab 僅在該分頁 mount） */
-  useEffect(() => {
-    if (!user?.id || activeTab !== 'profile') return
-    const q = readEffectivePaymentReturnQuery()
-    if (!isPaymentReturnPostReloadPass(q)) return
-    setForegroundReloadNonce((n) => n + 1)
-  }, [user?.id, activeTab])
+  const clearRewardFlash = useCallback(() => {
+    setRewardFlash(null)
+    const orderNo = postPaymentRewardReloadOrderRef.current
+    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
+    postPaymentRewardReloadOrderRef.current = null
+    requestAnimationFrame(() => {
+      hardReloadOnceAfterPaymentReturn(orderNo)
+    })
+  }, [])
 
   const openSubscriptionModal = useCallback(() => {
     preSubscriptionCreditsRef.current = { ...creditBalance }
@@ -6664,21 +6627,12 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成（boot reload 後第二輪）：顯示道具／VIP 提示 */
+  /** 綠界付款完成：先入帳並顯示道具／VIP 提示，關閉後整頁重開（修 WebKit 僵死連線） */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
     const orderNo = query.orderNo
-
-    if (query.kind === 'return' && orderNo && paymentReturnHardReloadPending(orderNo)) {
-      return
-    }
-
-    if (orderNo && hasPaymentReturnRewardShown(orderNo)) {
-      clearPaymentReturnQuery()
-      return
-    }
 
     if (query.kind === 'cancel') {
       clearPaymentReturnQuery()
@@ -6704,14 +6658,11 @@ export default function MainScreen({
 
     const gatewayOk = query.status === 'ok'
 
+    let cancelled = false
     void (async () => {
       try {
-        await repairAuthAfterResume()
-        await ensureConnectionWithBudget(5_000)
-        void queryClient.invalidateQueries()
-        setForegroundReloadNonce((n) => n + 1)
-
         const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
+        if (cancelled) return
 
         if (!paid?.paid) {
           if (gatewayOk) {
@@ -6720,7 +6671,7 @@ export default function MainScreen({
               title: '付款成功',
               subtitle: '若道具未更新，請至會員管理查看',
             })
-            markPaymentReturnRewardShown(orderNo)
+            armHardReloadAfterRewardDismiss(orderNo)
           } else {
             setRewardFlash({
               variant: 'grant',
@@ -6741,7 +6692,7 @@ export default function MainScreen({
             title: '購買成功',
             subtitle: pack?.creditLabel ?? '道具已入帳',
           })
-          markPaymentReturnRewardShown(orderNo)
+          armHardReloadAfterRewardDismiss(orderNo)
           clearPaymentReturnQuery()
           return
         }
@@ -6774,13 +6725,17 @@ export default function MainScreen({
               ? `會員到期：${expiryLabel}`
               : '若會員管理仍顯示未訂閱，請稍後重新整理',
         })
-        markPaymentReturnRewardShown(orderNo)
+        armHardReloadAfterRewardDismiss(orderNo)
         clearPaymentReturnQuery()
       } finally {
         releasePaymentReturnRewardEffect()
       }
     })()
-  }, [user?.id, refreshCredits])
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, refreshCredits, armHardReloadAfterRewardDismiss])
 
   useEffect(() => {
     if (!user?.id) return

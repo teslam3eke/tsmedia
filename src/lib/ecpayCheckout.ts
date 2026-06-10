@@ -1,5 +1,5 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
-import { triggerResumeStylePageReload } from '@/lib/resumeHardReload'
+import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { clearPaymentReturnAuthRepairPending, markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -183,16 +183,17 @@ export function markPaymentReturnHardReloadDone(orderNo: string): void {
 }
 
 /**
- * 付費返回：與 PWA 背景切回前景相同整頁重載（`location.reload()`）。
- * 每筆 order 僅一次；回 true 表示已觸發重載。
+ * 付費返回：道具／VIP 提示關閉後整頁重開一次（每筆 order 僅一次，localStorage 防無限圈）。
  */
-export function triggerPaymentReturnResumeReload(orderNo: string | null | undefined): boolean {
+export function hardReloadOnceAfterPaymentReturn(orderNo: string | null | undefined): boolean {
   if (typeof window === 'undefined') return false
   if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return false
   if (paymentHardReloadArmedThisDocument) return false
   paymentHardReloadArmedThisDocument = true
   markPaymentReturnHardReloadDone(orderNo)
-  return triggerResumeStylePageReload()
+  markSkipInstantMatchLeaveOnNextFullUnload()
+  window.location.reload()
+  return true
 }
 
 /**
