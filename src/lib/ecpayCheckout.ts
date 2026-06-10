@@ -1,4 +1,5 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
+import { unregisterSwAndClearSiteCaches } from '@/lib/appVersion'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { clearPaymentReturnAuthRepairPending, markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
@@ -183,16 +184,23 @@ export function markPaymentReturnHardReloadDone(orderNo: string): void {
 }
 
 /**
- * 付費返回：首次進探索後整頁重開一次；第二輪再顯示道具／月費提示（localStorage 防無限圈）。
+ * 付費返回：unregister SW + 清 Cache Storage + replace（PWA 上比 reload() 更像手動重整）。
+ * 每筆 order 僅一次；回 true 表示已觸發導航。
  */
-export function hardReloadOnceAfterPaymentReturn(orderNo: string | null | undefined): boolean {
+export async function forceHardPaymentReturnReload(orderNo: string | null | undefined): Promise<boolean> {
   if (typeof window === 'undefined') return false
   if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return false
   if (paymentHardReloadArmedThisDocument) return false
   paymentHardReloadArmedThisDocument = true
   markPaymentReturnHardReloadDone(orderNo)
   markSkipInstantMatchLeaveOnNextFullUnload()
-  window.location.reload()
+
+  await unregisterSwAndClearSiteCaches()
+
+  const url = new URL(window.location.href)
+  url.searchParams.delete('_tm_pr')
+  url.searchParams.set('_tm_pr', String(Date.now()))
+  window.location.replace(url.toString())
   return true
 }
 
@@ -317,6 +325,7 @@ export function clearPaymentReturnQuery() {
   url.searchParams.delete('payment')
   url.searchParams.delete('order')
   url.searchParams.delete('status')
+  url.searchParams.delete('_tm_pr')
   const next = `${url.pathname}${url.search}${url.hash}`
   window.history.replaceState({}, '', next)
 }

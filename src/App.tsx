@@ -39,7 +39,10 @@ import {
   isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
 import {
+  forceHardPaymentReturnReload,
   hasPendingPaymentReturn,
+  paymentReturnHardReloadPending,
+  readEffectivePaymentReturnQuery,
   tryAlternateOriginForPaymentReturn,
 } from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
@@ -593,8 +596,12 @@ export default function App() {
         readSecurityOnboardingDone(u.id) &&
         !readPasswordRecoveryPending()
 
-      /** 付費返回且已 onboarding：快進主殼；JWT 暖機由 MainScreen 付費返回序列負責 */
+      /** 付費返回首輪：勿進主殼，等 App 顯示「重新載入」並 force replace */
       if (paymentReturn && onboarded) {
+        const payQ = readEffectivePaymentReturnQuery()
+        if (payQ.kind === 'return' && payQ.orderNo && paymentReturnHardReloadPending(payQ.orderNo)) {
+          return
+        }
         go('main')
         return
       }
@@ -630,6 +637,24 @@ export default function App() {
       }
     }
   }, [go]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 付費返回首輪：session 就緒後顯示 splash，再 unregister SW 硬重開（非軟 reload 閃一下） */
+  useEffect(() => {
+    if (!authReady || !user?.id) return
+    const q = readEffectivePaymentReturnQuery()
+    if (q.kind !== 'return' || !q.orderNo || !paymentReturnHardReloadPending(q.orderNo)) return
+
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      if (cancelled) return
+      void forceHardPaymentReturnReload(q.orderNo)
+    }, 1_100)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [authReady, user?.id])
 
   const routeToPasswordRecovery = useCallback(() => {
     markPasswordRecoveryPending()
@@ -950,6 +975,18 @@ export default function App() {
     !paymentReturnRecoveryExhausted &&
     !user?.id &&
     screen !== 'main'
+
+  const payReturnQuery = readEffectivePaymentReturnQuery()
+  const paymentReturnHardReloadGate =
+    authReady &&
+    Boolean(user?.id) &&
+    payReturnQuery.kind === 'return' &&
+    Boolean(payReturnQuery.orderNo) &&
+    paymentReturnHardReloadPending(payReturnQuery.orderNo)
+
+  if (paymentReturnHardReloadGate) {
+    return <SplashScreen subtitle="付款完成，正在重新載入應用…" />
+  }
 
   if (!authReady || paymentReturnRecovering) {
     return (

@@ -9,7 +9,6 @@ import App from './App.tsx'
 import { consumeSupabaseAuthCallbackFromUrl, restorePersistedAuthSession } from '@/lib/auth'
 import {
   capturePaymentReturnFromUrl,
-  hardReloadOnceAfterPaymentReturn,
   hasPendingPaymentReturn,
   paymentReturnHardReloadPending,
   readEffectivePaymentReturnQuery,
@@ -176,9 +175,6 @@ async function boot() {
       restorePersistedAuthSession(4_000),
       new Promise<void>((resolve) => globalThis.setTimeout(resolve, 4_200)),
     ])
-    if (payQuery.kind === 'return' && hardReloadOnceAfterPaymentReturn(payQuery.orderNo)) {
-      return
-    }
   }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(

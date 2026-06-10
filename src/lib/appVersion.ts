@@ -13,7 +13,7 @@ import { markSkipInstantMatchLeaveOnNextFullUnload } from './instantMatchUnloadG
 const MIN_PROBE_INTERVAL_MS = 20_000
 let buildIdProbeInFlight = false
 let lastBuildIdProbeEndedAt = 0
-async function unregisterSwAndClearSiteCaches(): Promise<void> {
+export async function unregisterSwAndClearSiteCaches(): Promise<void> {
   try {
     if ('serviceWorker' in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations()
