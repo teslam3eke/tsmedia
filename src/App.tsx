@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { AnimatePresence, motion, type TargetAndTransition } from 'framer-motion'
 import type { User } from '@supabase/supabase-js'
 
@@ -38,7 +38,11 @@ import {
   clearPasswordResetFlowStarted,
   isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
-import { hasPendingPaymentReturn, reloadOnceAfterPaymentReturn, tryAlternateOriginForPaymentReturn } from '@/lib/ecpayCheckout'
+import {
+  hasPendingPaymentReturn,
+  resetClientStateAfterPaymentReturn,
+  tryAlternateOriginForPaymentReturn,
+} from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
@@ -602,8 +606,9 @@ export default function App() {
         ])
       }
 
-      /** 付費返回且已 onboarding：直接進主殼，勿再 routeByProfile（null profile 會誤跳同意書） */
+      /** 付費返回且已 onboarding：清 stale 快取後進主殼，勿再 routeByProfile（null profile 會誤跳同意書） */
       if (paymentReturn && onboarded) {
+        resetClientStateAfterPaymentReturn()
         go('main')
         return
       }
@@ -729,11 +734,6 @@ export default function App() {
         return
       }
 
-      /** 付費返回：「正在載入」session 還原完後整頁重開，第二輪再進主殼（boot 時重開無效） */
-      if (u && pendingPaymentReturn && reloadOnceAfterPaymentReturn()) {
-        return
-      }
-
       /** 先解除 splash 鎖，避免 getProfile／ensure 卡住時整頁像當機 */
       setReady(true)
 
@@ -748,12 +748,6 @@ export default function App() {
 
     return () => { cancelled = true; subscription.unsubscribe() }
   }, [go, routeToPasswordRecovery, routeSignedInUser]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** 付費返回：auth 就緒後若 init 未觸發 reload（例如 user 晚到），補一次 */
-  useLayoutEffect(() => {
-    if (!authReady || !user?.id || !hasPendingPaymentReturn()) return
-    reloadOnceAfterPaymentReturn()
-  }, [authReady, user?.id])
 
   /** authReady 後若仍停在 splash（早期 return 漏設 screen）→ 避免空白頁 */
   useEffect(() => {

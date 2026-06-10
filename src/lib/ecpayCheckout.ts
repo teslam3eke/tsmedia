@@ -1,4 +1,4 @@
-import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
+import { clearAppQueryCache } from '@/lib/queryClient'
 import { supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -120,33 +120,15 @@ export type PaymentReturnQuery = {
 
 const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
 const PAYMENT_RETURN_ORIGIN_TRIED_KEY = 'tm_payment_return_origin_tried_v1'
-const PAYMENT_RETURN_RELOAD_KEY = 'tm_payment_return_did_reload_v1'
-
-export function clearPaymentReturnReloadFlag(): void {
-  try {
-    sessionStorage.removeItem(PAYMENT_RETURN_RELOAD_KEY)
-  } catch {
-    /* ignore */
-  }
-}
 
 /**
- * 綠界全頁跳回後硬重開 PWA 一次（在 App auth 還原 session 後觸發，勿在 boot 最早呼叫）。
- * 每筆付款返回只 reload 一次；回 true 表示已觸發 reload。
+ * 綠界全頁跳回後清掉離線 TanStack／探索 deck 快取，避免 stale 資料導致 RPC 全掛。
+ * 勿用 location.reload()：iOS PWA 上 sessionStorage 旗標常無法跨 reload 保留，會無限「付款完成，正在載入…」。
  */
-export function reloadOnceAfterPaymentReturn(): boolean {
-  if (typeof window === 'undefined') return false
-  const query = readEffectivePaymentReturnQuery()
-  if (query.kind !== 'return') return false
-  try {
-    if (sessionStorage.getItem(PAYMENT_RETURN_RELOAD_KEY) === '1') return false
-    sessionStorage.setItem(PAYMENT_RETURN_RELOAD_KEY, '1')
-  } catch {
-    return false
-  }
-  markSkipInstantMatchLeaveOnNextFullUnload()
-  window.location.reload()
-  return true
+export function resetClientStateAfterPaymentReturn(): void {
+  if (typeof window === 'undefined') return
+  if (!hasPendingPaymentReturn()) return
+  clearAppQueryCache()
 }
 
 /** apex 付完卻無 session 時，改試 www（或反向）一次 */
@@ -182,7 +164,6 @@ export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
     try {
       sessionStorage.removeItem(PAYMENT_RETURN_STORAGE_KEY)
       sessionStorage.removeItem(PAYMENT_RETURN_ORIGIN_TRIED_KEY)
-      sessionStorage.removeItem(PAYMENT_RETURN_RELOAD_KEY)
     } catch {
       /* ignore */
     }
@@ -242,7 +223,6 @@ export function clearPaymentReturnQuery() {
   } catch {
     /* ignore */
   }
-  clearPaymentReturnReloadFlag()
   const url = new URL(window.location.href)
   url.searchParams.delete('payment')
   url.searchParams.delete('order')
