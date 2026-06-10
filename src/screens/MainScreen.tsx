@@ -6763,6 +6763,12 @@ export default function MainScreen({
     }
   }, [user?.id, refreshCredits])
 
+  /** 探索 deck 依 login_last_app_day 排序；進主殼即記錄當 app 日登入（與「我的」統計共用 RPC）。 */
+  useEffect(() => {
+    if (!user?.id) return
+    void refreshProfileTabStats({ skipEnsure: true })
+  }, [user?.id])
+
   /** 避免連續觸發 load 時舊請求晚到覆寫新資料；懸置請求時安全逾時仍會關閉 spinner */
   const liveMatchThreadsLoadGenRef = useRef(0)
 

@@ -725,7 +725,7 @@ export type DailyDiscoverRpcRow = {
   incoming_super_liked?: boolean
 }
 
-/** 今日探索名單（最多 6 人）：優先未曾在探索出現；同條件依對方最近登入日／更新時間排序；不足時可含曾出現者。 */
+/** 今日探索名單（最多 6 人）：incoming like／超喜優先；新面孔優先；同條件依 login_last_app_day（新→舊）再隨機；重複候選仍加權 deck_show_count。 */
 export async function fetchDailyDiscoverDeck(options?: {
   skipWake?: boolean
   /** DiscoverTab 每輪載入建立的 signal：effect cleanup／新一輪取代時 abort，卡住中的上一輪 `await rpc` 才會卸下。 */
