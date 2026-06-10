@@ -40,7 +40,6 @@ import {
 } from '@/lib/auth'
 import {
   hasPendingPaymentReturn,
-  resetClientStateAfterPaymentReturn,
   tryAlternateOriginForPaymentReturn,
 } from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
@@ -594,23 +593,23 @@ export default function App() {
         readSecurityOnboardingDone(u.id) &&
         !readPasswordRecoveryPending()
 
+      /** 付費返回且已 onboarding：先進主殼，連線暖機放背景（勿串 8s ensure 擋 splash） */
+      if (paymentReturn && onboarded) {
+        go('main')
+        void repairAuthAfterResume().then(() => ensureConnectionWithBudget(4_000))
+        return
+      }
+
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         await Promise.race([
           (async () => {
             await repairAuthAfterResume()
-            await ensureConnectionWithBudget(paymentReturn ? 6_000 : 5_500)
+            await ensureConnectionWithBudget(paymentReturn ? 4_000 : 5_500)
           })(),
           new Promise<void>((resolve) =>
-            globalThis.setTimeout(resolve, paymentReturn ? 8_000 : 6_000),
+            globalThis.setTimeout(resolve, paymentReturn ? 5_000 : 6_000),
           ),
         ])
-      }
-
-      /** 付費返回且已 onboarding：清 stale 快取後進主殼，勿再 routeByProfile（null profile 會誤跳同意書） */
-      if (paymentReturn && onboarded) {
-        resetClientStateAfterPaymentReturn()
-        go('main')
-        return
       }
 
       const profile = await Promise.race([
@@ -719,9 +718,9 @@ export default function App() {
       let u = await readSessionUserWithBudget(2_500)
       if (cancelled) return
 
-      /** 綠界全頁跳轉回站：首輪 getSession 常為 null，多試換發 */
+      /** 綠界全頁跳轉回站：main.tsx boot 已試過 restore */
       if (!u && pendingPaymentReturn) {
-        u = await restorePersistedAuthSession(5_000)
+        u = await restorePersistedAuthSession(2_500)
       }
 
       if (cancelled) return

@@ -63,7 +63,6 @@ import MembershipManagementScreen, {
 import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
-  hasPendingPaymentReturn,
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
 } from '@/lib/ecpayCheckout'
@@ -6289,21 +6288,18 @@ export default function MainScreen({
   }, [user?.id])
 
   /**
-   * 首次進入主殼（SPA 內導航無新 `pageshow`）：使用者在 onboarding／驗證頁停留過久時 JWT 可能已過期；
-   * 僅依賴「背景↔前景」wake 會漏掉此情況（iOS 特別明顯）。
-   * 綠界全頁跳轉回站亦同：須先 await 連線再 bump，否則探索／個資 RPC 會全掛直到重開 App。
+   * 首次進入主殼：先 bump 探索／配對重抓，連線暖機放背景（勿 await 12s 擋 deck RPC）。
    */
   useEffect(() => {
     if (!user?.id) return
     if (document.visibilityState !== 'visible') return
     let cancelled = false
+    void queryClient.invalidateQueries()
+    setForegroundReloadNonce((n) => n + 1)
     void (async () => {
-      const paymentReturn = hasPendingPaymentReturn()
       await repairAuthAfterResume()
       if (cancelled) return
-      void queryClient.invalidateQueries()
-      setForegroundReloadNonce((n) => n + 1)
-      await ensureConnectionWithBudget(paymentReturn ? 12_000 : 8_000)
+      await ensureConnectionWithBudget(5_000)
       if (cancelled) return
       void queryClient.invalidateQueries()
       setForegroundReloadNonce((n) => n + 1)
@@ -6599,7 +6595,7 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成返回 PWA：輪詢 PaymentInfoURL 入帳後顯示獎勵 */
+  /** 綠界付款完成返回 PWA：樂觀顯示成功，背景輪詢入帳（勿全螢幕擋 30s） */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
@@ -6624,25 +6620,28 @@ export default function MainScreen({
       return
     }
 
-    if (query.status === 'fail') {
+    const gatewayOk = query.status === 'ok'
+    if (gatewayOk) {
       setRewardFlash({
         variant: 'grant',
-        title: '付款確認中',
-        subtitle: '已收到付款，入帳可能需要數十秒，請稍候在會員管理查看',
+        title: '付款成功',
+        subtitle: '正在更新會員與道具…',
       })
     }
 
     let cancelled = false
-    ;(async () => {
-      const paid = await pollEcpayOrderPaid(query.orderNo!)
+    void (async () => {
+      const paid = await pollEcpayOrderPaid(query.orderNo!, { gatewayConfirmed: gatewayOk })
       if (cancelled) return
 
       if (!paid?.paid) {
-        setRewardFlash({
-          variant: 'grant',
-          title: '付款確認中',
-          subtitle: '入帳可能需要數十秒，請稍後在會員管理查看',
-        })
+        if (!gatewayOk) {
+          setRewardFlash({
+            variant: 'grant',
+            title: '付款確認中',
+            subtitle: '入帳可能需要數十秒，請稍後在會員管理查看',
+          })
+        }
         return
       }
 

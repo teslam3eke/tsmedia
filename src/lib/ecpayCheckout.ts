@@ -1,4 +1,4 @@
-import { clearAppQueryCache } from '@/lib/queryClient'
+import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
 import { supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -93,13 +93,14 @@ export async function fetchEcpayOrderStatus(orderNo: string): Promise<EcpayOrder
   return json
 }
 
-/** 付款返回後輪詢 PaymentInfoURL 入帳（最多約 30 秒） */
+/** 付款返回後輪詢入帳；綠界 return 已 status=ok 時用較短輪詢（webhook／return 通常已入帳） */
 export async function pollEcpayOrderPaid(
   orderNo: string,
-  opts?: { attempts?: number; intervalMs?: number },
+  opts?: { attempts?: number; intervalMs?: number; gatewayConfirmed?: boolean },
 ): Promise<EcpayOrderStatus | null> {
-  const attempts = opts?.attempts ?? 15
-  const intervalMs = opts?.intervalMs ?? 2000
+  const gatewayConfirmed = opts?.gatewayConfirmed === true
+  const attempts = opts?.attempts ?? (gatewayConfirmed ? 4 : 10)
+  const intervalMs = opts?.intervalMs ?? (gatewayConfirmed ? 1_200 : 2_000)
 
   for (let i = 0; i < attempts; i++) {
     const status = await fetchEcpayOrderStatus(orderNo)
@@ -122,13 +123,18 @@ const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
 const PAYMENT_RETURN_ORIGIN_TRIED_KEY = 'tm_payment_return_origin_tried_v1'
 
 /**
- * 綠界全頁跳回後清掉離線 TanStack／探索 deck 快取，避免 stale 資料導致 RPC 全掛。
- * 勿用 location.reload()：iOS PWA 上 sessionStorage 旗標常無法跨 reload 保留，會無限「付款完成，正在載入…」。
+ * 綠界全頁跳回後清掉 TanStack 持久化快取（勿清探索 deck LS，保留 SWR 避免白屏）。
+ * 勿用 location.reload()：iOS PWA 上 sessionStorage 旗標常無法跨 reload 保留。
  */
 export function resetClientStateAfterPaymentReturn(): void {
   if (typeof window === 'undefined') return
   if (!hasPendingPaymentReturn()) return
-  clearAppQueryCache()
+  queryClient.clear()
+  try {
+    localStorage.removeItem(QUERY_CACHE_STORAGE_KEY)
+  } catch {
+    /* private mode / quota */
+  }
 }
 
 /** apex 付完卻無 session 時，改試 www（或反向）一次 */

@@ -165,9 +165,12 @@ async function boot() {
   capturePaymentReturnFromUrl()
   if (hasPendingPaymentReturn()) {
     resetClientStateAfterPaymentReturn()
-    await restorePersistedAuthSession(6_000)
-    await repairAuthAfterResume()
-    await ensureConnectionWithBudget(8_000)
+    await Promise.race([
+      restorePersistedAuthSession(4_000),
+      new Promise<void>((resolve) => globalThis.setTimeout(resolve, 4_200)),
+    ])
+    /** 連線暖機與 React 掛載並行，勿再阻塞 splash（Stripe／Checkout.com 建議：先回 App 再背景確認） */
+    void repairAuthAfterResume().then(() => ensureConnectionWithBudget(4_000))
   }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(
