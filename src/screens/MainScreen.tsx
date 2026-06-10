@@ -2192,7 +2192,7 @@ function DiscoverTab({
         {!emptyLive && !emptyDemo && (
           <>
             <p className="text-slate-700 font-semibold text-lg">今日推薦已全部看完</p>
-            <p className="text-slate-400 text-sm mt-1">明天再來探索更多工程師</p>
+            <p className="text-slate-400 text-sm mt-1">明天再來探索更多</p>
             <button
               type="button"
               onClick={() => { setIndex(0); setDone(false) }}
