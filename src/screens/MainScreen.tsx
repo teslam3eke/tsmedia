@@ -6261,6 +6261,8 @@ export default function MainScreen({
   const [physicalChannelResubscribeNonce, setPhysicalChannelResubscribeNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
+  /** 付費返回：道具提示關閉後才 hard reload；勿被 pageshow 前景流程提早清掉 */
+  const postPaymentRewardReloadOrderRef = useRef<string | null>(null)
 
   /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒（Safari 分頁改由安全檢測頁引導）。 */
   useEffect(() => {
@@ -6348,7 +6350,7 @@ export default function MainScreen({
         debounceTimer = null
         void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
-          setRewardFlash(null)
+          if (!postPaymentRewardReloadOrderRef.current) setRewardFlash(null)
           setMatchSplash(null)
           setShowDiscoverPuzzleIntro(false)
           void queryClient.invalidateQueries()
@@ -6511,8 +6513,19 @@ export default function MainScreen({
     }
   }, [user?.id, foregroundReloadNonce, ingestUnreadAppNotifications])
 
+  const armHardReloadAfterRewardDismiss = useCallback((orderNo: string | null | undefined) => {
+    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
+    postPaymentRewardReloadOrderRef.current = orderNo
+  }, [])
+
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
+    const orderNo = postPaymentRewardReloadOrderRef.current
+    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
+    postPaymentRewardReloadOrderRef.current = null
+    requestAnimationFrame(() => {
+      hardReloadOnceAfterPaymentReturn(orderNo)
+    })
   }, [])
 
   const openSubscriptionModal = useCallback(() => {
@@ -6610,11 +6623,12 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成返回 PWA：樂觀顯示成功，背景輪詢入帳（勿全螢幕擋 30s） */
+  /** 綠界付款完成：入帳後顯示道具／VIP 提示，關閉提示後整頁重開（修 WebKit 僵死連線） */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
+    const orderNo = query.orderNo
     clearPaymentReturnQuery()
 
     if (query.kind === 'cancel') {
@@ -6626,7 +6640,7 @@ export default function MainScreen({
       return
     }
 
-    if (!query.orderNo) {
+    if (!orderNo) {
       setRewardFlash({
         variant: 'grant',
         title: '付款未完成',
@@ -6635,36 +6649,22 @@ export default function MainScreen({
       return
     }
 
-    /** boot 未觸發 reload 時的備援：短暫提示後整頁重開（等同使用者手動重整） */
-    if (query.kind === 'return' && paymentReturnHardReloadPending(query.orderNo)) {
-      setRewardFlash({
-        variant: 'grant',
-        title: '付款成功',
-        subtitle: '正在重新載入…',
-      })
-      const orderNo = query.orderNo
-      window.setTimeout(() => {
-        hardReloadOnceAfterPaymentReturn(orderNo)
-      }, 900)
-      return
-    }
-
     const gatewayOk = query.status === 'ok'
-    if (gatewayOk) {
-      setRewardFlash({
-        variant: 'grant',
-        title: '付款成功',
-        subtitle: '正在更新會員與道具…',
-      })
-    }
 
     let cancelled = false
     void (async () => {
-      const paid = await pollEcpayOrderPaid(query.orderNo!, { gatewayConfirmed: gatewayOk })
+      const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
       if (cancelled) return
 
       if (!paid?.paid) {
-        if (!gatewayOk) {
+        if (gatewayOk) {
+          setRewardFlash({
+            variant: 'grant',
+            title: '付款成功',
+            subtitle: '關閉後將重新載入以更新探索與個人資料',
+          })
+          armHardReloadAfterRewardDismiss(orderNo)
+        } else {
           setRewardFlash({
             variant: 'grant',
             title: '付款確認中',
@@ -6683,6 +6683,7 @@ export default function MainScreen({
           title: '購買成功',
           subtitle: pack?.creditLabel ?? '道具已入帳',
         })
+        armHardReloadAfterRewardDismiss(orderNo)
         return
       }
 
@@ -6714,12 +6715,13 @@ export default function MainScreen({
             ? `會員到期：${expiryLabel}`
             : '若會員管理仍顯示未訂閱，請稍後重新整理',
       })
+      armHardReloadAfterRewardDismiss(orderNo)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [user?.id, refreshCredits])
+  }, [user?.id, refreshCredits, armHardReloadAfterRewardDismiss])
 
   useEffect(() => {
     if (!user?.id) return

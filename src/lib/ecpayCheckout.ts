@@ -145,8 +145,7 @@ export function markPaymentReturnHardReloadDone(orderNo: string): void {
 }
 
 /**
- * 綠界全頁跳回後整頁重開一次（session 還原後、掛 React 前）。
- * WebKit 僵死 JWT 下 repair 常無效，使用者手動重載才恢復——此為自動同等操作。
+ * 付費返回：道具／VIP 提示關閉後整頁重開一次（每筆 order 僅一次，localStorage 防無限圈）。
  */
 export function hardReloadOnceAfterPaymentReturn(orderNo: string | null | undefined): boolean {
   if (typeof window === 'undefined') return false
