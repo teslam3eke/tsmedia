@@ -1,4 +1,5 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
+import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -121,10 +122,45 @@ export type PaymentReturnQuery = {
 
 const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
 const PAYMENT_RETURN_ORIGIN_TRIED_KEY = 'tm_payment_return_origin_tried_v1'
+/** 每筆 order 只 hard reload 一次；用 localStorage（iOS PWA 跨 reload 比 sessionStorage 可靠） */
+const PAYMENT_RETURN_HARD_RELOAD_LS_PREFIX = 'tm_payment_return_hard_reload_v2:'
+
+let paymentHardReloadArmedThisDocument = false
+
+export function paymentReturnHardReloadPending(orderNo: string | null | undefined): boolean {
+  if (!orderNo || typeof window === 'undefined') return false
+  try {
+    return localStorage.getItem(PAYMENT_RETURN_HARD_RELOAD_LS_PREFIX + orderNo) !== '1'
+  } catch {
+    return false
+  }
+}
+
+export function markPaymentReturnHardReloadDone(orderNo: string): void {
+  try {
+    localStorage.setItem(PAYMENT_RETURN_HARD_RELOAD_LS_PREFIX + orderNo, '1')
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+/**
+ * 綠界全頁跳回後整頁重開一次（session 還原後、掛 React 前）。
+ * WebKit 僵死 JWT 下 repair 常無效，使用者手動重載才恢復——此為自動同等操作。
+ */
+export function hardReloadOnceAfterPaymentReturn(orderNo: string | null | undefined): boolean {
+  if (typeof window === 'undefined') return false
+  if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return false
+  if (paymentHardReloadArmedThisDocument) return false
+  paymentHardReloadArmedThisDocument = true
+  markPaymentReturnHardReloadDone(orderNo)
+  markSkipInstantMatchLeaveOnNextFullUnload()
+  window.location.reload()
+  return true
+}
 
 /**
  * 綠界全頁跳回後清掉 TanStack 持久化快取（勿清探索 deck LS，保留 SWR 避免白屏）。
- * 勿用 location.reload()：iOS PWA 上 sessionStorage 旗標常無法跨 reload 保留。
  */
 export function resetClientStateAfterPaymentReturn(): void {
   if (typeof window === 'undefined') return

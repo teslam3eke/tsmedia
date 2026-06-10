@@ -9,7 +9,9 @@ import App from './App.tsx'
 import { consumeSupabaseAuthCallbackFromUrl, restorePersistedAuthSession } from '@/lib/auth'
 import {
   capturePaymentReturnFromUrl,
+  hardReloadOnceAfterPaymentReturn,
   hasPendingPaymentReturn,
+  readEffectivePaymentReturnQuery,
   resetClientStateAfterPaymentReturn,
 } from '@/lib/ecpayCheckout'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
@@ -169,7 +171,10 @@ async function boot() {
       restorePersistedAuthSession(4_000),
       new Promise<void>((resolve) => globalThis.setTimeout(resolve, 4_200)),
     ])
-    /** JWT／Realtime 暖機由 MainScreen 付費返回單次序列負責，避免與探索 RPC 競態 */
+    const payQuery = readEffectivePaymentReturnQuery()
+    if (payQuery.kind === 'return' && hardReloadOnceAfterPaymentReturn(payQuery.orderNo)) {
+      return
+    }
   }
   await consumeSupabaseAuthCallbackFromUrl()
   createRoot(document.getElementById('root')!).render(

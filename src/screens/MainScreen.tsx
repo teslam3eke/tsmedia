@@ -65,6 +65,8 @@ import MembershipManagementScreen, {
 import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
+  hardReloadOnceAfterPaymentReturn,
+  paymentReturnHardReloadPending,
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
 } from '@/lib/ecpayCheckout'
@@ -6630,6 +6632,20 @@ export default function MainScreen({
         title: '付款未完成',
         subtitle: '若已扣款請聯絡客服並保留交易紀錄',
       })
+      return
+    }
+
+    /** boot 未觸發 reload 時的備援：短暫提示後整頁重開（等同使用者手動重整） */
+    if (query.kind === 'return' && paymentReturnHardReloadPending(query.orderNo)) {
+      setRewardFlash({
+        variant: 'grant',
+        title: '付款成功',
+        subtitle: '正在重新載入…',
+      })
+      const orderNo = query.orderNo
+      window.setTimeout(() => {
+        hardReloadOnceAfterPaymentReturn(orderNo)
+      }, 900)
       return
     }
 
