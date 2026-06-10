@@ -1,5 +1,5 @@
 /**
- * 從伺服器讀取本次部署的版本號（package.json semver），與 bundle 內 __APP_BUILD_ID__ 比對。
+ * 從伺服器讀取本次部署的 build id（git SHA 前 12 碼），與 bundle 內 __APP_BUILD_ID__ 比對。
  * 不一致時強制重新載入以取得最新前端（優先 /api/git-sha，備援 /build-id.txt）。
  *
  * 僅 reload() 時，舊 Service Worker 仍可能持續用 precache 餵舊 HTML/JS（尤其「加到主畫面」的 PWA）。
