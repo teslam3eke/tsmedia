@@ -6,9 +6,17 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-/** 與 dist/build-id.txt 一致；Vercel 上為 git SHA，本地 build 為 local-* */
-const APP_BUILD_ID =
-  process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? `local-${Date.now()}`
+function readPackageVersion(): string {
+  const pkgPath = path.join(process.cwd(), 'package.json')
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string }
+  const v = pkg.version?.trim()
+  if (!v) throw new Error('package.json 缺少 version')
+  return v
+}
+
+/** 語意化版本（1.0.0 → 1.0.1）；與 build-id.txt、/api/git-sha、PWA 更新檢查一致。 */
+const APP_VERSION = readPackageVersion()
+const APP_BUILD_ID = APP_VERSION
 
 /** public/build-id.txt 確保 dist 根目錄一定有此檔（避免 SPA fallback 把 /build-id.txt 當成前端路由）。此處在緊接 PWA 輸出後再覆寫內容。 */
 function emitBuildIdPlugin(): Plugin {
@@ -25,6 +33,7 @@ function emitBuildIdPlugin(): Plugin {
 
 export default defineConfig({
   define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
     __APP_BUILD_ID__: JSON.stringify(APP_BUILD_ID),
   },
   plugins: [

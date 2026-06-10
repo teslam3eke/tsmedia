@@ -60,6 +60,7 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
+import { appReleaseVersionLabel } from '@/lib/appReleaseVersion'
 import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
@@ -7380,9 +7381,9 @@ export default function MainScreen({
             <span className="text-[11px] text-slate-400 leading-none shrink-0">Silicon Hearts</span>
             <span
               className="ml-auto min-w-0 truncate text-[10px] font-mono tabular-nums text-slate-400 max-w-[9rem] text-right"
-              title={`Build ${__APP_BUILD_ID__}`}
+              title={`版本 ${appReleaseVersionLabel()}`}
             >
-              {__APP_BUILD_ID__}
+              {appReleaseVersionLabel()}
             </span>
           </div>
         </div>

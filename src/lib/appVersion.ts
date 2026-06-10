@@ -1,5 +1,5 @@
 /**
- * 從伺服器讀取本次部署的 build-id，與目前 bundle 內嵌版本比對。
+ * 從伺服器讀取本次部署的版本號（package.json semver），與 bundle 內 __APP_BUILD_ID__ 比對。
  * 不一致時強制重新載入以取得最新前端（優先 /api/git-sha，備援 /build-id.txt）。
  *
  * 僅 reload() 時，舊 Service Worker 仍可能持續用 precache 餵舊 HTML/JS（尤其「加到主畫面」的 PWA）。
@@ -54,7 +54,7 @@ async function fetchRemoteBuildId(): Promise<string | null> {
 export async function checkRemoteBuildIdAndReload(): Promise<void> {
   if (import.meta.env.DEV) return
   const embedded = typeof __APP_BUILD_ID__ === 'string' ? __APP_BUILD_ID__.trim() : ''
-  if (!embedded || embedded.startsWith('local-')) return
+  if (!embedded || embedded.endsWith('-dev')) return
 
   if (buildIdProbeInFlight) return
   const since = Date.now() - lastBuildIdProbeEndedAt
