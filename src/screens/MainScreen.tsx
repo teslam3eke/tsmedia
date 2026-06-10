@@ -6533,6 +6533,8 @@ export default function MainScreen({
 
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
+    void queryClient.invalidateQueries()
+    setForegroundReloadNonce((n) => n + 1)
     const orderNo = postPaymentRewardReloadOrderRef.current
     if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
     postPaymentRewardReloadOrderRef.current = null
@@ -6651,7 +6653,7 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成：先入帳並顯示道具／VIP 提示，關閉後整頁重開（修 WebKit 僵死連線） */
+  /** 綠界付款完成：第二輪先預熱「我的」資料，再顯示道具／VIP 提示。 */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
@@ -6692,8 +6694,27 @@ export default function MainScreen({
         const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
         if (cancelled) return
 
+        const prewarmProfileReads = async (): Promise<ProfileRow | null> => {
+          try {
+            await repairAuthAfterResume()
+            await ensureConnectionWithBudget(5_000)
+          } catch {
+            /* 仍讓付款提示往下走；ProfileTab 會在 nonce bump 後再重抓。 */
+          }
+          const [profile] = await Promise.all([
+            getProfile(user.id).catch(() => null),
+            refreshProfileTabStats().catch(() => null),
+            refreshCredits().catch(() => undefined),
+          ])
+          void queryClient.invalidateQueries()
+          setForegroundReloadNonce((n) => n + 1)
+          return profile
+        }
+
         if (!paid?.paid) {
           if (gatewayOk) {
+            await prewarmProfileReads()
+            if (cancelled) return
             setRewardFlash({
               variant: 'grant',
               title: '付款成功',
@@ -6711,7 +6732,8 @@ export default function MainScreen({
           return
         }
 
-        await refreshCredits()
+        const warmedProfile = await prewarmProfileReads()
+        if (cancelled) return
 
         if (paid.productType === 'credit_pack') {
           const pack = CREDIT_PACK_PRODUCTS.find((p) => p.key === paid.packKey)
@@ -6725,9 +6747,8 @@ export default function MainScreen({
           return
         }
 
-        const profile = await getProfile(user.id)
         const expiresAt =
-          paid.subscriptionExpiresAt ?? profile?.subscription_expires_at ?? null
+          paid.subscriptionExpiresAt ?? warmedProfile?.subscription_expires_at ?? null
         const expiryLabel = formatMembershipExpiryZhTw(expiresAt)
 
         const beforeSnap = preSubscriptionCreditsRef.current
