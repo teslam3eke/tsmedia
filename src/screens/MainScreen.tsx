@@ -6528,11 +6528,11 @@ export default function MainScreen({
 
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
-    void queryClient.invalidateQueries()
-    setForegroundReloadNonce((n) => n + 1)
     const orderNo = postPaymentRewardReloadOrderRef.current
     if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
     postPaymentRewardReloadOrderRef.current = null
+    void queryClient.invalidateQueries()
+    setForegroundReloadNonce((n) => n + 1)
     requestAnimationFrame(() => {
       hardReloadOnceAfterPaymentReturn(orderNo)
     })
