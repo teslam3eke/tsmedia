@@ -1,6 +1,6 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
-import { markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
+import { clearPaymentReturnAuthRepairPending, markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
   productType: 'membership' | 'credit_pack'
@@ -198,6 +198,11 @@ export function tryAlternateOriginForPaymentReturn(): boolean {
   return true
 }
 
+/** 此筆 order 已做過付費返回 hard reload（第二輪 boot） */
+export function isPaymentReturnPostReloadPass(query: PaymentReturnQuery): boolean {
+  return query.kind === 'return' && Boolean(query.orderNo) && !paymentReturnHardReloadPending(query.orderNo)
+}
+
 /** boot 最早呼叫：綠界 302 回 `/?payment=return` 時保留意圖；無 URL 參數則清掉舊 storage 避免一般登入誤觸 */
 export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
   const query = readPaymentReturnQuery()
@@ -210,7 +215,12 @@ export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
     }
     return null
   }
-  markPaymentReturnAuthRepairPending()
+  /** 第二輪（探索後已 reload）：勿再打 auth repair，否則「我的」／探索 RPC 又被擋住 */
+  if (isPaymentReturnPostReloadPass(query)) {
+    clearPaymentReturnAuthRepairPending()
+  } else {
+    markPaymentReturnAuthRepairPending()
+  }
   try {
     sessionStorage.setItem(PAYMENT_RETURN_STORAGE_KEY, JSON.stringify(query))
   } catch {

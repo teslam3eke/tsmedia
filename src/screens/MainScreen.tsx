@@ -6531,10 +6531,11 @@ export default function MainScreen({
     if (query.kind !== 'return' || !query.orderNo) return
     if (!paymentReturnHardReloadPending(query.orderNo)) return
     const orderNo = query.orderNo
-    const t = window.requestAnimationFrame(() => {
+    /** 略等探索 shell 繪出再 reload（與手動重整同為 location.reload，但避開 boot 競態） */
+    const t = window.setTimeout(() => {
       hardReloadOnceAfterPaymentReturn(orderNo)
-    })
-    return () => window.cancelAnimationFrame(t)
+    }, 520)
+    return () => window.clearTimeout(t)
   }, [user?.id, activeTab])
 
   const openSubscriptionModal = useCallback(() => {
@@ -6668,6 +6669,13 @@ export default function MainScreen({
 
     let cancelled = false
     void (async () => {
+      await repairAuthAfterResume()
+      if (cancelled) return
+      await ensureConnectionWithBudget(5_000)
+      if (cancelled) return
+      void queryClient.invalidateQueries()
+      setForegroundReloadNonce((n) => n + 1)
+
       const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
       if (cancelled) return
 

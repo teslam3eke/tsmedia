@@ -10,6 +10,8 @@ import { consumeSupabaseAuthCallbackFromUrl, restorePersistedAuthSession } from 
 import {
   capturePaymentReturnFromUrl,
   hasPendingPaymentReturn,
+  paymentReturnHardReloadPending,
+  readEffectivePaymentReturnQuery,
   resetClientStateAfterPaymentReturn,
 } from '@/lib/ecpayCheckout'
 import { queryClient, QUERY_CACHE_STORAGE_KEY } from '@/lib/queryClient'
@@ -164,7 +166,11 @@ const queryPersister = createSyncStoragePersister({
 async function boot() {
   capturePaymentReturnFromUrl()
   if (hasPendingPaymentReturn()) {
-    resetClientStateAfterPaymentReturn()
+    const payQuery = readEffectivePaymentReturnQuery()
+    /** 第二輪勿再清 TanStack／deck，行為對齊使用者手動重整 */
+    if (!payQuery.orderNo || paymentReturnHardReloadPending(payQuery.orderNo)) {
+      resetClientStateAfterPaymentReturn()
+    }
     await Promise.race([
       restorePersistedAuthSession(4_000),
       new Promise<void>((resolve) => globalThis.setTimeout(resolve, 4_200)),
