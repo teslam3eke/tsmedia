@@ -21,9 +21,11 @@ import {
   resumeHardReloadEnabled,
   resumeDesktopWindowBlurRepairLikely,
   RESUME_DESKTOP_WINDOW_BLUR_MIN_MS,
+  RESUME_MIN_VISIBILITY_HIDDEN_MS,
   touchMediaPickerGraceSession,
   isWithinMediaPickerGracePeriod,
   windowBlurWakeLikelyForResumeReload,
+  triggerResumeStylePageReload,
 } from '@/lib/resumeHardReload'
 import { acceptLatestTerms, hasAcceptedLatestTerms, upsertProfile, saveQuestionnaire, getProfile } from '@/lib/db'
 import {
@@ -39,10 +41,7 @@ import {
   isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
 import {
-  forceHardPaymentReturnReload,
   hasPendingPaymentReturn,
-  paymentReturnHardReloadPending,
-  readEffectivePaymentReturnQuery,
   tryAlternateOriginForPaymentReturn,
 } from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
@@ -50,7 +49,6 @@ import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
-import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 // profileSetupData is collected but used for future profile enrichment
 
 
@@ -389,7 +387,7 @@ export default function App() {
     const useDesktopBlurRepair = resumeDesktopWindowBlurRepairLikely()
     if (!useVisibilityResume && !useDesktopBlurRepair) return
 
-    const MIN_VISIBILITY_HIDDEN_MS = 600
+    const MIN_VISIBILITY_HIDDEN_MS = RESUME_MIN_VISIBILITY_HIDDEN_MS
     const dbg =
       new URLSearchParams(window.location.search).get('debugHardResume') === '1'
     const log = (...a: unknown[]) => {
@@ -416,10 +414,7 @@ export default function App() {
       }
       log('reload()')
       reloading = true
-      markSkipInstantMatchLeaveOnNextFullUnload()
-      requestAnimationFrame(() => {
-        window.location.reload()
-      })
+      if (!triggerResumeStylePageReload()) reloading = false
     }
 
     const markHiddenVisibility = () => {
@@ -596,12 +591,7 @@ export default function App() {
         readSecurityOnboardingDone(u.id) &&
         !readPasswordRecoveryPending()
 
-      /** 付費返回首輪：勿進主殼，等 App 顯示「重新載入」並 force replace */
       if (paymentReturn && onboarded) {
-        const payQ = readEffectivePaymentReturnQuery()
-        if (payQ.kind === 'return' && payQ.orderNo && paymentReturnHardReloadPending(payQ.orderNo)) {
-          return
-        }
         go('main')
         return
       }
@@ -637,24 +627,6 @@ export default function App() {
       }
     }
   }, [go]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  /** 付費返回首輪：session 就緒後顯示 splash，再 unregister SW 硬重開（非軟 reload 閃一下） */
-  useEffect(() => {
-    if (!authReady || !user?.id) return
-    const q = readEffectivePaymentReturnQuery()
-    if (q.kind !== 'return' || !q.orderNo || !paymentReturnHardReloadPending(q.orderNo)) return
-
-    let cancelled = false
-    const t = window.setTimeout(() => {
-      if (cancelled) return
-      void forceHardPaymentReturnReload(q.orderNo)
-    }, 1_100)
-
-    return () => {
-      cancelled = true
-      window.clearTimeout(t)
-    }
-  }, [authReady, user?.id])
 
   const routeToPasswordRecovery = useCallback(() => {
     markPasswordRecoveryPending()
@@ -975,18 +947,6 @@ export default function App() {
     !paymentReturnRecoveryExhausted &&
     !user?.id &&
     screen !== 'main'
-
-  const payReturnQuery = readEffectivePaymentReturnQuery()
-  const paymentReturnHardReloadGate =
-    authReady &&
-    Boolean(user?.id) &&
-    payReturnQuery.kind === 'return' &&
-    Boolean(payReturnQuery.orderNo) &&
-    paymentReturnHardReloadPending(payReturnQuery.orderNo)
-
-  if (paymentReturnHardReloadGate) {
-    return <SplashScreen subtitle="付款完成，正在重新載入應用…" />
-  }
 
   if (!authReady || paymentReturnRecovering) {
     return (

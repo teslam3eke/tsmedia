@@ -1,6 +1,5 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
-import { unregisterSwAndClearSiteCaches } from '@/lib/appVersion'
-import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
+import { triggerResumeStylePageReload } from '@/lib/resumeHardReload'
 import { clearPaymentReturnAuthRepairPending, markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -184,24 +183,16 @@ export function markPaymentReturnHardReloadDone(orderNo: string): void {
 }
 
 /**
- * 付費返回：unregister SW + 清 Cache Storage + replace（PWA 上比 reload() 更像手動重整）。
- * 每筆 order 僅一次；回 true 表示已觸發導航。
+ * 付費返回：與 PWA 背景切回前景相同整頁重載（`location.reload()`）。
+ * 每筆 order 僅一次；回 true 表示已觸發重載。
  */
-export async function forceHardPaymentReturnReload(orderNo: string | null | undefined): Promise<boolean> {
+export function triggerPaymentReturnResumeReload(orderNo: string | null | undefined): boolean {
   if (typeof window === 'undefined') return false
   if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return false
   if (paymentHardReloadArmedThisDocument) return false
   paymentHardReloadArmedThisDocument = true
   markPaymentReturnHardReloadDone(orderNo)
-  markSkipInstantMatchLeaveOnNextFullUnload()
-
-  await unregisterSwAndClearSiteCaches()
-
-  const url = new URL(window.location.href)
-  url.searchParams.delete('_tm_pr')
-  url.searchParams.set('_tm_pr', String(Date.now()))
-  window.location.replace(url.toString())
-  return true
+  return triggerResumeStylePageReload()
 }
 
 /**

@@ -4,6 +4,8 @@
  * `?debugHardResume=1` 會在 console 印 `[hardResume]`（需在 Mac Safari 接上裝置除錯）。
  */
 
+import { markSkipInstantMatchLeaveOnNextFullUnload } from './instantMatchUnloadGuard'
+
 const STORAGE_DISABLE_KEY = 'tm_no_hard_resume'
 
 /** Android / desktop PWA：`display-mode: standalone`。iOS 加到主畫面：`navigator.standalone`。 */
@@ -68,6 +70,9 @@ export function resumeDesktopWindowBlurRepairLikely(): boolean {
 /** 視窗離開至少多久後回焦才重整；短暫 blur（工具列／檔選）避免誤載。見 `touchMediaPickerGraceSession`。 */
 export const RESUME_DESKTOP_WINDOW_BLUR_MIN_MS = 3_600
 
+/** PWA／iOS 回前景 hard reload：背景至少多久才整頁重載（與 `App.tsx` visibility resume 一致）。 */
+export const RESUME_MIN_VISIBILITY_HIDDEN_MS = 600
+
 export function resumeHardReloadDisabledGlobally(): boolean {
   try {
     const q = new URLSearchParams(window.location.search)
@@ -110,4 +115,19 @@ export function isWithinMediaPickerGracePeriod(): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * 與主殼「背景切回前景」相同的整頁重載（`rAF` + `location.reload()`）。
+ * 付費返回亦用此路徑，勿 unregister SW／replace（使用者手動背景切回即靠此恢復「我的」等 RPC）。
+ */
+export function triggerResumeStylePageReload(): boolean {
+  if (typeof window === 'undefined') return false
+  if (resumeHardReloadDisabledGlobally()) return false
+  if (isWithinMediaPickerGracePeriod()) return false
+  markSkipInstantMatchLeaveOnNextFullUnload()
+  requestAnimationFrame(() => {
+    window.location.reload()
+  })
+  return true
 }

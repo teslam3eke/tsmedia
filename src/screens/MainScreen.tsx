@@ -72,6 +72,7 @@ import {
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
   releasePaymentReturnRewardEffect,
+  triggerPaymentReturnResumeReload,
   tryClaimPaymentReturnRewardEffect,
 } from '@/lib/ecpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
@@ -106,7 +107,7 @@ import {
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
-import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod, RESUME_MIN_VISIBILITY_HIDDEN_MS } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
@@ -6526,6 +6527,47 @@ export default function MainScreen({
     const q = readEffectivePaymentReturnQuery()
     if (isPaymentReturnPostReloadPass(q)) setActiveTab('discover')
   }, [user?.id])
+
+  /**
+   * 付費返回首輪：進入主殼後整頁重載（與 PWA 背景切回前景相同），恢復「我的」等 RPC。
+   * 須在 main + user 就緒後觸發，勿在 splash 擋住主殼。
+   */
+  useEffect(() => {
+    if (!user?.id) return
+    const q = readEffectivePaymentReturnQuery()
+    if (q.kind !== 'return' || !q.orderNo || !paymentReturnHardReloadPending(q.orderNo)) return
+
+    const t = window.setTimeout(() => {
+      triggerPaymentReturnResumeReload(q.orderNo)
+    }, RESUME_MIN_VISIBILITY_HIDDEN_MS)
+
+    return () => window.clearTimeout(t)
+  }, [user?.id])
+
+  /** 付費返回第二輪：主殼就緒後先 prepare profile reads，再 bump 讓「我的」重抓 */
+  useEffect(() => {
+    if (!user?.id) return
+    const q = readEffectivePaymentReturnQuery()
+    if (!isPaymentReturnPostReloadPass(q)) return
+
+    let cancelled = false
+    void (async () => {
+      await prepareSupabaseForProfileReads('load')
+      if (cancelled) return
+      setForegroundReloadNonce((n) => n + 1)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
+
+  /** 付費返回第二輪：切到「我的」時再 bump 一次（ProfileTab 僅在該分頁 mount） */
+  useEffect(() => {
+    if (!user?.id || activeTab !== 'profile') return
+    const q = readEffectivePaymentReturnQuery()
+    if (!isPaymentReturnPostReloadPass(q)) return
+    setForegroundReloadNonce((n) => n + 1)
+  }, [user?.id, activeTab])
 
   const openSubscriptionModal = useCallback(() => {
     preSubscriptionCreditsRef.current = { ...creditBalance }
