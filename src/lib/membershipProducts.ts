@@ -1,5 +1,7 @@
 export type CreditPackKey = 'super_like_5' | 'blur_unlock_16'
 
+export const CROWN_EFFECT_PACK_KEY = 'crown_effect' as const
+
 export type CreditPackProduct = {
   key: CreditPackKey
   title: string
@@ -11,6 +13,8 @@ export type CreditPackProduct = {
 /** 金流測試用；上線前設 PAYMENT_TEST_MODE = false（須與 api/_utils/paymentProducts.ts 一致） */
 const PAYMENT_TEST_MODE = true
 const PAYMENT_TEST_PRICE_NTD = 30
+const CROWN_EFFECT_TEST_PRICE_NTD = 31
+const CROWN_EFFECT_PROD_PRICE_NTD = 299
 
 export const CREDIT_PACK_PRODUCTS: CreditPackProduct[] = [
   {
@@ -28,6 +32,24 @@ export const CREDIT_PACK_PRODUCTS: CreditPackProduct[] = [
     creditLabel: '16 次解除拼圖',
   },
 ]
+
+/** 皇冠特效：男性限購一次、永久解鎖；正式價 299，測試 31。 */
+export const CROWN_EFFECT_PRODUCT = {
+  key: CROWN_EFFECT_PACK_KEY,
+  title: '皇冠特效',
+  subtitle: '個人頁皇冠動態特效（永久解鎖，限購一次）',
+  usageNote: '須完成收入認證審核通過後方可使用',
+  priceNtd: PAYMENT_TEST_MODE ? CROWN_EFFECT_TEST_PRICE_NTD : CROWN_EFFECT_PROD_PRICE_NTD,
+  purchaseLabel: '皇冠特效（永久）',
+} as const
+
+export function crownEffectPriceNtd(): number {
+  return CROWN_EFFECT_PRODUCT.priceNtd
+}
+
+export function isCrownEffectPurchased(purchasedAt: string | null | undefined): boolean {
+  return Boolean(purchasedAt)
+}
 
 export function membershipMonthlyPriceNtd(gender: 'male' | 'female'): number {
   if (PAYMENT_TEST_MODE) return PAYMENT_TEST_PRICE_NTD

@@ -1020,6 +1020,28 @@ export async function purchaseCreditPackMock(
   return { ok: true }
 }
 
+/** 皇冠特效：限購一次（模擬金流）。 */
+export async function purchaseCrownEffectMock(): Promise<{
+  ok: boolean
+  error?: string
+  reason?: string
+}> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('purchase_credit_pack', {
+    p_pack_key: 'crown_effect',
+  })
+
+  if (error) {
+    console.error('[db] purchaseCrownEffectMock error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as { ok?: boolean; reason?: string } | null
+  if (!row?.ok) {
+    return { ok: false, reason: row?.reason, error: row?.reason === 'already_purchased' ? '已購買' : 'purchase failed' }
+  }
+  return { ok: true }
+}
+
 export async function claimDailyMemberHearts(): Promise<{
   ok: boolean
   reason?: string

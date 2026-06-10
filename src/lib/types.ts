@@ -72,6 +72,8 @@ export interface ProfileRow {
   terms_accepted_at: string | null              // 最近同意時間
   subscription_expires_at?: string | null
   membership_welcome_granted_at?: string | null
+  /** 皇冠特效永久解鎖（限購一次） */
+  crown_effect_purchased_at?: string | null
   /** 登入統計（與 app 換日一致，由 RPC 維護） */
   login_last_app_day?: string | null
   login_streak?: number | null

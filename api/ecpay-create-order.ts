@@ -75,6 +75,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!pack) {
       return res.status(400).json({ ok: false, error: '無效的道具包。' })
     }
+
+    if (packKey === 'crown_effect') {
+      const { data: crownProfile, error: crownErr } = await admin
+        .from('profiles')
+        .select('gender, crown_effect_purchased_at')
+        .eq('id', auth.userId)
+        .maybeSingle()
+
+      if (crownErr || crownProfile?.gender !== 'male') {
+        return res.status(400).json({ ok: false, error: '皇冠特效僅限男性會員購買。' })
+      }
+      if (crownProfile?.crown_effect_purchased_at) {
+        return res.status(400).json({ ok: false, error: '您已購買過皇冠特效。' })
+      }
+    }
+
     amount = pack.amount
     itemDesc = pack.details
     itemName = pack.itemName

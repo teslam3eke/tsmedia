@@ -7559,6 +7559,14 @@ export default function MainScreen({
                   })
                   return
                 }
+                if (event.type === 'crown_effect') {
+                  setRewardFlash({
+                    variant: 'grant',
+                    title: '購買成功',
+                    subtitle: '皇冠特效已永久解鎖（須完成收入認證後方可使用）',
+                  })
+                  return
+                }
                 setRewardFlash({
                   variant: 'grant',
                   title: '已取消會員訂閱',

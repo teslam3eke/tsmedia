@@ -7,11 +7,14 @@ import {
   completeMonthlyMembership,
   getProfile,
   purchaseCreditPackMock,
+  purchaseCrownEffectMock,
 } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import {
   CREDIT_PACK_PRODUCTS,
+  CROWN_EFFECT_PRODUCT,
   formatMembershipExpiryZhTw,
+  isCrownEffectPurchased,
   isMembershipActive,
   membershipMonthlyPriceNtd,
   type CreditPackKey,
@@ -29,6 +32,7 @@ import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 export type MembershipUpdateEvent =
   | { type: 'membership' }
   | { type: 'pack'; subtitle: string }
+  | { type: 'crown_effect' }
   | { type: 'cancel' }
 
 const TAPPAY_FIELD_PREFIX = 'membership-mgmt-card'
@@ -49,6 +53,7 @@ export default function MembershipManagementScreen({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null)
+  const [crownEffectPurchasedAt, setCrownEffectPurchasedAt] = useState<string | null>(null)
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
 
@@ -64,10 +69,12 @@ export default function MembershipManagementScreen({
 
   const monthlyPrice = membershipMonthlyPriceNtd(gender)
   const memberActive = isMembershipActive(subscriptionExpiresAt)
+  const crownEffectOwned = isCrownEffectPurchased(crownEffectPurchasedAt)
 
   const reloadProfile = useCallback(async () => {
     const profile = await getProfile(userId)
     setSubscriptionExpiresAt(profile?.subscription_expires_at ?? null)
+    setCrownEffectPurchasedAt(profile?.crown_effect_purchased_at ?? null)
   }, [userId])
 
   useEffect(() => {
@@ -176,6 +183,63 @@ export default function MembershipManagementScreen({
         return
       }
       onUpdated({ type: 'pack', subtitle: creditLabel })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '購買失敗')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const buyCrownEffect = async () => {
+    if (crownEffectOwned) return
+    setBusy(true)
+    setError(null)
+    try {
+      if (paymentMode === 'mock') {
+        const res = await purchaseCrownEffectMock()
+        if (!res.ok) {
+          setError(res.error ?? '購買失敗')
+          return
+        }
+        await reloadProfile()
+        onUpdated({ type: 'crown_effect' })
+        return
+      }
+      if (paymentMode === 'ecpay') {
+        await startEcpayCheckout({
+          productType: 'credit_pack',
+          packKey: CROWN_EFFECT_PRODUCT.key,
+          email: userEmail,
+        })
+        return
+      }
+      if (!ensureCardholder() || !tpRef || !tapReady) return
+      const prime = await getCardPrime(tpRef)
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) {
+        setError('登入已過期，請重新登入。')
+        return
+      }
+      const res = await fetch('/api/tappay-credit-pack', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          packKey: CROWN_EFFECT_PRODUCT.key,
+          prime,
+          cardholder: cardholderPayload(),
+        }),
+      })
+      const json = (await res.json()) as { ok?: boolean; error?: string }
+      if (!res.ok || !json.ok) {
+        setError(json.error ?? `付款失敗（${res.status}）`)
+        return
+      }
+      await reloadProfile()
+      onUpdated({ type: 'crown_effect' })
     } catch (e) {
       setError(e instanceof Error ? e.message : '購買失敗')
     } finally {
@@ -335,6 +399,45 @@ export default function MembershipManagementScreen({
                   </button>
                 </div>
               ))}
+
+              {gender === 'male' && (
+                <div className="flex items-center gap-3 rounded-2xl bg-white/5 px-4 py-3 ring-1 ring-white/10">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400/30 to-orange-600/30">
+                    <Crown className="h-5 w-5 text-amber-300" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-black text-slate-100">{CROWN_EFFECT_PRODUCT.title}</p>
+                    <p className="text-[11px] font-semibold text-slate-400">{CROWN_EFFECT_PRODUCT.subtitle}</p>
+                    <p className="mt-1 text-[11px] font-semibold leading-snug text-amber-200/80">
+                      {CROWN_EFFECT_PRODUCT.usageNote}
+                    </p>
+                    <p className="mt-0.5 text-sm font-black text-amber-400">
+                      NT$ {CROWN_EFFECT_PRODUCT.priceNtd}
+                    </p>
+                  </div>
+                  {crownEffectOwned ? (
+                    <span className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-slate-300 ring-1 ring-white/15">
+                      已購買
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        paymentLoading ||
+                        (paymentMode === 'tappay' && (!tapReady || Boolean(tapInitError)))
+                      }
+                      onClick={() => void buyCrownEffect()}
+                      className={cn(
+                        'shrink-0 rounded-xl px-3 py-2 text-xs font-black transition active:scale-[0.98]',
+                        busy ? 'bg-slate-700 text-slate-400' : 'bg-amber-500 text-slate-950',
+                      )}
+                    >
+                      購買
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 

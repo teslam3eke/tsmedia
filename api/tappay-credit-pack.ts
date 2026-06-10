@@ -10,9 +10,12 @@ import {
   type TapPayCardholder,
 } from './_utils/tappayPayByPrime'
 
+import { CREDIT_PACKS } from './_utils/paymentProducts.js'
+
 const PACKS: Record<string, { amount: number; details: string }> = {
-  super_like_5: { amount: 199, details: 'tsMedia 加購：超級喜歡 x5' },
-  blur_unlock_16: { amount: 99, details: 'tsMedia 加購：解除拼圖 x16' },
+  super_like_5: { amount: CREDIT_PACKS.super_like_5.amount, details: CREDIT_PACKS.super_like_5.details },
+  blur_unlock_16: { amount: CREDIT_PACKS.blur_unlock_16.amount, details: CREDIT_PACKS.blur_unlock_16.details },
+  crown_effect: { amount: CREDIT_PACKS.crown_effect.amount, details: CREDIT_PACKS.crown_effect.details },
 }
 
 type Body = {
@@ -50,6 +53,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pack = PACKS[packKey]
   if (!pack) {
     return res.status(400).json({ ok: false, error: '無效的商品。' })
+  }
+
+  if (packKey === 'crown_effect') {
+    const adminPre = createClient(cfg.url, cfg.serviceKey)
+    const { data: crownProfile, error: crownErr } = await adminPre
+      .from('profiles')
+      .select('gender, crown_effect_purchased_at')
+      .eq('id', auth.userId)
+      .maybeSingle()
+
+    if (crownErr || crownProfile?.gender !== 'male') {
+      return res.status(400).json({ ok: false, error: '皇冠特效僅限男性會員購買。' })
+    }
+    if (crownProfile?.crown_effect_purchased_at) {
+      return res.status(400).json({ ok: false, error: '您已購買過皇冠特效。' })
+    }
   }
 
   const prime = body.prime?.trim()

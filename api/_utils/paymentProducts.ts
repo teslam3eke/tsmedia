@@ -13,6 +13,11 @@ export const CREDIT_PACKS: Record<string, { amount: number; details: string; ite
     details: 'tsMedia 加購：解除拼圖 x16',
     itemName: '解除拼圖 x16',
   },
+  crown_effect: {
+    amount: PAYMENT_TEST_MODE ? 31 : 299,
+    details: 'tsMedia 加購：皇冠特效（永久）',
+    itemName: '皇冠特效',
+  },
 }
 
 export function membershipAmountNtd(gender: 'male' | 'female'): number {
