@@ -23,7 +23,6 @@ import {
   type TPDirectAPI,
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
-import { paymentModeLabel } from '@/lib/paymentProvider'
 import { startEcpayCheckout } from '@/lib/ecpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
@@ -53,7 +52,7 @@ export default function MembershipManagementScreen({
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
 
-  const { mode: paymentMode, sandbox: paymentSandbox, loading: paymentLoading } = usePaymentProvider()
+  const { mode: paymentMode, loading: paymentLoading } = usePaymentProvider()
 
   const [tapReady, setTapReady] = useState(false)
   const [tapInitError, setTapInitError] = useState<string | null>(null)
@@ -147,7 +146,7 @@ export default function MembershipManagementScreen({
         await startEcpayCheckout({
           productType: 'credit_pack',
           packKey,
-          email: holderEmail.trim() || userEmail,
+          email: userEmail,
         })
         return
       }
@@ -206,7 +205,7 @@ export default function MembershipManagementScreen({
     try {
       await startEcpayCheckout({
         productType: 'membership',
-        email: holderEmail.trim() || userEmail,
+        email: userEmail,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : '無法前往付款')
@@ -370,26 +369,6 @@ export default function MembershipManagementScreen({
             </ul>
           </section>
 
-          {paymentMode === 'ecpay' && (
-            <div className="space-y-3 rounded-2xl bg-white/[0.07] p-4 ring-1 ring-white/10">
-              <p className="text-[11px] font-bold tracking-wider text-slate-500">
-                信用卡（{paymentModeLabel('ecpay')}
-                {paymentSandbox ? ' · 測試' : ''}）
-              </p>
-              <p className="text-xs font-semibold leading-relaxed text-slate-400">
-                將前往綠界安全付款頁完成刷卡。單次購買 30 天 VIP，到期後需再手動付款（非自動續扣）。
-              </p>
-              <input
-                type="email"
-                autoComplete="email"
-                placeholder="付款通知 Email（選填）"
-                value={holderEmail}
-                onChange={(e) => setHolderEmail(e.target.value)}
-                className="w-full rounded-xl bg-white px-3 py-3 text-sm font-semibold text-slate-900 outline-none ring-1 ring-slate-200 placeholder:text-slate-400"
-              />
-            </div>
-          )}
-
           {paymentMode === 'tappay' && (
             <div className="space-y-3 rounded-2xl bg-white/[0.07] p-4 ring-1 ring-white/10">
               <p className="text-[11px] font-bold tracking-wider text-slate-500">信用卡（TapPay）</p>
@@ -512,15 +491,6 @@ export default function MembershipManagementScreen({
             服務條款（Terms of Service）
           </button>
           。
-        </p>
-        <p className="mt-4 text-center text-[11px] font-semibold text-slate-500">
-          客服信箱：{' '}
-          <a
-            href="mailto:letmesaveyou@livemail.tw"
-            className="text-amber-400/95 underline decoration-amber-400/50 underline-offset-2"
-          >
-            letmesaveyou@livemail.tw
-          </a>
         </p>
       </div>
 
