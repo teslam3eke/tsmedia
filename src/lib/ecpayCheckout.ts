@@ -124,6 +124,44 @@ const PAYMENT_RETURN_STORAGE_KEY = 'tm_payment_return_v1'
 const PAYMENT_RETURN_ORIGIN_TRIED_KEY = 'tm_payment_return_origin_tried_v1'
 /** 每筆 order 只 hard reload 一次；用 localStorage（iOS PWA 跨 reload 比 sessionStorage 可靠） */
 const PAYMENT_RETURN_HARD_RELOAD_LS_PREFIX = 'tm_payment_return_hard_reload_v2:'
+const PAYMENT_RETURN_REWARD_SHOWN_LS_PREFIX = 'tm_payment_return_reward_shown_v1:'
+const PAYMENT_RETURN_REWARD_INFLIGHT_KEY = 'tm_payment_return_reward_inflight_v1'
+
+export function hasPaymentReturnRewardShown(orderNo: string): boolean {
+  try {
+    return localStorage.getItem(PAYMENT_RETURN_REWARD_SHOWN_LS_PREFIX + orderNo) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function markPaymentReturnRewardShown(orderNo: string): void {
+  try {
+    localStorage.setItem(PAYMENT_RETURN_REWARD_SHOWN_LS_PREFIX + orderNo, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 避免 React StrictMode 雙跑 effect 時過早 clearPaymentReturnQuery */
+export function tryClaimPaymentReturnRewardEffect(orderNo: string): boolean {
+  if (hasPaymentReturnRewardShown(orderNo)) return false
+  try {
+    if (sessionStorage.getItem(PAYMENT_RETURN_REWARD_INFLIGHT_KEY) === orderNo) return false
+    sessionStorage.setItem(PAYMENT_RETURN_REWARD_INFLIGHT_KEY, orderNo)
+    return true
+  } catch {
+    return true
+  }
+}
+
+export function releasePaymentReturnRewardEffect(): void {
+  try {
+    sessionStorage.removeItem(PAYMENT_RETURN_REWARD_INFLIGHT_KEY)
+  } catch {
+    /* ignore */
+  }
+}
 
 let paymentHardReloadArmedThisDocument = false
 

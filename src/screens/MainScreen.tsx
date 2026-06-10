@@ -65,10 +65,14 @@ import MembershipManagementScreen, {
 import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
-  hardReloadOnceAfterPaymentReturn,
+  hasPaymentReturnRewardShown,
+  isPaymentReturnPostReloadPass,
+  markPaymentReturnRewardShown,
   paymentReturnHardReloadPending,
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
+  releasePaymentReturnRewardEffect,
+  tryClaimPaymentReturnRewardEffect,
 } from '@/lib/ecpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
@@ -1574,8 +1578,9 @@ function DiscoverTab({
       return
     }
 
-    /** 付費返回：須等 MainScreen 換發 JWT 後再打 RPC，否則與背景切換相同「全空」假死 */
-    if (paymentReturnAuthRepairPending()) {
+    /** 付費返回首輪：boot 已 hard reload；第二輪勿再擋 deck */
+    const payQuery = readEffectivePaymentReturnQuery()
+    if (paymentReturnAuthRepairPending() && !isPaymentReturnPostReloadPass(payQuery)) {
       if (liveDeckRef.current.length === 0) setLiveDeckStatus('loading')
       return
     }
@@ -5608,7 +5613,7 @@ function ProfileTab({
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
-      if (paymentReturnAuthRepairPending()) return
+      if (paymentReturnAuthRepairPending() && !isPaymentReturnPostReloadPass(readEffectivePaymentReturnQuery())) return
       const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       try {
         actionTrace('profileTab', 'load:開始', {
@@ -6515,28 +6520,12 @@ export default function MainScreen({
     setRewardFlash(null)
   }, [])
 
-  /** 付費返回：先切到探索，首次進探索後整頁重開；第二輪才跑入帳提示 */
+  /** 付費返回第二輪：預設探索分頁 */
   useEffect(() => {
     if (!user?.id) return
-    const query = readEffectivePaymentReturnQuery()
-    if (query.kind !== 'return' || !query.orderNo) return
-    if (!paymentReturnHardReloadPending(query.orderNo)) return
-    setActiveTab('discover')
+    const q = readEffectivePaymentReturnQuery()
+    if (isPaymentReturnPostReloadPass(q)) setActiveTab('discover')
   }, [user?.id])
-
-  useEffect(() => {
-    if (!user?.id) return
-    if (activeTab !== 'discover') return
-    const query = readEffectivePaymentReturnQuery()
-    if (query.kind !== 'return' || !query.orderNo) return
-    if (!paymentReturnHardReloadPending(query.orderNo)) return
-    const orderNo = query.orderNo
-    /** 略等探索 shell 繪出再 reload（與手動重整同為 location.reload，但避開 boot 競態） */
-    const t = window.setTimeout(() => {
-      hardReloadOnceAfterPaymentReturn(orderNo)
-    }, 520)
-    return () => window.clearTimeout(t)
-  }, [user?.id, activeTab])
 
   const openSubscriptionModal = useCallback(() => {
     preSubscriptionCreditsRef.current = { ...creditBalance }
@@ -6633,21 +6622,24 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成（第二輪）：入帳後顯示道具／VIP 提示 */
+  /** 綠界付款完成（boot reload 後第二輪）：顯示道具／VIP 提示 */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
     const orderNo = query.orderNo
 
-    /** 首輪：等探索 tab 觸發 hard reload，勿清 URL／勿顯示獎勵 */
     if (query.kind === 'return' && orderNo && paymentReturnHardReloadPending(orderNo)) {
       return
     }
 
-    clearPaymentReturnQuery()
+    if (orderNo && hasPaymentReturnRewardShown(orderNo)) {
+      clearPaymentReturnQuery()
+      return
+    }
 
     if (query.kind === 'cancel') {
+      clearPaymentReturnQuery()
       setRewardFlash({
         variant: 'grant',
         title: '已取消付款',
@@ -6657,6 +6649,7 @@ export default function MainScreen({
     }
 
     if (!orderNo) {
+      clearPaymentReturnQuery()
       setRewardFlash({
         variant: 'grant',
         title: '付款未完成',
@@ -6665,82 +6658,86 @@ export default function MainScreen({
       return
     }
 
+    if (!tryClaimPaymentReturnRewardEffect(orderNo)) return
+
     const gatewayOk = query.status === 'ok'
 
-    let cancelled = false
     void (async () => {
-      await repairAuthAfterResume()
-      if (cancelled) return
-      await ensureConnectionWithBudget(5_000)
-      if (cancelled) return
-      void queryClient.invalidateQueries()
-      setForegroundReloadNonce((n) => n + 1)
+      try {
+        await repairAuthAfterResume()
+        await ensureConnectionWithBudget(5_000)
+        void queryClient.invalidateQueries()
+        setForegroundReloadNonce((n) => n + 1)
 
-      const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
-      if (cancelled) return
+        const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
 
-      if (!paid?.paid) {
-        if (gatewayOk) {
-          setRewardFlash({
-            variant: 'grant',
-            title: '付款成功',
-            subtitle: '若道具未更新，請至會員管理查看',
-          })
-        } else {
-          setRewardFlash({
-            variant: 'grant',
-            title: '付款確認中',
-            subtitle: '入帳可能需要數十秒，請稍後在會員管理查看',
-          })
+        if (!paid?.paid) {
+          if (gatewayOk) {
+            setRewardFlash({
+              variant: 'grant',
+              title: '付款成功',
+              subtitle: '若道具未更新，請至會員管理查看',
+            })
+            markPaymentReturnRewardShown(orderNo)
+          } else {
+            setRewardFlash({
+              variant: 'grant',
+              title: '付款確認中',
+              subtitle: '入帳可能需要數十秒，請稍後在會員管理查看',
+            })
+          }
+          clearPaymentReturnQuery()
+          return
         }
-        return
-      }
 
-      await refreshCredits()
+        await refreshCredits()
 
-      if (paid.productType === 'credit_pack') {
-        const pack = CREDIT_PACK_PRODUCTS.find((p) => p.key === paid.packKey)
+        if (paid.productType === 'credit_pack') {
+          const pack = CREDIT_PACK_PRODUCTS.find((p) => p.key === paid.packKey)
+          setRewardFlash({
+            variant: 'grant',
+            title: '購買成功',
+            subtitle: pack?.creditLabel ?? '道具已入帳',
+          })
+          markPaymentReturnRewardShown(orderNo)
+          clearPaymentReturnQuery()
+          return
+        }
+
+        const profile = await getProfile(user.id)
+        const expiresAt =
+          paid.subscriptionExpiresAt ?? profile?.subscription_expires_at ?? null
+        const expiryLabel = formatMembershipExpiryZhTw(expiresAt)
+
+        const beforeSnap = preSubscriptionCreditsRef.current
+        preSubscriptionCreditsRef.current = null
+        const after = await getCreditBalance(user.id)
+        const parts: string[] = []
+        if (beforeSnap) {
+          if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
+          if (after.super_like > beforeSnap.super_like) {
+            parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)
+          }
+          if (after.blur_unlock > beforeSnap.blur_unlock) {
+            parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
+          }
+        }
+        const rewardLine = parts.length > 0 ? parts.join(' · ') : null
         setRewardFlash({
           variant: 'grant',
-          title: '購買成功',
-          subtitle: pack?.creditLabel ?? '道具已入帳',
+          title: parts.length > 0 ? 'VIP 已開通' : 'VIP 購買成功',
+          subtitle: rewardLine
+            ? `${rewardLine} · 到期 ${expiryLabel}`
+            : expiryLabel !== '尚未訂閱'
+              ? `會員到期：${expiryLabel}`
+              : '若會員管理仍顯示未訂閱，請稍後重新整理',
         })
-        return
+        markPaymentReturnRewardShown(orderNo)
+        clearPaymentReturnQuery()
+      } finally {
+        releasePaymentReturnRewardEffect()
       }
-
-      const profile = await getProfile(user.id)
-      const expiresAt =
-        paid.subscriptionExpiresAt ?? profile?.subscription_expires_at ?? null
-      const expiryLabel = formatMembershipExpiryZhTw(expiresAt)
-
-      const beforeSnap = preSubscriptionCreditsRef.current
-      preSubscriptionCreditsRef.current = null
-      const after = await getCreditBalance(user.id)
-      const parts: string[] = []
-      if (beforeSnap) {
-        if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
-        if (after.super_like > beforeSnap.super_like) {
-          parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)
-        }
-        if (after.blur_unlock > beforeSnap.blur_unlock) {
-          parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
-        }
-      }
-      const rewardLine = parts.length > 0 ? parts.join(' · ') : null
-      setRewardFlash({
-        variant: 'grant',
-        title: parts.length > 0 ? 'VIP 已開通' : 'VIP 購買成功',
-        subtitle: rewardLine
-          ? `${rewardLine} · 到期 ${expiryLabel}`
-          : expiryLabel !== '尚未訂閱'
-            ? `會員到期：${expiryLabel}`
-            : '若會員管理仍顯示未訂閱，請稍後重新整理',
-      })
     })()
-
-    return () => {
-      cancelled = true
-    }
   }, [user?.id, refreshCredits])
 
   useEffect(() => {
