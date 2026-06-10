@@ -103,7 +103,7 @@ import {
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
-import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod, RESUME_MIN_VISIBILITY_HIDDEN_MS } from '@/lib/resumeHardReload'
+import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
@@ -6538,21 +6538,6 @@ export default function MainScreen({
     })
   }, [])
 
-  /** 付費返回首輪：先到探索，再做一次整頁重開；第二輪才輪詢入帳並顯示道具。 */
-  useEffect(() => {
-    if (!user?.id) return
-    const query = readEffectivePaymentReturnQuery()
-    if (query.kind !== 'return' || !query.orderNo) return
-    if (!paymentReturnHardReloadPending(query.orderNo)) return
-
-    setActiveTab('discover')
-    const t = window.setTimeout(() => {
-      hardReloadOnceAfterPaymentReturn(query.orderNo)
-    }, RESUME_MIN_VISIBILITY_HIDDEN_MS)
-
-    return () => window.clearTimeout(t)
-  }, [user?.id])
-
   const openSubscriptionModal = useCallback(() => {
     preSubscriptionCreditsRef.current = { ...creditBalance }
     setShowSubscription(true)
@@ -6648,16 +6633,12 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成：第二輪先預熱「我的」資料，再顯示道具／VIP 提示。 */
+  /** 綠界付款完成：先顯示道具／VIP 提示，使用者按確認後再整頁重啟。 */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
     const orderNo = query.orderNo
-
-    if (query.kind === 'return' && orderNo && paymentReturnHardReloadPending(orderNo)) {
-      return
-    }
 
     if (query.kind === 'cancel') {
       clearPaymentReturnQuery()
@@ -6689,23 +6670,13 @@ export default function MainScreen({
         const paid = await pollEcpayOrderPaid(orderNo, { gatewayConfirmed: gatewayOk })
         if (cancelled) return
 
-        const prewarmProfileReads = async (): Promise<ProfileRow | null> => {
-          void repairAuthAfterResume()
-          void ensureConnectionWithBudget(2_000)
-          const [profile] = await Promise.all([
-            getProfile(user.id, { skipEnsure: true }).catch(() => null),
-            refreshProfileTabStats({ skipEnsure: true }).catch(() => null),
-          ])
-          void refreshCredits()
-          void queryClient.invalidateQueries()
-          setForegroundReloadNonce((n) => n + 1)
-          return profile
-        }
+        void repairAuthAfterResume()
+        void ensureConnectionWithBudget(2_000)
+        void refreshCredits()
+        void queryClient.invalidateQueries()
 
         if (!paid?.paid) {
           if (gatewayOk) {
-            await prewarmProfileReads()
-            if (cancelled) return
             setRewardFlash({
               variant: 'grant',
               title: '付款成功',
@@ -6723,9 +6694,6 @@ export default function MainScreen({
           return
         }
 
-        const warmedProfile = await prewarmProfileReads()
-        if (cancelled) return
-
         if (paid.productType === 'credit_pack') {
           const pack = CREDIT_PACK_PRODUCTS.find((p) => p.key === paid.packKey)
           setRewardFlash({
@@ -6739,36 +6707,16 @@ export default function MainScreen({
         }
 
         const expiresAt =
-          paid.subscriptionExpiresAt ?? warmedProfile?.subscription_expires_at ?? null
+          paid.subscriptionExpiresAt ?? null
         const expiryLabel = formatMembershipExpiryZhTw(expiresAt)
 
-        const beforeSnap = preSubscriptionCreditsRef.current
         preSubscriptionCreditsRef.current = null
-        const after = await Promise.race([
-          getCreditBalance(user.id),
-          new Promise<CreditBalance | null>((resolve) =>
-            window.setTimeout(() => resolve(null), 3_000),
-          ),
-        ])
-        const parts: string[] = []
-        if (beforeSnap && after) {
-          if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
-          if (after.super_like > beforeSnap.super_like) {
-            parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)
-          }
-          if (after.blur_unlock > beforeSnap.blur_unlock) {
-            parts.push(`拼圖解鎖 +${after.blur_unlock - beforeSnap.blur_unlock}`)
-          }
-        }
-        const rewardLine = parts.length > 0 ? parts.join(' · ') : null
         setRewardFlash({
           variant: 'grant',
-          title: parts.length > 0 ? 'VIP 已開通' : 'VIP 購買成功',
-          subtitle: rewardLine
-            ? `${rewardLine} · 到期 ${expiryLabel}`
-            : expiryLabel !== '尚未訂閱'
-              ? `會員到期：${expiryLabel}`
-              : '若會員管理仍顯示未訂閱，請稍後重新整理',
+          title: 'VIP 購買成功',
+          subtitle: expiryLabel !== '尚未訂閱'
+            ? `會員到期：${expiryLabel}`
+            : '若會員管理仍顯示未訂閱，請稍後重新整理',
         })
         armHardReloadAfterRewardDismiss(orderNo)
         clearPaymentReturnQuery()
@@ -7622,6 +7570,8 @@ export default function MainScreen({
         title={rewardFlash?.title ?? ''}
         subtitle={rewardFlash?.subtitle}
         onDismiss={clearRewardFlash}
+        requireConfirm={postPaymentRewardReloadOrderRef.current != null}
+        confirmLabel="確認並重新啟動"
       />
 
       <AnimatePresence>

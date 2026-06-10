@@ -32,12 +32,16 @@ export function CreditRewardFlash({
   title,
   subtitle,
   onDismiss,
+  requireConfirm = false,
+  confirmLabel = '確認',
 }: {
   open: boolean
   variant: CreditRewardVariant
   title: string
   subtitle?: string
   onDismiss: () => void
+  requireConfirm?: boolean
+  confirmLabel?: string
 }) {
   /** iOS／PWA：`setTimeout` 在背景凍結，auto-dismiss 永不跑 → 全螢幕 overlay 卡住所有觸控。 */
   const resumeDismissRef = useRef(false)
@@ -46,13 +50,13 @@ export function CreditRewardFlash({
     const onVisibility = () => {
       const v = document.visibilityState
       if (open && v === 'hidden') resumeDismissRef.current = true
-      if (open && v === 'visible' && resumeDismissRef.current) {
+      if (!requireConfirm && open && v === 'visible' && resumeDismissRef.current) {
         resumeDismissRef.current = false
         onDismiss()
       }
     }
     const onPageshow = (ev: Event) => {
-      if (!open) return
+      if (!open || requireConfirm) return
       const e = ev as PageTransitionEvent
       if (e.persisted) onDismiss()
     }
@@ -62,16 +66,17 @@ export function CreditRewardFlash({
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pageshow', onPageshow)
     }
-  }, [open, onDismiss])
+  }, [open, onDismiss, requireConfirm])
 
   useEffect(() => {
     if (!open) {
       resumeDismissRef.current = false
       return
     }
+    if (requireConfirm) return
     const t = window.setTimeout(onDismiss, 2400)
     return () => window.clearTimeout(t)
-  }, [open, onDismiss])
+  }, [open, onDismiss, requireConfirm])
 
   const Icon = VARIANT_ICON[variant]
 
@@ -88,7 +93,7 @@ export function CreditRewardFlash({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          onClick={onDismiss}
+          onClick={requireConfirm ? undefined : onDismiss}
         >
           <motion.div
             className="relative w-full max-w-[280px] overflow-hidden rounded-[1.35rem] bg-white px-5 py-7 shadow-2xl shadow-slate-900/25 ring-2 ring-white/80"
@@ -118,6 +123,15 @@ export function CreditRewardFlash({
               <p className="text-[17px] font-black tracking-tight text-slate-900">{title}</p>
               {subtitle ? (
                 <p className="mt-2 text-[13px] font-semibold leading-snug text-slate-500">{subtitle}</p>
+              ) : null}
+              {requireConfirm ? (
+                <button
+                  type="button"
+                  onClick={onDismiss}
+                  className="mt-5 w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-black text-white shadow-lg shadow-slate-900/20 active:scale-[0.99]"
+                >
+                  {confirmLabel}
+                </button>
               ) : null}
             </motion.div>
             <motion.div
