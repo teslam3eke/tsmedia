@@ -106,6 +106,11 @@ function readPreferredMainShellTab(): MainScreenTab | null {
   return null
 }
 
+/** 曾進入主殼（`?tab=` 或 sessionStorage）；PWA 重載時可直進 main，避免 splash→landing 閃屏。 */
+function hasMainShellSessionHint(): boolean {
+  return readPreferredMainShellTab() != null
+}
+
 // ── Splash loader ─────────────────────────────────────────────────────────────
 function SplashScreen({ subtitle }: { subtitle?: string }) {
   return (
@@ -591,8 +596,8 @@ export default function App() {
         readSecurityOnboardingDone(u.id) &&
         !readPasswordRecoveryPending()
 
-      if (paymentReturn && onboarded) {
-        go('main')
+      if (onboarded && (paymentReturn || hasMainShellSessionHint())) {
+        launchMainFromProfile(null)
         return
       }
 
@@ -744,18 +749,18 @@ export default function App() {
     return () => { cancelled = true; subscription.unsubscribe() }
   }, [go, routeToPasswordRecovery, routeSignedInUser]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** authReady 後若仍停在 splash（早期 return 漏設 screen）→ 避免空白頁 */
+  /** authReady 後若仍停在 splash（早期 return 漏設 screen）→ 避免空白頁；已登入勿誤跳 landing。 */
   useEffect(() => {
     if (!authReady || screen !== 'splash') return
     if (readPasswordRecoveryPending() || readPasswordResetFlowStarted() || isOnPasswordRecoveryRoute()) {
       routeToPasswordRecovery()
       return
     }
-    if (user?.id && hasPendingPaymentReturn()) {
+    if (hasPendingPaymentReturn() && !paymentReturnRecoveryExhausted && !user?.id) return
+    if (user?.id) {
       void routeSignedInUser(user)
       return
     }
-    if (hasPendingPaymentReturn() && !paymentReturnRecoveryExhausted && !user?.id) return
     go('landing')
   }, [authReady, screen, go, routeToPasswordRecovery, user?.id, paymentReturnRecoveryExhausted, routeSignedInUser]) // eslint-disable-line react-hooks/exhaustive-deps
 
