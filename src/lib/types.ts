@@ -203,6 +203,35 @@ export interface MessageReportRow {
   reviewer_note: string | null
 }
 
+export type UserFeedbackCategory =
+  | 'bug'
+  | 'account'
+  | 'payment'
+  | 'discover'
+  | 'instant_match'
+  | 'verify'
+  | 'safety'
+  | 'suggestion'
+  | 'other'
+
+export interface UserFeedbackRow {
+  id: string
+  user_id: string
+  category: UserFeedbackCategory
+  body: string
+  status: 'open' | 'reviewing' | 'resolved' | 'dismissed'
+  created_at: string
+  reviewed_at: string | null
+  reviewer_note: string | null
+}
+
+export interface UserFeedbackWithProfile extends UserFeedbackRow {
+  profiles: {
+    name: string | null
+    nickname: string | null
+  } | null
+}
+
 export interface CreditTransactionRow {
   id: string
   user_id: string
@@ -272,6 +301,11 @@ export interface Database {
         Row: MessageReportRow
         Insert: Partial<MessageReportRow> & { reporter_user_id: string; reason: MessageReportReason }
         Update: Partial<MessageReportRow>
+      }
+      user_feedback: {
+        Row: UserFeedbackRow
+        Insert: Partial<UserFeedbackRow> & { user_id: string; category: UserFeedbackCategory; body: string }
+        Update: Partial<UserFeedbackRow>
       }
       credit_transactions: {
         Row: CreditTransactionRow

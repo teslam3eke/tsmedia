@@ -8,7 +8,7 @@ import type {
   AiConfidence, VerificationDocWithProfile, AppNotificationKind, AppNotificationRow,
   ProfileInteractionAction, MatchRow, MessageRow, ReportReason, ProfileReportRow,
   MessageReportReason, MessageReportRow, CreditBalance, CreditTransactionRow,
-  PhotoUnlockStateRow,
+  PhotoUnlockStateRow, UserFeedbackRow, UserFeedbackWithProfile,
 } from './types'
 import { PROFILE_PHOTO_MAX } from './types'
 
@@ -2168,6 +2168,91 @@ export async function updateMessageReportStatus(reportId: string, status: Messag
 
   if (error) {
     console.error('[db] updateMessageReportStatus error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
+// ─── User feedback ───────────────────────────────────────────────────────────
+
+export async function submitUserFeedback(
+  category: UserFeedbackRow['category'],
+  body: string,
+): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('submit_user_feedback', {
+    p_category: category,
+    p_body: body,
+  })
+
+  if (error) {
+    console.error('[db] submitUserFeedback error:', error.message)
+    return { ok: false, error: error.message }
+  }
+
+  const row = data as { ok?: boolean; error?: string } | null
+  if (row?.ok === false) {
+    return { ok: false, error: row.error ?? '送出失敗，請稍後再試。' }
+  }
+
+  return { ok: true }
+}
+
+export async function getAdminUserFeedback(): Promise<UserFeedbackWithProfile[]> {
+  const { data, error } = await supabase
+    .from('user_feedback')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[db] getAdminUserFeedback error:', error.message)
+    return []
+  }
+
+  return attachProfilesToFeedback((data ?? []) as UserFeedbackRow[])
+}
+
+async function attachProfilesToFeedback(items: UserFeedbackRow[]): Promise<UserFeedbackWithProfile[]> {
+  const userIds = [...new Set(items.map((item) => item.user_id).filter(Boolean))]
+  if (userIds.length === 0) {
+    return items.map((item) => ({ ...item, profiles: null }))
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, name, nickname')
+    .in('id', userIds)
+
+  if (error) {
+    console.error('[db] attachProfilesToFeedback error:', error.message)
+    return items.map((item) => ({ ...item, profiles: null }))
+  }
+
+  const profileMap = new Map(
+    (data ?? []).map((profile) => [profile.id, {
+      name: profile.name,
+      nickname: profile.nickname,
+    }]),
+  )
+
+  return items.map((item) => ({
+    ...item,
+    profiles: profileMap.get(item.user_id) ?? null,
+  }))
+}
+
+export async function updateUserFeedbackStatus(
+  feedbackId: string,
+  status: UserFeedbackRow['status'],
+  reviewerNote?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('user_feedback')
+    .update({ status, reviewed_at: new Date().toISOString(), reviewer_note: reviewerNote ?? null })
+    .eq('id', feedbackId)
+
+  if (error) {
+    console.error('[db] updateUserFeedbackStatus error:', error.message)
     return { ok: false, error: error.message }
   }
   return { ok: true }

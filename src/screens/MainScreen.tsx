@@ -103,6 +103,7 @@ import {
   puzzleRecentMatchBoostEnabled,
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
+import FeedbackScreen from '@/screens/FeedbackScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
@@ -5613,6 +5614,7 @@ function ProfileTab({
   const [showCompanyVerify, setShowCompanyVerify] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
   const [showTermsNotice, setShowTermsNotice] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
@@ -5950,10 +5952,19 @@ function ProfileTab({
         <motion.button
           whileTap={{ backgroundColor: '#f8fafc' }}
           onClick={() => setShowTermsNotice(true)}
-          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700"
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
         >
           <FileText className="w-4 h-4 text-slate-400" />
           <span>會員同意書</span>
+        </motion.button>
+        <motion.button
+          whileTap={{ backgroundColor: '#f8fafc' }}
+          onClick={() => setShowFeedback(true)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700"
+        >
+          <MessageSquare className="w-4 h-4 text-slate-400" />
+          <span>意見反映</span>
+          <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
         </motion.button>
       </div>
 
@@ -6047,6 +6058,10 @@ function ProfileTab({
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showFeedback && <FeedbackScreen onClose={() => setShowFeedback(false)} />}
       </AnimatePresence>
 
       {/* Admin screen */}

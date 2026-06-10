@@ -3,20 +3,22 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShieldCheck, Clock, CheckCircle2, XCircle, ChevronLeft,
-  Cpu, Eye, RefreshCw, AlertCircle, Building2, Gem, Flag, Ban,
+  Cpu, Eye, RefreshCw, AlertCircle, Building2, Gem, Flag, Ban, MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { adminVerificationCompanyLabel, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
+import { userFeedbackCategoryLabel } from '@/lib/userFeedback'
 import {
   getAllVerifications, approveVerificationDoc,
   rejectVerificationDoc, getDocSignedUrl, getAdminProfileReports,
   getAdminMessageReports, updateProfileReportStatus, updateMessageReportStatus,
+  getAdminUserFeedback, updateUserFeedbackStatus,
   blockProfile,
 } from '@/lib/db'
-import type { MessageReportRow, ProfileReportRow, VerificationDocWithProfile } from '@/lib/types'
+import type { MessageReportRow, ProfileReportRow, UserFeedbackWithProfile, VerificationDocWithProfile } from '@/lib/types'
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all'
-type AdminTab = 'verifications' | 'reports'
+type AdminTab = 'verifications' | 'reports' | 'feedback'
 
 interface Props {
   onBack: () => void
@@ -38,6 +40,7 @@ export default function AdminScreen({ onBack }: Props) {
   const [docs, setDocs]         = useState<VerificationDocWithProfile[]>([])
   const [profileReports, setProfileReports] = useState<ProfileReportRow[]>([])
   const [messageReports, setMessageReports] = useState<MessageReportRow[]>([])
+  const [feedbackItems, setFeedbackItems] = useState<UserFeedbackWithProfile[]>([])
   const [loading, setLoading]   = useState(true)
   const [acting, setActing]     = useState<string | null>(null)   // doc id being acted on
   const [viewUrl, setViewUrl]   = useState<string | null>(null)
@@ -51,13 +54,16 @@ export default function AdminScreen({ onBack }: Props) {
     if (tab === 'verifications') {
       const data = await getAllVerifications(filter === 'all' ? undefined : filter)
       setDocs(data)
-    } else {
+    } else if (tab === 'reports') {
       const [profileData, messageData] = await Promise.all([
         getAdminProfileReports(),
         getAdminMessageReports(),
       ])
       setProfileReports(profileData)
       setMessageReports(messageData)
+    } else {
+      const data = await getAdminUserFeedback()
+      setFeedbackItems(data)
     }
     setLoading(false)
   }, [filter, tab])
@@ -103,6 +109,7 @@ export default function AdminScreen({ onBack }: Props) {
 
   const pendingCount = docs.filter(d => filter === 'all' && d.status === 'pending').length
   const openReportCount = [...profileReports, ...messageReports].filter((r) => r.status === 'open' || r.status === 'reviewing').length
+  const openFeedbackCount = feedbackItems.filter((r) => r.status === 'open' || r.status === 'reviewing').length
 
   return (
     <div className="flex h-[100dvh] min-h-0 flex-col bg-[#f5f5f7]">
@@ -117,7 +124,7 @@ export default function AdminScreen({ onBack }: Props) {
           </button>
           <div className="flex-1">
             <h1 className="text-base font-bold text-slate-900">管理後台</h1>
-            <p className="text-xs text-slate-400">驗證文件 / 檢舉處理</p>
+            <p className="text-xs text-slate-400">驗證文件 / 檢舉 / 意見反映</p>
           </div>
           <button
             onClick={load}
@@ -127,10 +134,11 @@ export default function AdminScreen({ onBack }: Props) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="grid grid-cols-3 gap-2 mb-2">
           {([
             ['verifications', '驗證審核'],
             ['reports', `檢舉${openReportCount ? ` ${openReportCount}` : ''}`],
+            ['feedback', `意見${openFeedbackCount ? ` ${openFeedbackCount}` : ''}`],
           ] as [AdminTab, string][]).map(([value, label]) => (
             <button
               key={value}
@@ -205,7 +213,7 @@ export default function AdminScreen({ onBack }: Props) {
               />
             ))}
           </>
-        ) : (
+        ) : tab === 'reports' ? (
           <ReportAdminList
             profileReports={profileReports}
             messageReports={messageReports}
@@ -230,6 +238,17 @@ export default function AdminScreen({ onBack }: Props) {
                 blockedDisplayName: target.displayName ?? null,
                 reason: 'admin_report_action',
               })
+              setActing(null)
+              load()
+            }}
+          />
+        ) : (
+          <FeedbackAdminList
+            items={feedbackItems}
+            acting={acting}
+            onResolve={async (item, status) => {
+              setActing(item.id)
+              await updateUserFeedbackStatus(item.id, status)
               setActing(null)
               load()
             }}
@@ -695,3 +714,86 @@ function ReportCard({
 
 // suppress unused import warnings for icons used conditionally
 void Clock
+
+function FeedbackAdminList({
+  items,
+  acting,
+  onResolve,
+}: {
+  items: UserFeedbackWithProfile[]
+  acting: string | null
+  onResolve: (item: UserFeedbackWithProfile, status: 'resolved' | 'dismissed') => void
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <MessageSquare className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+        <p className="text-sm text-slate-400">目前沒有意見反映</p>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {items.map((item) => {
+        const displayName = item.profiles?.nickname || item.profiles?.name || '未知用戶'
+        const isOpen = item.status === 'open' || item.status === 'reviewing'
+        return (
+          <motion.div
+            key={item.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-bold text-slate-900">{displayName}</span>
+                  <span className={cn(
+                    'rounded-full px-2 py-0.5 text-[10px] font-bold',
+                    isOpen ? 'bg-amber-50 text-amber-700' : item.status === 'resolved' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500',
+                  )}>
+                    {isOpen ? '待處理' : item.status === 'resolved' ? '已處理' : '已駁回'}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-400">
+                  {userFeedbackCategoryLabel(item.category)} · {new Date(item.created_at).toLocaleString('zh-TW')}
+                </p>
+              </div>
+              <MessageSquare className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400" />
+            </div>
+
+            <div className="rounded-xl bg-slate-50 px-3 py-2">
+              <p className="text-xs leading-relaxed text-slate-700 whitespace-pre-wrap">{item.body}</p>
+            </div>
+
+            {item.reviewer_note && (
+              <div className="rounded-xl bg-slate-50 px-3 py-2">
+                <p className="text-[10px] text-slate-400">審核備註：{item.reviewer_note}</p>
+              </div>
+            )}
+
+            {isOpen && (
+              <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                <button
+                  onClick={() => onResolve(item, 'dismissed')}
+                  disabled={acting === item.id}
+                  className="rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-500 disabled:opacity-60"
+                >
+                  駁回
+                </button>
+                <button
+                  onClick={() => onResolve(item, 'resolved')}
+                  disabled={acting === item.id}
+                  className="rounded-xl bg-emerald-500 py-2.5 text-xs font-bold text-white disabled:opacity-60"
+                >
+                  標記處理
+                </button>
+              </div>
+            )}
+          </motion.div>
+        )
+      })}
+    </>
+  )
+}
