@@ -251,6 +251,7 @@ export function capturePaymentReturnFromUrl(): PaymentReturnQuery | null {
     } catch {
       /* ignore */
     }
+    clearPaymentReturnAuthRepairPending()
     return null
   }
   /** 第二輪（探索後已 reload）：勿再打 auth repair，否則「我的」／探索 RPC 又被擋住 */

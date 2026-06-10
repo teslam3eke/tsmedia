@@ -105,7 +105,7 @@ import {
 } from '@/components/PuzzlePhotoUnlock'
 import AdminScreen from '@/screens/AdminScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
-import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod, RESUME_MIN_VISIBILITY_HIDDEN_MS } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
@@ -1579,7 +1579,11 @@ function DiscoverTab({
 
     /** 付費返回首輪：boot 已 hard reload；第二輪勿再擋 deck */
     const payQuery = readEffectivePaymentReturnQuery()
-    if (paymentReturnAuthRepairPending() && !isPaymentReturnPostReloadPass(payQuery)) {
+    if (
+      paymentReturnAuthRepairPending() &&
+      payQuery.kind === 'return' &&
+      !isPaymentReturnPostReloadPass(payQuery)
+    ) {
       if (liveDeckRef.current.length === 0) setLiveDeckStatus('loading')
       return
     }
@@ -5612,7 +5616,12 @@ function ProfileTab({
   useEffect(() => {
     const myEpoch = ++profileLoadEpochRef.current
     const load = async () => {
-      if (paymentReturnAuthRepairPending() && !isPaymentReturnPostReloadPass(readEffectivePaymentReturnQuery())) return
+      const payQuery = readEffectivePaymentReturnQuery()
+      if (
+        paymentReturnAuthRepairPending() &&
+        payQuery.kind === 'return' &&
+        !isPaymentReturnPostReloadPass(payQuery)
+      ) return
       const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       try {
         actionTrace('profileTab', 'load:開始', {
@@ -6532,6 +6541,21 @@ export default function MainScreen({
     })
   }, [])
 
+  /** 付費返回首輪：先到探索，再做一次整頁重開；第二輪才輪詢入帳並顯示道具。 */
+  useEffect(() => {
+    if (!user?.id) return
+    const query = readEffectivePaymentReturnQuery()
+    if (query.kind !== 'return' || !query.orderNo) return
+    if (!paymentReturnHardReloadPending(query.orderNo)) return
+
+    setActiveTab('discover')
+    const t = window.setTimeout(() => {
+      hardReloadOnceAfterPaymentReturn(query.orderNo)
+    }, RESUME_MIN_VISIBILITY_HIDDEN_MS)
+
+    return () => window.clearTimeout(t)
+  }, [user?.id])
+
   const openSubscriptionModal = useCallback(() => {
     preSubscriptionCreditsRef.current = { ...creditBalance }
     setShowSubscription(true)
@@ -6633,6 +6657,10 @@ export default function MainScreen({
     const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
     const orderNo = query.orderNo
+
+    if (query.kind === 'return' && orderNo && paymentReturnHardReloadPending(orderNo)) {
+      return
+    }
 
     if (query.kind === 'cancel') {
       clearPaymentReturnQuery()
