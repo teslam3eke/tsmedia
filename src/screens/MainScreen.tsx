@@ -37,8 +37,6 @@ import {
   prepareSupabaseForProfileReads,
   paymentReturnAuthRepairPending,
   clearPaymentReturnAuthRepairPending,
-  awaitRealtimeWsSignalWithin,
-  PROFILE_TAB_REALTIME_SIGNAL_MS,
   supabase,
 } from '@/lib/supabase'
 import { clearAppQueryCache, queryClient } from '@/lib/queryClient'
@@ -5632,15 +5630,13 @@ function ProfileTab({
         /** 勿阻塞：iOS／PWA `finalize_due_ai_reviews` RPC 偶有長掛，`await` 會擋住整頁個資與探索相關狀態。 */
         void finalizeDueAiReviews()
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await prepareSupabaseForProfileReads('load')
+          void prepareSupabaseForProfileReads('load')
         }
-        /** 至多等 WS／Worker open；逾時不中斷，接著 REST（fetch 另有逾時）。 */
-        await awaitRealtimeWsSignalWithin(PROFILE_TAB_REALTIME_SIGNAL_MS)
 
-        /** `getProfile` 與統計並行，統計不依賴 profile 列。 */
+        /** REST-first：勿等完整 auth/realtime repair，避免「我的」頁看似卡數分鐘。 */
         const [latest, stats] = await Promise.all([
-          getProfile(userId),
-          refreshProfileTabStats(),
+          getProfile(userId, { skipEnsure: true }),
+          refreshProfileTabStats({ skipEnsure: true }),
         ])
         if (profileLoadEpochRef.current !== myEpoch) {
           actionTrace('profileTab', 'load:略過 stale', {
@@ -5680,12 +5676,11 @@ function ProfileTab({
         actionTrace('profileTab', 'poll:開始', { poll, uid: shortId(userId), myEpoch })
         void finalizeDueAiReviews()
         if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-          await prepareSupabaseForProfileReads('poll')
+          void prepareSupabaseForProfileReads('poll')
         }
-        await awaitRealtimeWsSignalWithin(PROFILE_TAB_REALTIME_SIGNAL_MS)
         const [latest, stats] = await Promise.all([
-          getProfile(userId),
-          refreshProfileTabStats(),
+          getProfile(userId, { skipEnsure: true }),
+          refreshProfileTabStats({ skipEnsure: true }),
         ])
         if (profilePollGenRef.current !== myEpoch) {
           actionTrace('profileTab', 'poll:略過 stale', {
@@ -6695,17 +6690,13 @@ export default function MainScreen({
         if (cancelled) return
 
         const prewarmProfileReads = async (): Promise<ProfileRow | null> => {
-          try {
-            await repairAuthAfterResume()
-            await ensureConnectionWithBudget(5_000)
-          } catch {
-            /* 仍讓付款提示往下走；ProfileTab 會在 nonce bump 後再重抓。 */
-          }
+          void repairAuthAfterResume()
+          void ensureConnectionWithBudget(2_000)
           const [profile] = await Promise.all([
-            getProfile(user.id).catch(() => null),
-            refreshProfileTabStats().catch(() => null),
-            refreshCredits().catch(() => undefined),
+            getProfile(user.id, { skipEnsure: true }).catch(() => null),
+            refreshProfileTabStats({ skipEnsure: true }).catch(() => null),
           ])
+          void refreshCredits()
           void queryClient.invalidateQueries()
           setForegroundReloadNonce((n) => n + 1)
           return profile
@@ -6753,9 +6744,14 @@ export default function MainScreen({
 
         const beforeSnap = preSubscriptionCreditsRef.current
         preSubscriptionCreditsRef.current = null
-        const after = await getCreditBalance(user.id)
+        const after = await Promise.race([
+          getCreditBalance(user.id),
+          new Promise<CreditBalance | null>((resolve) =>
+            window.setTimeout(() => resolve(null), 3_000),
+          ),
+        ])
         const parts: string[] = []
-        if (beforeSnap) {
+        if (beforeSnap && after) {
           if (after.heart > beforeSnap.heart) parts.push(`愛心 +${after.heart - beforeSnap.heart}`)
           if (after.super_like > beforeSnap.super_like) {
             parts.push(`超級喜歡 +${after.super_like - beforeSnap.super_like}`)

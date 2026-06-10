@@ -67,27 +67,30 @@ function mergedDiscoverDeckAbortSignal(parent: AbortSignal | undefined, budgetMs
 
 // ─── Profiles ────────────────────────────────────────────────────────────────
 
-export async function getProfile(userId: string): Promise<ProfileRow | null> {
+export async function getProfile(
+  userId: string,
+  opts?: { skipEnsure?: boolean },
+): Promise<ProfileRow | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await ensureConnectionWithBudget()
+  if (visible && !opts?.skipEnsure) await ensureConnectionWithBudget()
 
   const query = () =>
     supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
 
   let { data, error } = await query()
 
-  if (visible && error && isRecoverableResumeAuthError(error)) {
+  if (visible && !opts?.skipEnsure && error && isRecoverableResumeAuthError(error)) {
     await repairAuthAfterResume()
     await ensureConnectionWithBudget(12_000)
     ;({ data, error } = await query())
   }
 
-  if (visible && error && isRecoverableResumeAuthError(error)) {
+  if (visible && !opts?.skipEnsure && error && isRecoverableResumeAuthError(error)) {
     await repairAuthAfterResume()
     ;({ data, error } = await query())
   }
 
-  if (error && visible) {
+  if (error && visible && !opts?.skipEnsure) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await query())
   }
@@ -1054,9 +1057,11 @@ export type ProfileTabStats = {
 }
 
 /** 更新登入 streak／累積天數，並回傳「我的」頁統計（須執行 migration 016） */
-export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> {
+export async function refreshProfileTabStats(
+  opts?: { skipEnsure?: boolean },
+): Promise<ProfileTabStats | null> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await ensureConnectionWithBudget()
+  if (visible && !opts?.skipEnsure) await ensureConnectionWithBudget()
 
   const rpc = async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1064,7 +1069,7 @@ export async function refreshProfileTabStats(): Promise<ProfileTabStats | null> 
   }
 
   let { data, error } = await rpc()
-  if (error && visible) {
+  if (error && visible && !opts?.skipEnsure) {
     await ensureConnectionWithBudget()
     ;({ data, error } = await rpc())
   }
