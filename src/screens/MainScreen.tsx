@@ -6261,8 +6261,6 @@ export default function MainScreen({
   const [physicalChannelResubscribeNonce, setPhysicalChannelResubscribeNonce] = useState(0)
   /** `visibilitychange` + `pageshow` 常同幀連發，避免探索 deck 連續被取消（epoch stale） */
   const lastFgScheduleAtRef = useRef(0)
-  /** 付費返回：道具提示關閉後才 hard reload；勿被 pageshow 前景流程提早清掉 */
-  const postPaymentRewardReloadOrderRef = useRef<string | null>(null)
 
   /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒（Safari 分頁改由安全檢測頁引導）。 */
   useEffect(() => {
@@ -6350,7 +6348,7 @@ export default function MainScreen({
         debounceTimer = null
         void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
-          if (!postPaymentRewardReloadOrderRef.current) setRewardFlash(null)
+          setRewardFlash(null)
           setMatchSplash(null)
           setShowDiscoverPuzzleIntro(false)
           void queryClient.invalidateQueries()
@@ -6513,20 +6511,31 @@ export default function MainScreen({
     }
   }, [user?.id, foregroundReloadNonce, ingestUnreadAppNotifications])
 
-  const armHardReloadAfterRewardDismiss = useCallback((orderNo: string | null | undefined) => {
-    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
-    postPaymentRewardReloadOrderRef.current = orderNo
-  }, [])
-
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
-    const orderNo = postPaymentRewardReloadOrderRef.current
-    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
-    postPaymentRewardReloadOrderRef.current = null
-    requestAnimationFrame(() => {
+  }, [])
+
+  /** 付費返回：先切到探索，首次進探索後整頁重開；第二輪才跑入帳提示 */
+  useEffect(() => {
+    if (!user?.id) return
+    const query = readEffectivePaymentReturnQuery()
+    if (query.kind !== 'return' || !query.orderNo) return
+    if (!paymentReturnHardReloadPending(query.orderNo)) return
+    setActiveTab('discover')
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return
+    if (activeTab !== 'discover') return
+    const query = readEffectivePaymentReturnQuery()
+    if (query.kind !== 'return' || !query.orderNo) return
+    if (!paymentReturnHardReloadPending(query.orderNo)) return
+    const orderNo = query.orderNo
+    const t = window.requestAnimationFrame(() => {
       hardReloadOnceAfterPaymentReturn(orderNo)
     })
-  }, [])
+    return () => window.cancelAnimationFrame(t)
+  }, [user?.id, activeTab])
 
   const openSubscriptionModal = useCallback(() => {
     preSubscriptionCreditsRef.current = { ...creditBalance }
@@ -6623,12 +6632,18 @@ export default function MainScreen({
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
 
-  /** 綠界付款完成：入帳後顯示道具／VIP 提示，關閉提示後整頁重開（修 WebKit 僵死連線） */
+  /** 綠界付款完成（第二輪）：入帳後顯示道具／VIP 提示 */
   useEffect(() => {
     if (!user?.id) return
     const query = readEffectivePaymentReturnQuery()
     if (!query.kind) return
     const orderNo = query.orderNo
+
+    /** 首輪：等探索 tab 觸發 hard reload，勿清 URL／勿顯示獎勵 */
+    if (query.kind === 'return' && orderNo && paymentReturnHardReloadPending(orderNo)) {
+      return
+    }
+
     clearPaymentReturnQuery()
 
     if (query.kind === 'cancel') {
@@ -6661,9 +6676,8 @@ export default function MainScreen({
           setRewardFlash({
             variant: 'grant',
             title: '付款成功',
-            subtitle: '關閉後將重新載入以更新探索與個人資料',
+            subtitle: '若道具未更新，請至會員管理查看',
           })
-          armHardReloadAfterRewardDismiss(orderNo)
         } else {
           setRewardFlash({
             variant: 'grant',
@@ -6683,7 +6697,6 @@ export default function MainScreen({
           title: '購買成功',
           subtitle: pack?.creditLabel ?? '道具已入帳',
         })
-        armHardReloadAfterRewardDismiss(orderNo)
         return
       }
 
@@ -6715,13 +6728,12 @@ export default function MainScreen({
             ? `會員到期：${expiryLabel}`
             : '若會員管理仍顯示未訂閱，請稍後重新整理',
       })
-      armHardReloadAfterRewardDismiss(orderNo)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [user?.id, refreshCredits, armHardReloadAfterRewardDismiss])
+  }, [user?.id, refreshCredits])
 
   useEffect(() => {
     if (!user?.id) return

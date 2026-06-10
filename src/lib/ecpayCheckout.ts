@@ -145,7 +145,7 @@ export function markPaymentReturnHardReloadDone(orderNo: string): void {
 }
 
 /**
- * 付費返回：道具／VIP 提示關閉後整頁重開一次（每筆 order 僅一次，localStorage 防無限圈）。
+ * 付費返回：首次進探索後整頁重開一次；第二輪再顯示道具／月費提示（localStorage 防無限圈）。
  */
 export function hardReloadOnceAfterPaymentReturn(orderNo: string | null | undefined): boolean {
   if (typeof window === 'undefined') return false
