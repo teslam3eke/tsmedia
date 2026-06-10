@@ -3,7 +3,6 @@ import { motion } from 'framer-motion'
 import { ChevronLeft, Crown, Heart, Sparkles, Eye, LayoutGrid } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
-  cancelMembershipSubscription,
   completeMonthlyMembership,
   getProfile,
   purchaseCreditPackMock,
@@ -33,7 +32,6 @@ export type MembershipUpdateEvent =
   | { type: 'membership' }
   | { type: 'pack'; subtitle: string }
   | { type: 'crown_effect' }
-  | { type: 'cancel' }
 
 const TAPPAY_FIELD_PREFIX = 'membership-mgmt-card'
 
@@ -54,7 +52,6 @@ export default function MembershipManagementScreen({
   const [error, setError] = useState<string | null>(null)
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null)
   const [crownEffectPurchasedAt, setCrownEffectPurchasedAt] = useState<string | null>(null)
-  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false)
   const [termsOpen, setTermsOpen] = useState(false)
 
   const { mode: paymentMode, loading: paymentLoading } = usePaymentProvider()
@@ -315,23 +312,6 @@ export default function MembershipManagementScreen({
     }
   }
 
-  const confirmCancel = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      const res = await cancelMembershipSubscription()
-      if (!res.ok) {
-        setError(res.reason === 'not_subscribed' ? '目前沒有有效會員訂閱' : res.error ?? '取消失敗')
-        return
-      }
-      setCancelConfirmOpen(false)
-      await reloadProfile()
-      onUpdated({ type: 'cancel' })
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -518,17 +498,6 @@ export default function MembershipManagementScreen({
             </div>
           )}
 
-          {memberActive && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setCancelConfirmOpen(true)}
-              className="w-full rounded-2xl border border-red-400/40 bg-red-500/10 py-3.5 text-sm font-black text-red-300 ring-1 ring-red-400/20 transition active:scale-[0.99] disabled:opacity-60"
-            >
-              取消會員訂閱
-            </button>
-          )}
-
           {error && (
             <p className="rounded-2xl bg-red-500/15 px-4 py-2 text-center text-sm font-semibold text-red-300 ring-1 ring-red-400/30">
               {error}
@@ -595,36 +564,16 @@ export default function MembershipManagementScreen({
           </button>
           。
         </p>
+        <p className="mt-4 text-center text-[11px] font-semibold text-slate-500">
+          客服信箱：{' '}
+          <a
+            href="mailto:letmesaveyou@livemail.tw"
+            className="text-amber-400/95 underline decoration-amber-400/50 underline-offset-2"
+          >
+            letmesaveyou@livemail.tw
+          </a>
+        </p>
       </div>
-
-      {cancelConfirmOpen && (
-        <div className="fixed inset-0 z-[420] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-2xl bg-slate-900 p-5 ring-1 ring-white/10">
-            <p className="text-base font-black text-white">確定取消會員訂閱？</p>
-            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-400">
-              取消後將立即失去會員資格（含每日登入愛心）。已購買的道具次數仍可使用。
-            </p>
-            <div className="mt-5 flex gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setCancelConfirmOpen(false)}
-                className="flex-1 rounded-xl bg-white/10 py-3 text-sm font-bold text-slate-200"
-              >
-                保留會員
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void confirmCancel()}
-                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-black text-white"
-              >
-                確認取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <TermsOfServiceModal open={termsOpen} onClose={() => setTermsOpen(false)} />
     </motion.div>

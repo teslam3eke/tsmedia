@@ -51,6 +51,29 @@ export function isCrownEffectPurchased(purchasedAt: string | null | undefined): 
   return Boolean(purchasedAt)
 }
 
+/** 男性須購買皇冠特效道具後才可啟用；女性僅需收入認證。 */
+export function canEnableCrownEffect(profile: {
+  gender: 'male' | 'female' | null
+  crown_effect_purchased_at?: string | null
+}): boolean {
+  if (profile.gender !== 'male') return true
+  return isCrownEffectPurchased(profile.crown_effect_purchased_at)
+}
+
+export function effectiveShowIncomeBorder(profile: {
+  gender: 'male' | 'female' | null
+  show_income_border?: boolean | null
+  income_tier?: string | null
+  crown_effect_purchased_at?: string | null
+} | null | undefined): boolean {
+  if (!profile) return false
+  return Boolean(
+    profile.show_income_border &&
+    profile.income_tier &&
+    canEnableCrownEffect(profile),
+  )
+}
+
 export function membershipMonthlyPriceNtd(gender: 'male' | 'female'): number {
   if (PAYMENT_TEST_MODE) return PAYMENT_TEST_PRICE_NTD
   return gender === 'male' ? 399 : 299

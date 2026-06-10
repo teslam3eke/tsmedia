@@ -60,7 +60,7 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
-import { CREDIT_PACK_PRODUCTS, formatMembershipExpiryZhTw } from '@/lib/membershipProducts'
+import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
   hardReloadOnceAfterPaymentReturn,
@@ -457,7 +457,7 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
     workRegion: wr,
     homeRegion: hr,
     incomeTier: row.income_tier ?? undefined,
-    showIncomeBorder: Boolean(row.show_income_border && row.income_tier),
+    showIncomeBorder: effectiveShowIncomeBorder(row),
     likedToday: Boolean(row.liked_today),
     superLikedToday: Boolean(row.super_liked_today),
     incomingSuperLiked: Boolean(row.incoming_super_liked),
@@ -567,7 +567,7 @@ async function profileRowToMatchProfile(row: ProfileRow, idSlot: number): Promis
     workRegion: wr,
     homeRegion: hr,
     incomeTier: row.income_tier ?? undefined,
-    showIncomeBorder: Boolean(row.show_income_border && row.income_tier),
+    showIncomeBorder: effectiveShowIncomeBorder(row),
   }
 }
 
@@ -4066,11 +4066,13 @@ function EditProfileScreen({
   userId,
   onClose,
   onSaved,
+  onOpenMembershipManagement,
 }: {
   profile: ProfileRow
   userId: string
   onClose: () => void
   onSaved: (updated: ProfileRow) => void
+  onOpenMembershipManagement: () => void
 }) {
   const [name, setName]     = useState(profile.name ?? '')
   const [nickname, setNickname] = useState(profile.nickname ?? '')
@@ -4081,7 +4083,12 @@ function EditProfileScreen({
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
 
-  const [showIncomeBorder, setShowIncomeBorder] = useState<boolean>(profile.show_income_border ?? false)
+  const [showIncomeBorder, setShowIncomeBorder] = useState<boolean>(() => {
+    if (!canEnableCrownEffect(profile)) return false
+    return profile.show_income_border ?? false
+  })
+  const crownEffectOwned = isCrownEffectPurchased(profile.crown_effect_purchased_at)
+  const maleNeedsCrownPurchase = profile.gender === 'male' && !crownEffectOwned
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
@@ -4444,6 +4451,9 @@ function EditProfileScreen({
 
     const uploadedPaths = photoList.map((p) => p.storagePath)
 
+    const borderToSave =
+      profile.gender === 'male' && !crownEffectOwned ? false : showIncomeBorder
+
     const result = await upsertProfile({
       userId,
       name: name.trim(),
@@ -4455,7 +4465,7 @@ function EditProfileScreen({
       workRegion:      workRegion      === '' ? null : workRegion,
       homeRegion:      homeRegion      === '' ? null : homeRegion,
       preferredRegion: preferredRegion === '' ? null : preferredRegion,
-      showIncomeBorder,
+      showIncomeBorder: borderToSave,
     })
 
     setSaving(false)
@@ -4482,7 +4492,7 @@ function EditProfileScreen({
       work_region:      workRegion      === '' ? null : workRegion,
       home_region:      homeRegion      === '' ? null : homeRegion,
       preferred_region: preferredRegion === '' ? null : preferredRegion,
-      show_income_border: showIncomeBorder,
+      show_income_border: borderToSave,
     }
     onSaved(updated)
     return true
@@ -4698,7 +4708,14 @@ function EditProfileScreen({
 
               {/* Toggle */}
               <button
-                onClick={() => setShowIncomeBorder((v) => !v)}
+                type="button"
+                onClick={() => {
+                  if (!showIncomeBorder && maleNeedsCrownPurchase) {
+                    onOpenMembershipManagement()
+                    return
+                  }
+                  setShowIncomeBorder((v) => !v)
+                }}
                 className={cn(
                   'w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-between px-4 transition-all',
                   showIncomeBorder
@@ -4717,6 +4734,11 @@ function EditProfileScreen({
                   )} />
                 </div>
               </button>
+              {maleNeedsCrownPurchase ? (
+                <p className="text-[11px] font-semibold leading-relaxed text-amber-700 px-1">
+                  須至會員管理購買「皇冠特效」後方可啟用（仍須完成收入認證）。
+                </p>
+              ) : null}
               <p className="text-[11px] text-slate-400 leading-relaxed px-1">
                 啟用後，所有人看你的照片都會加上 {INCOME_TIER_META[profile.income_tier].short} 。左側預覽與生活照上傳區塊相同大小。
               </p>
@@ -5807,7 +5829,7 @@ function ProfileTab({
             <LifePhotoPreviewTile
               photoUrl={profilePhotoPreviewUrl}
               incomeTier={profile?.income_tier}
-              showCrown={Boolean(profile?.show_income_border && profile?.income_tier)}
+              showCrown={effectiveShowIncomeBorder(profile)}
             />
             <div className="col-span-2 flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0 pt-1">
@@ -5828,7 +5850,7 @@ function ProfileTab({
                         {INCOME_TIER_META[profile.income_tier].short}
                       </span>
                     </span>
-                    {!profile.show_income_border ? (
+                    {!effectiveShowIncomeBorder(profile) ? (
                       <span className="text-xs font-semibold text-red-500">尚未開啟皇冠特效</span>
                     ) : null}
                   </div>
@@ -5967,6 +5989,10 @@ function ProfileTab({
             userId={userId}
             onClose={() => setEditing(false)}
             onSaved={(updated) => setProfile(updated)}
+            onOpenMembershipManagement={() => {
+              setEditing(false)
+              onOpenSubscription()
+            }}
           />
         )}
       </AnimatePresence>
@@ -7565,13 +7591,7 @@ export default function MainScreen({
                     title: '購買成功',
                     subtitle: '皇冠特效已永久解鎖（須完成收入認證後方可使用）',
                   })
-                  return
                 }
-                setRewardFlash({
-                  variant: 'grant',
-                  title: '已取消會員訂閱',
-                  subtitle: '會員權益已結束，道具次數仍可使用',
-                })
               }}
             />
           </motion.div>
