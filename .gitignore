@@ -39,6 +39,7 @@ photo/
 
 # 本機測試帳號對照（含 Email，勿提交）
 scripts/test-users.csv
+scripts/founding-users.csv
 
 # Supabase CLI / 本機暫存
 supabase/.temp/

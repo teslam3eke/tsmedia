@@ -5,6 +5,7 @@
  *
  * 執行：
  *   npm run list:users
+ *   npm run list:users -- --founding-only
  *   npm run list:users -- --csv=scripts/test-users.csv
  *
  * 預設會印到終端機，並寫入 scripts/test-users.csv（已 gitignore，可常開對照）。
@@ -78,6 +79,10 @@ function parseCsvPathArg(): string | null {
   const hit = process.argv.find((a) => a.startsWith('--csv='))
   if (!hit) return null
   return hit.slice('--csv='.length).trim() || null
+}
+
+function parseFoundingOnlyArg(): boolean {
+  return process.argv.includes('--founding-only')
 }
 
 async function loadAllAuthEmails(
@@ -197,11 +202,15 @@ async function main() {
   }
 
   const rows = toUserRows((profiles ?? []) as ProfileRow[], emailById)
-  printTable(rows)
+  const foundingOnly = parseFoundingOnlyArg()
+  const outputRows = foundingOnly
+    ? rows.filter((r) => r.foundingNo !== '—')
+    : rows
+  printTable(outputRows)
 
   const csvArg = parseCsvPathArg()
-  const csvPath = path.resolve(repoRootDir(), csvArg ?? 'scripts/test-users.csv')
-  writeCsv(csvPath, rows)
+  const csvPath = path.resolve(repoRootDir(), csvArg ?? (foundingOnly ? 'scripts/founding-users.csv' : 'scripts/test-users.csv'))
+  writeCsv(csvPath, outputRows)
 
   console.log('創始測試帳密規律：founding001@tsmedia.tw～founding050@tsmedia.tw，密碼 88888888')
 }
