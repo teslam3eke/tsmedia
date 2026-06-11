@@ -1676,6 +1676,25 @@ export async function getPhotoUnlockState(matchId: string): Promise<PhotoUnlockS
   return data as PhotoUnlockStateRow
 }
 
+/** 合併多組全域拼圖格索引（去重排序）。 */
+export function mergePuzzleTileIds(...groups: number[][]): number[] {
+  return [...new Set(groups.flat().filter((t) => t >= 0 && t <= 47))].sort((a, b) => a - b)
+}
+
+/** 配對聊天：本人道具格 ＋（可選）即時升格前在 instant 房解鎖的格。 */
+export async function loadMatchPuzzleManualTiles(
+  matchId: string,
+  instantCarrySessionId?: string | null,
+): Promise<number[]> {
+  const carryId = instantCarrySessionId?.trim()
+  const [carryTiles, state] = await Promise.all([
+    carryId ? getInstantSessionPuzzleUnlockedTiles(carryId) : Promise.resolve([] as number[]),
+    getPhotoUnlockState(matchId),
+  ])
+  const matchManual = Array.isArray(state?.unlocked_tiles) ? state.unlocked_tiles : []
+  return mergePuzzleTileIds(carryTiles, matchManual)
+}
+
 export async function spendBlurUnlockTile(
   matchId: string,
   tile: number,

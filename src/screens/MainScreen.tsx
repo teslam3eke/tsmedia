@@ -47,7 +47,8 @@ import {
   getTodayVerificationSubmissionCount, finalizeDueAiReviews,
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile, endMatch,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
-  getPhotoUnlockState,
+  loadMatchPuzzleManualTiles,
+  mergePuzzleTileIds,
   getInstantSessionPuzzleUnlockedTiles,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages, patchChatMessageReadAt,
@@ -2938,13 +2939,12 @@ function PersonDetailView({
     }
     let cancelled = false
     ;(async () => {
-      const [rows, unlockState] = await Promise.all([
+      const [rows, manual] = await Promise.all([
         getMatchMessages(liveMatchId),
-        getPhotoUnlockState(liveMatchId),
+        loadMatchPuzzleManualTiles(liveMatchId, person.instantCarrySessionId),
       ])
       if (cancelled || rows === null) return
       const chatMessages = rows.map((r) => formatChatMessageFromRow(r, currentUserId))
-      const manual = Array.isArray(unlockState?.unlocked_tiles) ? unlockState.unlocked_tiles : []
       const puzzleSeedKey = person.instantCarrySessionId
         ? `instant:${String(person.instantCarrySessionId).trim().toLowerCase()}`
         : liveMatchId
@@ -3492,15 +3492,11 @@ function ChatRoomView({
     if (!isLive || !conversation.matchId) return
     let cancelled = false
     ;(async () => {
-      const carrySessionId = conversation.instantCarrySessionId?.trim()
-      if (carrySessionId) {
-        const tiles = await getInstantSessionPuzzleUnlockedTiles(carrySessionId)
-        if (!cancelled) setManualUnlockedTiles(tiles)
-        return
-      }
-      const state = await getPhotoUnlockState(conversation.matchId!)
-      if (cancelled) return
-      setManualUnlockedTiles(Array.isArray(state?.unlocked_tiles) ? state!.unlocked_tiles : [])
+      const tiles = await loadMatchPuzzleManualTiles(
+        conversation.matchId!,
+        conversation.instantCarrySessionId,
+      )
+      if (!cancelled) setManualUnlockedTiles(tiles)
     })()
     return () => {
       cancelled = true
@@ -3715,9 +3711,10 @@ function ChatRoomView({
       )
       await refreshCredits()
       if (res.ok) {
-        const unlockedFromServer = Array.isArray(res.state?.unlocked_tiles)
-          ? res.state!.unlocked_tiles
-          : [...manualUnlockedTiles, ...picked]
+        const matchManual = Array.isArray(res.state?.unlocked_tiles) ? res.state!.unlocked_tiles : []
+        const carryId = conversation.instantCarrySessionId?.trim()
+        const carryTiles = carryId ? await getInstantSessionPuzzleUnlockedTiles(carryId) : []
+        const unlockedFromServer = mergePuzzleTileIds(carryTiles, matchManual)
         setManualUnlockedTiles(unlockedFromServer)
         if (unlockedFromServer.length > prevLen) {
           onBlurUnlockSpent?.()
