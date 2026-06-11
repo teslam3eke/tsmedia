@@ -2475,7 +2475,11 @@ function DiscoverTab({
                 <p className="text-[13px] text-slate-500">
                   提醒：有效會員每日登入可領
                   <span className="mx-0.5 font-semibold text-slate-700">2 顆愛心</span>
-                  。每晚 10 點換日；須訂閱有效且當日尚未領取。
+                  ；免費會員每日登入可領
+                  <span className="mx-0.5 font-semibold text-slate-700">1 顆愛心</span>
+                  與
+                  <span className="mx-0.5 font-semibold text-slate-700">2 次拼圖解鎖</span>
+                  。每晚 10 點換日，每帳號當日限領一次。
                 </p>
                 {confirmIntent === 'super_like' && (
                   <p className="text-[13px] text-slate-500">
@@ -6215,6 +6219,7 @@ export default function MainScreen({
     }
   }, [activeTab])
   const [currentUserGender, setCurrentUserGender] = useState<'male' | 'female'>(initialDiscoverGender)
+  const [instantFriendFreeUsesRemaining, setInstantFriendFreeUsesRemaining] = useState(2)
   const [currentUserPreferredRegion, setCurrentUserPreferredRegion] = useState<import('@/lib/types').Region | null>(null)
   const [hideTabBarForChatKeyboard, setHideTabBarForChatKeyboard] = useState(false)
   /** 即時房進行中：與開啟配對聊天室同層級，避免底欄佔位與 visualViewport 留白重疊。 */
@@ -6672,6 +6677,14 @@ export default function MainScreen({
   const refreshCredits = useCallback(async () => {
     if (!user?.id) return
     setCreditBalance(await getCreditBalance(user.id))
+  }, [user?.id])
+
+  const refreshInstantFriendQuota = useCallback(async () => {
+    if (!user?.id) return
+    const profile = await getProfile(user.id, { skipEnsure: true })
+    if (!profile) return
+    const used = profile.instant_friend_free_uses_consumed ?? 0
+    setInstantFriendFreeUsesRemaining(Math.max(0, 2 - used))
   }, [user?.id])
 
   /** 綠界付款完成：先顯示道具／VIP 提示，使用者按確認後再整頁重啟。 */
@@ -7199,6 +7212,8 @@ export default function MainScreen({
       if (cancelled) return
       if (!profile) return
       if (profile.gender) setCurrentUserGender(profile.gender)
+      const used = profile.instant_friend_free_uses_consumed ?? 0
+      setInstantFriendFreeUsesRemaining(Math.max(0, 2 - used))
       setCurrentUserPreferredRegion((profile.preferred_region as import('@/lib/types').Region | null) ?? null)
       const n = (profile.photo_urls ?? []).filter(Boolean).length
       setSelfPhotoOk(n >= PROFILE_PHOTO_MIN)
@@ -7328,6 +7343,11 @@ export default function MainScreen({
         onWaitingStateChange={handleInstantWaitingStateChange}
         onInstantSessionShellActiveChange={setInstantSessionShellActive}
         onInstantComposerKeyboardOpenChange={setHideTabBarForChatKeyboard}
+        creditBalance={creditBalance}
+        userGender={currentUserGender}
+        instantFriendFreeUsesRemaining={instantFriendFreeUsesRemaining}
+        onRefreshCredits={refreshCredits}
+        onRefreshInstantFriendQuota={refreshInstantFriendQuota}
       />
     ) : (
       <div className="flex flex-col items-center justify-center h-full px-8 text-center text-sm text-slate-500">

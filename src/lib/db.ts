@@ -1046,6 +1046,9 @@ export async function claimDailyMemberHearts(): Promise<{
   ok: boolean
   reason?: string
   appDayKey?: string
+  tier?: 'member' | 'free'
+  hearts?: number
+  blurUnlock?: number
 }> {
   const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
   if (visible) await ensureConnectionWithBudget()
@@ -1064,11 +1067,24 @@ export async function claimDailyMemberHearts(): Promise<{
     console.error('[db] claimDailyMemberHearts error:', error.message)
     return { ok: false, reason: error.message }
   }
-  const row = data as { ok?: boolean; reason?: string; app_day_key?: string } | null
+  const row = data as {
+    ok?: boolean
+    reason?: string
+    app_day_key?: string
+    tier?: 'member' | 'free'
+    hearts?: number
+    blur_unlock?: number
+  } | null
   if (!row?.ok) {
     return { ok: false, reason: row?.reason ?? 'unknown', appDayKey: row?.app_day_key }
   }
-  return { ok: true, appDayKey: row?.app_day_key }
+  return {
+    ok: true,
+    appDayKey: row?.app_day_key,
+    tier: row?.tier,
+    hearts: row?.hearts,
+    blurUnlock: row?.blur_unlock,
+  }
 }
 
 export type ProfileTabStats = {
@@ -1695,7 +1711,7 @@ export async function simulatePartnerMatchMessage(matchId: string, body?: string
 // ─── 即時配對（7 分鐘房） ─────────────────────────────────────────────────────
 
 export type InstantMatchPollResult =
-  | { status: 'idle'; hint?: string; instant_hours_closed?: boolean }
+  | { status: 'idle'; hint?: string; instant_hours_closed?: boolean; instant_queue_blocked?: boolean }
   | { status: 'waiting'; hint?: string }
   | {
       status: 'in_session'

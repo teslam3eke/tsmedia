@@ -78,6 +78,8 @@ export interface ProfileRow {
   login_last_app_day?: string | null
   login_streak?: number | null
   login_total_days?: number | null
+  /** 男性即時配對「加為好友」已使用的終身免費次數（上限 2） */
+  instant_friend_free_uses_consumed?: number | null
   created_at: string
   updated_at: string
 }

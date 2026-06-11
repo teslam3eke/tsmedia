@@ -17,7 +17,7 @@ import { motion } from 'framer-motion'
 import { createPortal } from 'react-dom'
 import { Heart, Send, Timer, Users, DoorOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { ProfileRow } from '@/lib/types'
+import type { ProfileRow, CreditBalance } from '@/lib/types'
 import {
   instantMatchPoll,
   instantMatchLeaveQueue,
@@ -73,6 +73,12 @@ type Props = {
   onInstantSessionShellActiveChange?: (active: boolean) => void
   /** 聚焦輸入框時請主殼隱藏底欄，以免與 ChatRoom／即時共用之 visualViewport inset 留白重疊 */
   onInstantComposerKeyboardOpenChange?: (keyboardLikelyOpen: boolean) => void
+  creditBalance?: CreditBalance
+  userGender?: 'male' | 'female' | null
+  /** 男性加好友剩餘終身免費次數（0–2） */
+  instantFriendFreeUsesRemaining?: number
+  onRefreshCredits?: () => void | Promise<void>
+  onRefreshInstantFriendQuota?: () => void | Promise<void>
 }
 
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
@@ -201,6 +207,77 @@ function InstantHoursClosedNotice({ msUntil }: { msUntil: number }) {
         </p>
       ) : null}
     </div>
+  )
+}
+
+function InstantQueueBlockedNotice() {
+  return (
+    <div className="rounded-2xl bg-rose-50 px-4 py-3 text-left ring-1 ring-rose-100">
+      <p className="text-xs font-bold leading-relaxed text-rose-900">無法開始即時配對</p>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-rose-800/95">
+        你的「加為好友」免費次數（2 次）已用完，且目前沒有愛心。若聊天後選擇加好友，需消耗 1 顆愛心。
+      </p>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-rose-800/90">
+        免費會員每日登入可領 1 顆愛心；有效會員每日可領 2 顆愛心。請先取得愛心後再開始配對。
+      </p>
+    </div>
+  )
+}
+
+function InstantQueueBlockedModal({
+  open,
+  onClose,
+}: {
+  open: boolean
+  onClose: () => void
+}) {
+  if (!open) return null
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[360] flex items-end justify-center bg-black/55 px-4 backdrop-blur-[3px] sm:items-center"
+      role="presentation"
+      onClick={onClose}
+      style={{
+        paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))',
+        paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))',
+      }}
+    >
+      <motion.div
+        initial={{ y: 28, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+        className="mx-auto w-full max-w-md rounded-3xl border border-gray-200 bg-white p-5 shadow-xl ring-1 ring-black/[0.06]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="instant-queue-blocked-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p id="instant-queue-blocked-title" className="text-center text-base font-black text-slate-900">
+          無法開始即時配對
+        </p>
+        <div className="mt-4 space-y-2 text-left text-xs leading-relaxed text-slate-600">
+          <p>
+            你的即時配對「加為好友」
+            <span className="font-semibold text-slate-800">終身 2 次免費</span>
+            機會已用完，且目前
+            <span className="font-semibold text-slate-800">沒有愛心</span>
+            。
+          </p>
+          <p>若七分鐘聊天後你選擇「加為好友」，需消耗 1 顆愛心；愛心不足時也無法送出加好友。</p>
+          <p className="text-[11px] text-slate-500">
+            免費會員每日登入可領 1 顆愛心；有效會員每日可領 2 顆愛心。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 w-full rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white"
+        >
+          我知道了
+        </button>
+      </motion.div>
+    </div>,
+    document.body,
   )
 }
 
@@ -368,6 +445,11 @@ export default function InstantMatchTab({
   onWaitingStateChange,
   onInstantSessionShellActiveChange,
   onInstantComposerKeyboardOpenChange,
+  creditBalance,
+  userGender = null,
+  instantFriendFreeUsesRemaining = 2,
+  onRefreshCredits,
+  onRefreshInstantFriendQuota,
 }: Props) {
   const onMutualFriendMatchCreatedRef = useRef(onMutualFriendMatchCreated)
   onMutualFriendMatchCreatedRef.current = onMutualFriendMatchCreated
@@ -383,6 +465,7 @@ export default function InstantMatchTab({
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [pollReady, setPollReady] = useState(false)
   const [decideBusy, setDecideBusy] = useState(false)
+  const [queueBlockedModalOpen, setQueueBlockedModalOpen] = useState(false)
   /** 等候 → in_session：全螢幕模糊照片過場，結束後才顯示聊天 UI */
   const [showMatchIntro, setShowMatchIntro] = useState(false)
   const [sendBusy, setSendBusy] = useState(false)
@@ -418,7 +501,12 @@ export default function InstantMatchTab({
 
   const ingestPollOk = useCallback((raw: InstantMatchPollResult) => {
     const data = applyDismissedSessionFilter(raw, dismissedInstantSessionIdsRef.current)
-    setPollError(null)
+    if (data.status === 'idle' && data.instant_queue_blocked && data.hint) {
+      setPollError(data.hint)
+      setQueueBlockedModalOpen(true)
+    } else {
+      setPollError(null)
+    }
     setSnapshot((prev) => {
       if (
         prev?.status === 'done' &&
@@ -747,9 +835,70 @@ export default function InstantMatchTab({
     return raw as 'pending' | 'friend' | 'pass'
   }, [inSession, userId])
 
+  const instantFriendCost = useMemo(() => {
+    const hearts = creditBalance?.heart ?? 0
+    if (userGender === 'female') {
+      return {
+        applies: false,
+        freeRemaining: instantFriendFreeUsesRemaining,
+        hearts,
+        canAffordFriend: true,
+        ruleLines: ['女性帳號選「加為好友」不消耗愛心。'],
+      }
+    }
+    if (userGender !== 'male') {
+      return {
+        applies: false,
+        freeRemaining: instantFriendFreeUsesRemaining,
+        hearts,
+        canAffordFriend: true,
+        ruleLines: [] as string[],
+      }
+    }
+    const freeRemaining = Math.max(0, Math.min(2, instantFriendFreeUsesRemaining))
+    if (freeRemaining > 0) {
+      return {
+        applies: true,
+        freeRemaining,
+        hearts,
+        canAffordFriend: true,
+        ruleLines: [
+          `每位男性帳號終身享有 2 次加好友免消耗愛心；你尚餘 ${freeRemaining} 次，本次不扣愛心。`,
+          '選「不加好友」不消耗愛心。',
+        ],
+      }
+    }
+    return {
+      applies: true,
+      freeRemaining: 0,
+      hearts,
+      canAffordFriend: hearts >= 1,
+      ruleLines: [
+        '免費次數已用完；選「加為好友」將消耗 1 顆愛心。',
+        `你目前有 ${hearts} 顆愛心。`,
+        hearts < 1 ? '愛心不足時無法送出加好友。' : '選「不加好友」不消耗愛心。',
+      ],
+    }
+  }, [creditBalance?.heart, instantFriendFreeUsesRemaining, userGender])
+
+  /** 男性：免費加好友次數用盡且無愛心時，不可加入等候 */
+  const instantMatchQueueBlocked = useMemo(() => {
+    if (userGender !== 'male') return false
+    const hearts = creditBalance?.heart ?? 0
+    return instantFriendFreeUsesRemaining <= 0 && hearts < 1
+  }, [creditBalance?.heart, instantFriendFreeUsesRemaining, userGender])
+
+  const INSTANT_QUEUE_BLOCKED_HINT =
+    '你的即時配對「加為好友」免費次數（2 次）已用完，且目前沒有愛心。若七分鐘後選擇加好友，需消耗 1 顆愛心。請先取得愛心後再開始配對。'
+
   const startQueue = async () => {
     if (!isInstantMatchOpenNow(new Date(nowTick))) {
       setPollError(INSTANT_MATCH_CLOSED_HINT)
+      return
+    }
+    if (instantMatchQueueBlocked) {
+      setPollError(INSTANT_QUEUE_BLOCKED_HINT)
+      setQueueBlockedModalOpen(true)
       return
     }
     busyRef.current = true
@@ -863,15 +1012,38 @@ export default function InstantMatchTab({
             </p>
           </InstantCard>
           {!instantOpenNow ? <InstantHoursClosedNotice msUntil={msUntilInstantOpen} /> : null}
-          {pollError && <p className="text-center text-xs font-medium text-red-600">{pollError}</p>}
+          {instantOpenNow && instantMatchQueueBlocked ? <InstantQueueBlockedNotice /> : null}
+          {pollError && !instantMatchQueueBlocked ? (
+            <p className="text-center text-xs font-medium text-red-600">{pollError}</p>
+          ) : null}
           <button
             type="button"
             disabled={busy || !instantOpenNow}
-            onClick={() => void startQueue()}
-            className="w-full rounded-2xl bg-slate-900 py-3.5 font-bold text-white disabled:opacity-50"
+            onClick={() => {
+              if (instantMatchQueueBlocked) {
+                setPollError(INSTANT_QUEUE_BLOCKED_HINT)
+                setQueueBlockedModalOpen(true)
+                return
+              }
+              void startQueue()
+            }}
+            className={cn(
+              'w-full rounded-2xl py-3.5 font-bold text-white disabled:opacity-50',
+              instantOpenNow && instantMatchQueueBlocked ? 'bg-rose-400' : 'bg-slate-900',
+            )}
           >
-            {!instantOpenNow ? '非開放時段' : busy ? '處理中…' : '開始配對'}
+            {!instantOpenNow
+              ? '非開放時段'
+              : busy
+                ? '處理中…'
+                : instantMatchQueueBlocked
+                  ? '無法開始（愛心不足）'
+                  : '開始配對'}
           </button>
+          <InstantQueueBlockedModal
+            open={queueBlockedModalOpen}
+            onClose={() => setQueueBlockedModalOpen(false)}
+          />
         </div>
       </div>
     )
@@ -1173,6 +1345,18 @@ export default function InstantMatchTab({
                   <span className="block">雙方都選「加為好友」</span>
                   <span className="block">才會出現在配對名單並繼續聊天</span>
                 </p>
+                {instantFriendCost.ruleLines.length > 0 ? (
+                  <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/90 px-3.5 py-3 text-left text-[11px] leading-relaxed text-amber-950">
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-800/90">
+                      加好友規則
+                    </p>
+                    <ul className="space-y-1">
+                      {instantFriendCost.ruleLines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {myDecision !== 'pending' ? (
                   <div className="space-y-3 py-2 text-center">
                     <div
@@ -1189,14 +1373,19 @@ export default function InstantMatchTab({
                   <div className="flex flex-col gap-2.5">
                     <button
                       type="button"
-                      disabled={decideBusy}
+                      disabled={decideBusy || !instantFriendCost.canAffordFriend}
                       className="w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-bold text-white disabled:opacity-60"
                       onClick={() =>
                         void (async () => {
                           setDecideBusy(true)
                           try {
                             const res = await instantSessionDecide(sessionId, 'friend')
-                            if (res.ok === false) setPollError(res.error ?? '')
+                            if (res.ok === false) {
+                              setPollError(res.error ?? '')
+                              return
+                            }
+                            await onRefreshCredits?.()
+                            await onRefreshInstantFriendQuota?.()
                             const resPoll = await chainInstantMatchPoll(false)
                             if (resPoll.ok === true) ingestPollOk(resPoll.data)
                             else if (resPoll.ok === false) setPollError(resPoll.error)
@@ -1206,7 +1395,15 @@ export default function InstantMatchTab({
                         })()
                       }
                     >
-                      {decideBusy ? '送出中…' : '加為好友'}
+                      {decideBusy
+                        ? '送出中…'
+                        : !instantFriendCost.canAffordFriend
+                          ? '愛心不足，無法加為好友'
+                          : instantFriendCost.applies && instantFriendCost.freeRemaining > 0
+                            ? `加為好友（本次免消耗，尚餘 ${instantFriendCost.freeRemaining} 次）`
+                            : instantFriendCost.applies
+                              ? '加為好友（消耗 1 顆愛心）'
+                              : '加為好友'}
                     </button>
                     <button
                       type="button"
