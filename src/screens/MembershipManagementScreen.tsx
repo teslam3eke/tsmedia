@@ -439,7 +439,7 @@ export default function MembershipManagementScreen({
               {[
                 { icon: Heart, text: '開通即贈 3 顆愛心 + 1 次超級喜歡' },
                 { icon: Eye, text: '開通即贈 10 次解除拼圖模糊' },
-                { icon: Sparkles, text: 'VIP 每日登入送 2 顆愛心（每晚 10 點換日）' },
+                { icon: Sparkles, text: '每日登入 1 愛心 + 2 拼圖解鎖；VIP 另加 2 愛心（每晚 10 點換日）' },
               ].map(({ icon: Icon, text }) => (
                 <li
                   key={text}

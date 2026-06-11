@@ -2473,13 +2473,13 @@ function DiscoverTab({
                   。
                 </p>
                 <p className="text-[13px] text-slate-500">
-                  提醒：有效會員每日登入可領
-                  <span className="mx-0.5 font-semibold text-slate-700">2 顆愛心</span>
-                  ；免費會員每日登入可領
+                  提醒：每日登入（每晚 10 點換日）全帳號可領
                   <span className="mx-0.5 font-semibold text-slate-700">1 顆愛心</span>
                   與
                   <span className="mx-0.5 font-semibold text-slate-700">2 次拼圖解鎖</span>
-                  。每晚 10 點換日，每帳號當日限領一次。
+                  ；有效會員
+                  <span className="mx-0.5 font-semibold text-slate-700">另加 2 顆愛心</span>
+                  （合計 3 顆）。每帳號當日限領一次。
                 </p>
                 {confirmIntent === 'super_like' && (
                   <p className="text-[13px] text-slate-500">
