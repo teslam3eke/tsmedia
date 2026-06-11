@@ -44,6 +44,7 @@ type ChannelFamily =
   | 'messages'
   | 'messages_incoming_sound'
   | 'instant_session_messages'
+  | 'instant_session_puzzle_unlocks'
   | 'instant_sessions'
   | 'app_notifications'
 
