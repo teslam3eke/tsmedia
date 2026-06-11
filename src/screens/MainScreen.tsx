@@ -48,6 +48,7 @@ import {
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile, endMatch,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   getPhotoUnlockState,
+  getInstantSessionPuzzleUnlockedTiles,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages, patchChatMessageReadAt,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
@@ -3491,6 +3492,12 @@ function ChatRoomView({
     if (!isLive || !conversation.matchId) return
     let cancelled = false
     ;(async () => {
+      const carrySessionId = conversation.instantCarrySessionId?.trim()
+      if (carrySessionId) {
+        const tiles = await getInstantSessionPuzzleUnlockedTiles(carrySessionId)
+        if (!cancelled) setManualUnlockedTiles(tiles)
+        return
+      }
       const state = await getPhotoUnlockState(conversation.matchId!)
       if (cancelled) return
       setManualUnlockedTiles(Array.isArray(state?.unlocked_tiles) ? state!.unlocked_tiles : [])
@@ -3498,7 +3505,7 @@ function ChatRoomView({
     return () => {
       cancelled = true
     }
-  }, [isLive, conversation.matchId])
+  }, [isLive, conversation.matchId, conversation.instantCarrySessionId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })

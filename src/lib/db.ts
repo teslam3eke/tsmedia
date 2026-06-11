@@ -1941,18 +1941,14 @@ export async function instantSessionDecide(
 }
 
 export async function getInstantSessionPuzzleUnlockedTiles(sessionId: string): Promise<number[]> {
-  const { data, error } = await supabase
-    .from('instant_sessions')
-    .select('puzzle_manual_unlocked_tiles')
-    .eq('id', sessionId)
-    .maybeSingle()
+  const { data, error } = await (supabase as any).rpc('get_my_instant_session_puzzle_unlocked_tiles', {
+    p_session_id: sessionId,
+  })
   if (error) {
     console.error('[db] getInstantSessionPuzzleUnlockedTiles', error.message)
     return []
   }
-  const tiles = (data as { puzzle_manual_unlocked_tiles?: number[] | null } | null)
-    ?.puzzle_manual_unlocked_tiles
-  return Array.isArray(tiles) ? tiles : []
+  return Array.isArray(data) ? (data as number[]) : []
 }
 
 export async function spendInstantSessionBlurUnlockTile(
@@ -1974,20 +1970,22 @@ export async function spendInstantSessionBlurUnlockTile(
 
 export function subscribeToInstantSessionPuzzleUnlock(
   sessionId: string,
+  userId: string,
   onUpdate: (tiles: number[]) => void,
 ): () => void {
-  return subscribePostgresChannelWithBackoff('instant_sessions', () =>
-    supabase.channel(`instant-sess-puzzle:${sessionId}`).on(
+  return subscribePostgresChannelWithBackoff('instant_session_puzzle_unlocks', () =>
+    supabase.channel(`instant-sess-puzzle:${sessionId}:${userId}`).on(
       'postgres_changes',
       {
-        event: 'UPDATE',
+        event: '*',
         schema: 'public',
-        table: 'instant_sessions',
-        filter: `id=eq.${sessionId}`,
+        table: 'instant_session_puzzle_unlocks',
+        filter: `session_id=eq.${sessionId}`,
       },
       (payload) => {
-        const row = payload.new as { puzzle_manual_unlocked_tiles?: number[] | null }
-        onUpdate(Array.isArray(row.puzzle_manual_unlocked_tiles) ? row.puzzle_manual_unlocked_tiles : [])
+        const row = payload.new as { user_id?: string; unlocked_tiles?: number[] | null } | null
+        if (!row || row.user_id !== userId) return
+        onUpdate(Array.isArray(row.unlocked_tiles) ? row.unlocked_tiles : [])
       },
     ),
   )

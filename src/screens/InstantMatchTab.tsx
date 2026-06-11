@@ -763,14 +763,14 @@ export default function InstantMatchTab({
     void getInstantSessionPuzzleUnlockedTiles(sessionId).then((tiles) => {
       if (!cancelled) setManualUnlockedTiles(tiles)
     })
-    const unsub = subscribeToInstantSessionPuzzleUnlock(sessionId, (tiles) => {
+    const unsub = subscribeToInstantSessionPuzzleUnlock(sessionId, userId, (tiles) => {
       setManualUnlockedTiles(tiles)
     })
     return () => {
       cancelled = true
       unsub()
     }
-  }, [sessionId, foregroundReloadNonce, physicalChannelResubscribeNonce])
+  }, [sessionId, userId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
