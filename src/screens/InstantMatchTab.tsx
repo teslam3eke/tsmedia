@@ -31,6 +31,9 @@ import {
   subscribeToInstantSessionSignals,
   getProfile,
   resolvePhotoUrls,
+  getInstantSessionPuzzleUnlockedTiles,
+  spendInstantSessionBlurUnlockTile,
+  subscribeToInstantSessionPuzzleUnlock,
   type InstantMatchPollResponse,
   type InstantMatchPollResult,
   type InstantSessionMessageRow,
@@ -39,8 +42,13 @@ import {
   PuzzlePhotoUnlock,
   type PuzzleChatMessage,
   type PuzzleConversation,
+  getPuzzleProgress,
 } from '@/components/PuzzlePhotoUnlock'
 import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
+import {
+  computeChatUnlockedGlobalTiles,
+  pickBlurUnlockGlobalTiles,
+} from '@/lib/puzzleUnlockPick'
 import {
   peekSkipInstantMatchLeaveOnFullUnload,
   clearSkipInstantMatchLeaveOnFullUnload,
@@ -79,6 +87,8 @@ type Props = {
   instantFriendFreeUsesRemaining?: number
   onRefreshCredits?: () => void | Promise<void>
   onRefreshInstantFriendQuota?: () => void | Promise<void>
+  onOpenSubscription?: () => void
+  onBlurUnlockSpent?: () => void
 }
 
 type UiMsg = { id: string; text: string; fromMe: boolean; ts: number }
@@ -450,6 +460,8 @@ export default function InstantMatchTab({
   instantFriendFreeUsesRemaining = 2,
   onRefreshCredits,
   onRefreshInstantFriendQuota,
+  onOpenSubscription,
+  onBlurUnlockSpent,
 }: Props) {
   const onMutualFriendMatchCreatedRef = useRef(onMutualFriendMatchCreated)
   onMutualFriendMatchCreatedRef.current = onMutualFriendMatchCreated
@@ -469,6 +481,8 @@ export default function InstantMatchTab({
   /** 等候 → in_session：全螢幕模糊照片過場，結束後才顯示聊天 UI */
   const [showMatchIntro, setShowMatchIntro] = useState(false)
   const [sendBusy, setSendBusy] = useState(false)
+  const [manualUnlockedTiles, setManualUnlockedTiles] = useState<number[]>([])
+  const [puzzleUnlockNotice, setPuzzleUnlockNotice] = useState<string | null>(null)
 
   const instantInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -556,6 +570,8 @@ export default function InstantMatchTab({
     introSeenSessionIdsRef.current = loadIntroSeenFromStorage(userId)
     prevPollStatusRef.current = null
     setShowMatchIntro(false)
+    setManualUnlockedTiles([])
+    setPuzzleUnlockNotice(null)
     pollChainTailRef.current = Promise.resolve({ ok: true, data: { status: 'idle' as const } })
   }, [userId])
 
@@ -737,6 +753,24 @@ export default function InstantMatchTab({
       })
     })
   }, [sessionId, loadMsgs, userId, foregroundReloadNonce, physicalChannelResubscribeNonce])
+
+  useEffect(() => {
+    if (!sessionId) {
+      setManualUnlockedTiles([])
+      return
+    }
+    let cancelled = false
+    void getInstantSessionPuzzleUnlockedTiles(sessionId).then((tiles) => {
+      if (!cancelled) setManualUnlockedTiles(tiles)
+    })
+    const unsub = subscribeToInstantSessionPuzzleUnlock(sessionId, (tiles) => {
+      setManualUnlockedTiles(tiles)
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [sessionId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -949,7 +983,87 @@ export default function InstantMatchTab({
     } finally {
       sendInFlightRef.current = false
       setSendBusy(false)
+      window.requestAnimationFrame(() => {
+        instantInputRef.current?.focus({ preventScroll: true })
+      })
     }
+  }
+
+  const spendInstantPuzzleUnlock = async () => {
+    if (!sessionId || !puzzleConversation || !inSession || inSession.phase !== 'chat') return
+    if ((creditBalance?.blur_unlock ?? 0) <= 0) {
+      onOpenSubscription?.()
+      return
+    }
+    setPuzzleUnlockNotice(null)
+    const photoSlots = Math.min(
+      PUZZLE_MAX_PHOTO_SLOTS,
+      Math.max(1, puzzleConversation.photoUrls?.length ?? 0),
+    )
+    const puzzleSeedKey = String(puzzleConversation.id)
+    const matchedAtForPuzzle = puzzleConversation.matchedAt
+    const progress = getPuzzleProgress(
+      puzzleChatMessages,
+      manualUnlockedTiles,
+      matchedAtForPuzzle,
+      Date.now(),
+      puzzleSeedKey,
+      photoSlots,
+      false,
+      false,
+    )
+    const meCount = puzzleChatMessages.filter((m) => m.from === 'me').length
+    const themCount = puzzleChatMessages.filter((m) => m.from === 'them').length
+    const round = Math.floor(Math.min(meCount, themCount) / 3)
+    const chatTiles = computeChatUnlockedGlobalTiles({
+      round,
+      mult: 1,
+      slots: photoSlots,
+      manualUnlockedTiles,
+      puzzleSeedKey,
+      matchedAt: matchedAtForPuzzle,
+    })
+    const rejectedTiles = new Set<number>()
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const picked = pickBlurUnlockGlobalTiles({
+        chatTilesOrdered: chatTiles,
+        manualUnlockedTiles,
+        activePhotoIndex: progress.activePhotoIndex,
+        puzzleSeedKey,
+        matchedAt: matchedAtForPuzzle,
+        boostActive: false,
+        extraOccupiedGlobal: rejectedTiles,
+      })
+      if (picked.length === 0) break
+      const [firstGlobal] = picked
+      const prevLen = manualUnlockedTiles.length
+      const res = await spendInstantSessionBlurUnlockTile(sessionId, firstGlobal)
+      await onRefreshCredits?.()
+      if (res.ok) {
+        const unlockedFromServer = res.unlockedTiles ?? [...manualUnlockedTiles, firstGlobal]
+        setManualUnlockedTiles(unlockedFromServer)
+        if (unlockedFromServer.length > prevLen) {
+          onBlurUnlockSpent?.()
+        }
+        setPuzzleUnlockNotice('已使用 1 次解除拼圖，隨機解鎖 1 片。')
+        return
+      }
+      const errLower = (res.error ?? '').toLowerCase()
+      if (errLower.includes('already unlocked')) {
+        rejectedTiles.add(firstGlobal)
+        setManualUnlockedTiles((tiles) =>
+          tiles.includes(firstGlobal) ? tiles : [...tiles, firstGlobal],
+        )
+        continue
+      }
+      if (errLower.includes('insufficient')) {
+        onOpenSubscription?.()
+      } else {
+        setPollError(res.error ?? '解鎖失敗')
+      }
+      return
+    }
+    setPuzzleUnlockNotice('目前沒有可解鎖的拼圖格')
   }
 
   const peerBlurPhotoUrl = resolvedPeerPhotoUrls[0] ?? null
@@ -1203,14 +1317,10 @@ export default function InstantMatchTab({
         <PuzzlePhotoUnlock
           conversation={puzzleConversation}
           messages={puzzleChatMessages}
-          manualUnlockedTiles={[]}
+          manualUnlockedTiles={manualUnlockedTiles}
           isKeyboardOpen={instantPuzzleKeyboardOpen}
           liveUseDbTilesOnly={false}
-          onSpendUnlock={() => {
-            setPollError(
-              '即時匿名僅能用互傳訊息解鎖拼圖。道具「隨機解 1 片」請在雙方加好友後，於「配對」聊天使用。',
-            )
-          }}
+          onSpendUnlock={() => void spendInstantPuzzleUnlock()}
         />
       ) : null}
 
@@ -1270,6 +1380,11 @@ export default function InstantMatchTab({
         {pollError && (
           <p className="shrink-0 px-3 pb-1 text-center text-[11px] font-medium text-red-600">{pollError}</p>
         )}
+        {puzzleUnlockNotice && !pollError ? (
+          <p className="shrink-0 px-3 pb-1 text-center text-[11px] font-medium text-emerald-700">
+            {puzzleUnlockNotice}
+          </p>
+        ) : null}
 
         <div className="flex shrink-0 items-center gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5">
           <input
@@ -1298,6 +1413,8 @@ export default function InstantMatchTab({
           <button
             type="button"
             disabled={sess.phase !== 'chat' || sendBusy}
+            onMouseDown={(e) => e.preventDefault()}
+            onTouchStart={(e) => e.preventDefault()}
             onClick={() => void handleSend()}
             className={cn(
               'flex h-9 w-9 shrink-0 items-center justify-center rounded-full disabled:opacity-35',
@@ -1345,18 +1462,6 @@ export default function InstantMatchTab({
                   <span className="block">雙方都選「加為好友」</span>
                   <span className="block">才會出現在配對名單並繼續聊天</span>
                 </p>
-                {instantFriendCost.ruleLines.length > 0 ? (
-                  <div className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/90 px-3.5 py-3 text-left text-[11px] leading-relaxed text-amber-950">
-                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-800/90">
-                      加好友規則
-                    </p>
-                    <ul className="space-y-1">
-                      {instantFriendCost.ruleLines.map((line) => (
-                        <li key={line}>{line}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
                 {myDecision !== 'pending' ? (
                   <div className="space-y-3 py-2 text-center">
                     <div

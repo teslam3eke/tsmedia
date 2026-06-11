@@ -3619,6 +3619,9 @@ function ChatRoomView({
     } finally {
       sendInFlightRef.current = false
       setSending(false)
+      window.requestAnimationFrame(() => {
+        inputRef.current?.focus({ preventScroll: true })
+      })
     }
   }
 
@@ -3975,6 +3978,7 @@ function ChatRoomView({
           <motion.button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
+            onTouchStart={(e) => e.preventDefault()}
             onClick={() => void send()}
             disabled={sending}
             whileTap={{ scale: sending ? 1 : 0.9 }}
@@ -7348,6 +7352,14 @@ export default function MainScreen({
         instantFriendFreeUsesRemaining={instantFriendFreeUsesRemaining}
         onRefreshCredits={refreshCredits}
         onRefreshInstantFriendQuota={refreshInstantFriendQuota}
+        onOpenSubscription={openSubscriptionModal}
+        onBlurUnlockSpent={() =>
+          setRewardFlash({
+            variant: 'blur_unlock',
+            title: '已解鎖拼圖 1 格',
+            subtitle: '繼續聊天累積進度',
+          })
+        }
       />
     ) : (
       <div className="flex flex-col items-center justify-center h-full px-8 text-center text-sm text-slate-500">

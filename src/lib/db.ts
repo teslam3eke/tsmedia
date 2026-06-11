@@ -1940,6 +1940,59 @@ export async function instantSessionDecide(
   return { ok: true, data: data as Record<string, unknown> }
 }
 
+export async function getInstantSessionPuzzleUnlockedTiles(sessionId: string): Promise<number[]> {
+  const { data, error } = await supabase
+    .from('instant_sessions')
+    .select('puzzle_manual_unlocked_tiles')
+    .eq('id', sessionId)
+    .maybeSingle()
+  if (error) {
+    console.error('[db] getInstantSessionPuzzleUnlockedTiles', error.message)
+    return []
+  }
+  const tiles = (data as { puzzle_manual_unlocked_tiles?: number[] | null } | null)
+    ?.puzzle_manual_unlocked_tiles
+  return Array.isArray(tiles) ? tiles : []
+}
+
+export async function spendInstantSessionBlurUnlockTile(
+  sessionId: string,
+  tile: number,
+): Promise<{ ok: boolean; unlockedTiles?: number[]; error?: string }> {
+  const { data, error } = await (supabase as any).rpc('spend_instant_session_blur_unlock_tile', {
+    p_session_id: sessionId,
+    p_tile: tile,
+    p_bonus_tile: null,
+  })
+  if (error) {
+    console.error('[db] spendInstantSessionBlurUnlockTile', error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as { unlocked_tiles?: number[] } | null
+  return { ok: true, unlockedTiles: row?.unlocked_tiles ?? [] }
+}
+
+export function subscribeToInstantSessionPuzzleUnlock(
+  sessionId: string,
+  onUpdate: (tiles: number[]) => void,
+): () => void {
+  return subscribePostgresChannelWithBackoff('instant_sessions', () =>
+    supabase.channel(`instant-sess-puzzle:${sessionId}`).on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'instant_sessions',
+        filter: `id=eq.${sessionId}`,
+      },
+      (payload) => {
+        const row = payload.new as { puzzle_manual_unlocked_tiles?: number[] | null }
+        onUpdate(Array.isArray(row.puzzle_manual_unlocked_tiles) ? row.puzzle_manual_unlocked_tiles : [])
+      },
+    ),
+  )
+}
+
 export function subscribeToInstantSessionMessages(sessionId: string, onInsert: (row: InstantSessionMessageRow) => void): () => void {
   return subscribePostgresChannelWithBackoff('instant_session_messages', () =>
     supabase.channel(`instant-sess-msg:${sessionId}`).on(
