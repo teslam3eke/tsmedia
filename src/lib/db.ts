@@ -11,6 +11,7 @@ import type {
   PhotoUnlockStateRow, UserFeedbackRow, UserFeedbackWithProfile,
 } from './types'
 import { PROFILE_PHOTO_MAX } from './types'
+import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 
 export const TERMS_VERSION = '2026-04-28'
@@ -1030,7 +1031,7 @@ export async function cancelMembershipSubscription(): Promise<{ ok: boolean; rea
 }
 
 export async function purchaseCreditPackMock(
-  packKey: 'super_like_5' | 'blur_unlock_16',
+  packKey: CreditPackKey,
 ): Promise<{ ok: boolean; error?: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('purchase_credit_pack', {

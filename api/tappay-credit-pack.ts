@@ -13,6 +13,7 @@ import {
 import { CREDIT_PACKS } from './_utils/paymentProducts.js'
 
 const PACKS: Record<string, { amount: number; details: string }> = {
+  heart_5: { amount: CREDIT_PACKS.heart_5.amount, details: CREDIT_PACKS.heart_5.details },
   super_like_5: { amount: CREDIT_PACKS.super_like_5.amount, details: CREDIT_PACKS.super_like_5.details },
   blur_unlock_16: { amount: CREDIT_PACKS.blur_unlock_16.amount, details: CREDIT_PACKS.blur_unlock_16.details },
   crown_effect: { amount: CREDIT_PACKS.crown_effect.amount, details: CREDIT_PACKS.crown_effect.details },

@@ -15,7 +15,10 @@ import {
   formatMembershipExpiryZhTw,
   isCrownEffectPurchased,
   isMembershipActive,
+  isPaymentTestDiscountActive,
   membershipMonthlyPriceNtd,
+  MEMBERSHIP_LIST_PRICE_NTD,
+  PAYMENT_TEST_MODE,
   type CreditPackKey,
 } from '@/lib/membershipProducts'
 import {
@@ -34,6 +37,37 @@ export type MembershipUpdateEvent =
   | { type: 'crown_effect' }
 
 const TAPPAY_FIELD_PREFIX = 'membership-mgmt-card'
+
+function ProductPriceLine({
+  listPriceNtd,
+  priceNtd,
+}: {
+  listPriceNtd: number
+  priceNtd: number
+}) {
+  const showDiscount = isPaymentTestDiscountActive(listPriceNtd, priceNtd)
+  return (
+    <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+      {showDiscount && (
+        <span className="text-xs font-semibold text-slate-500 line-through">NT$ {listPriceNtd}</span>
+      )}
+      <span className="text-sm font-black text-amber-400">NT$ {priceNtd}</span>
+      {showDiscount && (
+        <span className="text-[10px] font-bold text-fuchsia-300">測試 2 折</span>
+      )}
+    </p>
+  )
+}
+
+function CreditPackIcon({ packKey }: { packKey: CreditPackKey }) {
+  if (packKey === 'heart_5') {
+    return <Heart className="h-5 w-5 text-rose-400" />
+  }
+  if (packKey === 'super_like_5') {
+    return <Sparkles className="h-5 w-5 text-fuchsia-400" />
+  }
+  return <LayoutGrid className="h-5 w-5 text-sky-400" />
+}
 
 export default function MembershipManagementScreen({
   userId,
@@ -338,12 +372,17 @@ export default function MembershipManagementScreen({
               {formatMembershipExpiryZhTw(subscriptionExpiresAt)}
             </p>
             <p className="mt-1 text-xs font-semibold text-slate-400">
-              {memberActive ? 'VIP 權益使用中' : '購買 30 天 VIP 月卡後可領每日愛心與開通禮'}
+              {memberActive ? 'VIP 權益使用中' : '購買 30 天 VIP 月卡後可領每月贈禮與每日愛心'}
             </p>
           </div>
 
           <section>
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">購買道具</p>
+            {PAYMENT_TEST_MODE && (
+              <p className="mb-3 rounded-xl bg-fuchsia-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-fuchsia-200 ring-1 ring-fuchsia-400/20">
+                測試階段：全站商品原價 2 折（括號內為正式定價）
+              </p>
+            )}
             <div className="space-y-3">
               {CREDIT_PACK_PRODUCTS.map((pack) => (
                 <div
@@ -351,16 +390,12 @@ export default function MembershipManagementScreen({
                   className="flex items-center gap-3 rounded-2xl bg-white/5 px-4 py-3 ring-1 ring-white/10"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10">
-                    {pack.key === 'super_like_5' ? (
-                      <Sparkles className="h-5 w-5 text-fuchsia-400" />
-                    ) : (
-                      <LayoutGrid className="h-5 w-5 text-sky-400" />
-                    )}
+                    <CreditPackIcon packKey={pack.key} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-black text-slate-100">{pack.title}</p>
                     <p className="text-[11px] font-semibold text-slate-400">{pack.subtitle}</p>
-                    <p className="mt-0.5 text-sm font-black text-amber-400">NT$ {pack.priceNtd}</p>
+                    <ProductPriceLine listPriceNtd={pack.listPriceNtd} priceNtd={pack.priceNtd} />
                   </div>
                   <button
                     type="button"
@@ -391,9 +426,10 @@ export default function MembershipManagementScreen({
                     <p className="mt-1 text-[11px] font-semibold leading-snug text-amber-200/80">
                       {CROWN_EFFECT_PRODUCT.usageNote}
                     </p>
-                    <p className="mt-0.5 text-sm font-black text-amber-400">
-                      NT$ {CROWN_EFFECT_PRODUCT.priceNtd}
-                    </p>
+                    <ProductPriceLine
+                      listPriceNtd={CROWN_EFFECT_PRODUCT.listPriceNtd}
+                      priceNtd={CROWN_EFFECT_PRODUCT.priceNtd}
+                    />
                   </div>
                   {crownEffectOwned ? (
                     <span className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-xs font-black text-slate-300 ring-1 ring-white/15">
@@ -428,17 +464,28 @@ export default function MembershipManagementScreen({
                 <Crown className="h-8 w-8 text-white" />
               </div>
             </div>
-            <p className="mt-3 text-center text-xl font-black tracking-tight">
-              <span className="text-amber-400">{monthlyPrice}</span> 元／30 天
+            <p className="mt-3 text-center text-xl font-black tracking-tight text-amber-400">
+              {isPaymentTestDiscountActive(
+                MEMBERSHIP_LIST_PRICE_NTD[gender],
+                monthlyPrice,
+              ) && (
+                <span className="mr-2 text-sm font-semibold text-slate-500 line-through">
+                  NT$ {MEMBERSHIP_LIST_PRICE_NTD[gender]}
+                </span>
+              )}
+              NT$ {monthlyPrice}／30 天
             </p>
+            {PAYMENT_TEST_MODE && (
+              <p className="mt-1 text-center text-[11px] font-bold text-fuchsia-300">測試 2 折</p>
+            )}
             <p className="mt-1 text-center text-xs font-semibold text-slate-400">
               {gender === 'male' ? '男性 VIP' : '女性 VIP'} · 單次購買，到期需再購買（非自動續扣）
             </p>
 
             <ul className="mt-5 space-y-2.5">
               {[
-                { icon: Heart, text: '開通即贈 3 顆愛心 + 1 次超級喜歡' },
-                { icon: Eye, text: '開通即贈 10 次解除拼圖模糊' },
+                { icon: Heart, text: '每次購買即贈 5 顆愛心 + 3 次超級喜歡' },
+                { icon: Eye, text: '每次購買即贈 20 次解除拼圖模糊' },
                 { icon: Sparkles, text: '每日登入 1 愛心 + 2 拼圖解鎖；VIP 另加 2 愛心（每晚 10 點換日）' },
               ].map(({ icon: Icon, text }) => (
                 <li

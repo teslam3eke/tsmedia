@@ -184,8 +184,8 @@ export default function SubscriptionScreen({
 
           <ul className="mt-8 space-y-3">
             {[
-              { icon: Heart, text: '開通即贈 3 顆愛心 + 1 次超級喜歡' },
-              { icon: Eye, text: '開通即贈 10 次解除拼圖模糊' },
+              { icon: Heart, text: '每次購買即贈 5 顆愛心 + 3 次超級喜歡' },
+              { icon: Eye, text: '每次購買即贈 20 次解除拼圖模糊' },
               { icon: Sparkles, text: '每日登入 1 愛心 + 2 拼圖解鎖；會員另加 2 愛心（每晚 10 點換日）' },
               { icon: Check, text: '探索滑卡消耗愛心／超級喜歡（略過不扣）' },
             ].map(({ icon: Icon, text }) => (
