@@ -143,11 +143,10 @@ import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
 import {
   discoverProfileAwaitingPhotoUrls,
   isDisplayablePhotoUrl,
-  mergeSignedDiscoverPhotosIntoDeck,
   normalizeDiscoverProfileFromCache,
   serializeDiscoverProfileForCache,
-  signDiscoverProfilePhotosBatch,
 } from '@/lib/discoverDeckProfilePhotos'
+import { runDiscoverDeckPhotoPipeline } from '@/lib/discoverDeckPhotoPipeline'
 import {
   markSkipInstantMatchLeaveOnNextFullUnload,
   peekSkipInstantMatchLeaveOnFullUnload,
@@ -422,9 +421,9 @@ function rpcQuestionnaireToQa(entries: QuestionnaireEntry[] | null | undefined):
   return out
 }
 
-async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Promise<Profile> {
+function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Profile {
   const uid = String(row.id)
-  const signed = await resolvePhotoUrls(row.photo_urls ?? [])
+  const photoStoragePaths = (row.photo_urls ?? []).map((p) => String(p).trim()).filter(Boolean)
   const g = uuidToGradients(uid)
   const h = hashFromUuid(uid)
   const nn = row.nickname?.trim()
@@ -454,8 +453,8 @@ async function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Prom
     gradientFrom: g.from,
     gradientTo: g.to,
     compatScore: 82 + (h % 14),
-    photoUrls: signed,
-    photoStoragePaths: (row.photo_urls ?? []).map((p) => String(p).trim()).filter(Boolean),
+    photoUrls: photoStoragePaths.filter(isDisplayablePhotoUrl),
+    photoStoragePaths,
     qa: rpcQuestionnaireToQa(row.questionnaire ?? null),
     workRegion: wr,
     homeRegion: hr,
@@ -1206,35 +1205,6 @@ function writeDiscoverDeckProfileCache(uid: string, dayKey: string, profiles: Pr
   }
 }
 
-/** 名單最前面連續累計至多 `max` 張相片 URL（用於預載）。 */
-function collectTopDiscoverPhotoUrls(profiles: Profile[], max = 3): string[] {
-  const out: string[] = []
-  outer: for (const p of profiles) {
-    for (const u of collectProfilePhotoUrls(p)) {
-      const s = String(u).trim()
-      if (s && isDisplayablePhotoUrl(s)) out.push(s)
-      if (out.length >= max) break outer
-    }
-  }
-  return out
-}
-
-function preloadDiscoverImageUrls(urls: readonly string[]): void {
-  if (typeof window === 'undefined') return
-  for (const u of urls) {
-    const img = new Image()
-    try {
-      if ('fetchPriority' in img) {
-        ;(img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'high'
-      }
-    } catch {
-      /* ignore */
-    }
-    img.decoding = 'async'
-    img.src = u
-  }
-}
-
 const DEMO_PUZZLE_CLEARED_KEY = 'tsm-demo-puzzle-cleared-slots'
 
 function discoverChatPuzzleIntroStorageKey(userId: string) {
@@ -1404,8 +1374,9 @@ function DiscoverTab({
   const deckLoadEpochRef = useRef(0)
   /** 中止「上一輪仍在 await 的探索 RPC」——僅 bump epoch 無法解 WebKit 卡住中的 fetch。 */
   const discoverDeckRpcFlightRef = useRef<AbortController | null>(null)
-  /** 快取 path 背景簽章；RPC 開始時遞增以略過 stale 合併 */
-  const cachePhotoHydrateEpochRef = useRef(0)
+  /** 探索相片漸進載入：最多載入到 `index+1` 位；切換卡片時才擴張 horizon */
+  const discoverPhotoHorizonRef = useRef(0)
+  const discoverPhotoPipelineEpochRef = useRef(0)
   const discoverUiSnap = userId ? takeDiscoverUiSnapshot(userId, discoverDeckDayKey, deckRefresh) : null
   const [celebrateDeck, setCelebrateDeck] = useState(false)
   const prevRolloverTickRef = useRef(0)
@@ -1439,45 +1410,22 @@ function DiscoverTab({
     setLiveDeck(cached)
     setLiveDeckStatus(cached.length > 0 ? 'ready' : 'idle')
 
-    if (cached.length === 0) return
-
-    const hydrateEpoch = ++cachePhotoHydrateEpochRef.current
-    void signDiscoverProfilePhotosBatch(cached).then((signed) => {
-      if (cachePhotoHydrateEpochRef.current !== hydrateEpoch) return
-      setLiveDeck((prev) => mergeSignedDiscoverPhotosIntoDeck(prev, signed))
-    })
   }, [userId, discoverDeckDayKey])
 
   const baseList = userId ? liveDeck : demoBase
 
-  const visibleProfiles = useMemo(
-    () => baseList.filter((p) => {
-      if (blockedKeys.includes(p.profileKey)) return false
-      if (p.userId && blockedKeys.includes(`user:${p.userId}`)) return false
-      // 未登入 Demo：依目前性別偏好篩異性。已登入：名單已由 get_daily_discover_deck_v2 篩過，
-      // 不可再用可能尚未同步的 currentUserGender 過濾，否則女性帳在預設 male 時會被濾成 0 人。
-      if (!userId && p.gender === currentUserGender) return false
-      return true
-    }),
-    [baseList, blockedKeys, currentUserGender, userId],
-  )
+  const visibleProfiles = baseList.filter((p) => {
+    if (blockedKeys.includes(p.profileKey)) return false
+    if (p.userId && blockedKeys.includes(`user:${p.userId}`)) return false
+    // 未登入 Demo：依目前性別偏好篩異性。已登入：名單已由 get_daily_discover_deck_v2 篩過，
+    // 不可再用可能尚未同步的 currentUserGender 過濾，否則女性帳在預設 male 時會被濾成 0 人。
+    if (!userId && p.gender === currentUserGender) return false
+    return true
+  })
 
-  const discoverTopPhotosSig = useMemo(
-    () => JSON.stringify(collectTopDiscoverPhotoUrls(visibleProfiles, 3)),
-    [visibleProfiles],
-  )
-
-  useEffect(() => {
-    if (!userId) return
-    let urls: string[] = []
-    try {
-      urls = JSON.parse(discoverTopPhotosSig) as string[]
-    } catch {
-      return
-    }
-    if (!Array.isArray(urls) || urls.length === 0) return
-    preloadDiscoverImageUrls(urls)
-  }, [userId, discoverTopPhotosSig])
+  const visibleProfileKeysSig = visibleProfiles.map((p) => p.profileKey).join('|')
+  const visibleProfilesRef = useRef(visibleProfiles)
+  visibleProfilesRef.current = visibleProfiles
 
   const [index, setIndex] = useState(() => discoverUiSnap?.cardIndex ?? 0)
   const [direction, setDirection] = useState<'next' | 'prev'>('next')
@@ -1538,6 +1486,39 @@ function DiscoverTab({
     if (visibleProfiles.length === 0) return
     setIndex((i) => Math.min(i, visibleProfiles.length - 1))
   }, [visibleProfiles.length])
+
+  useEffect(() => {
+    discoverPhotoHorizonRef.current = Math.max(
+      discoverPhotoHorizonRef.current,
+      Math.min(index + 1, Math.max(visibleProfiles.length - 1, 0)),
+    )
+  }, [index, visibleProfiles.length])
+
+  useEffect(() => {
+    if (!userId || visibleProfileKeysSig.length === 0) return
+
+    const pipelineEpoch = ++discoverPhotoPipelineEpochRef.current
+    const horizon = discoverPhotoHorizonRef.current
+    const cardIndex = index
+
+    void runDiscoverDeckPhotoPipeline({
+      orderedProfiles: visibleProfilesRef.current,
+      horizonProfileIndex: horizon,
+      currentCardIndex: cardIndex,
+      getProfileByKey: (profileKey) =>
+        liveDeckRef.current.find((p) => p.profileKey === profileKey),
+      patchProfilePhotos: (profileKey, photoUrls) => {
+        setLiveDeck((prev) =>
+          prev.map((p) => (p.profileKey === profileKey ? { ...p, photoUrls } : p)),
+        )
+      },
+      isStale: () => discoverPhotoPipelineEpochRef.current !== pipelineEpoch,
+    })
+
+    return () => {
+      discoverPhotoPipelineEpochRef.current += 1
+    }
+  }, [userId, visibleProfileKeysSig, index, deckRefresh])
 
   useEffect(() => {
     getMyBlockedProfileKeys().then(setBlockedKeys)
@@ -1626,7 +1607,8 @@ function DiscoverTab({
         }
 
         const myEpoch = ++deckLoadEpochRef.current
-        cachePhotoHydrateEpochRef.current += 1
+        discoverPhotoPipelineEpochRef.current += 1
+        discoverPhotoHorizonRef.current = 0
 
         actionTrace('discover.deck', 'effect:開始', {
           uid: shortId(userId),
@@ -1703,30 +1685,7 @@ function DiscoverTab({
                     }
                     phase = 'photos'
                     const tPhotos = perfNow()
-                    const profiles = await Promise.all(
-                      rows.map(async (r, i) => {
-                        actionTrace('discover.deck', 'mapRow:開始', {
-                          i,
-                          pid: shortId(String(r.id)),
-                          photoPaths: (r.photo_urls ?? []).length,
-                        })
-                        try {
-                          const p = await mapDailyDiscoverRow(r, i)
-                          actionTrace('discover.deck', 'mapRow:結束', {
-                            i,
-                            pid: shortId(String(r.id)),
-                            outPhotos: p.photoUrls?.length ?? 0,
-                          })
-                          return p
-                        } catch (e) {
-                          actionTrace('discover.deck', 'mapRow:例外', {
-                            i,
-                            msg: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160),
-                          })
-                          throw e
-                        }
-                      }),
-                    )
+                    const profiles = rows.map((r, i) => mapDailyDiscoverRow(r, i))
                     if (cancelledOuter || deckLoadEpochRef.current !== myEpoch) {
                       actionTrace('discover.deck', 'work:簽章後略過 stale', {
                         cancelled: cancelledOuter,
@@ -1826,6 +1785,7 @@ function DiscoverTab({
     }
     if (prevDeckRefreshRef.current !== deckRefresh) {
       prevDeckRefreshRef.current = deckRefresh
+      discoverPhotoHorizonRef.current = 0
       setIndex(0)
       setDone(false)
       setScrolled(false)
@@ -2271,7 +2231,7 @@ function DiscoverTab({
                   gradientFrom={profile.gradientFrom}
                   gradientTo={profile.gradientTo}
                   variant="discover"
-                  highFetchPrioritySlideCount={index === 0 ? 3 : 0}
+                  highFetchPrioritySlideCount={1}
                   onReportClick={() => setReportTarget({
                     profileKey: profile.profileKey,
                     displayName: getPublicName(profile),
@@ -7121,12 +7081,15 @@ export default function MainScreen({
     if (!user?.id) return
     return subscribeToNewMatches(user.id, (row) => {
       const peerId = row.user_a === user.id ? row.user_b : row.user_a
-      try {
-        playInAppSound('match')
-      } catch {
-        /* 同上 */
-      }
-      setMatchSplash({ matchId: row.id, peerUserId: peerId })
+      setMatchSplash((prev) => {
+        if (prev?.matchId === row.id) return prev
+        try {
+          playInAppSound('match')
+        } catch {
+          /* 同上 */
+        }
+        return { matchId: row.id, peerUserId: peerId }
+      })
       void loadLiveMatchThreads('soft')
     })
   }, [user?.id, loadLiveMatchThreads, foregroundReloadNonce, physicalChannelResubscribeNonce])
@@ -7256,9 +7219,21 @@ export default function MainScreen({
     onSignOut?.()
   }
 
-  const notifyInstantMutualFriendMatch = useCallback(() => {
-    void loadLiveMatchThreads('soft')
-  }, [loadLiveMatchThreads])
+  const notifyInstantMutualFriendMatch = useCallback(
+    (info: { matchId: string; peerUserId: string; sessionId: string }) => {
+      setMatchSplash((prev) => {
+        if (prev?.matchId === info.matchId) return prev
+        try {
+          playInAppSound('match')
+        } catch {
+          /* Web Audio 極少數環境可能丟錯 */
+        }
+        return { matchId: info.matchId, peerUserId: info.peerUserId }
+      })
+      void loadLiveMatchThreads('soft')
+    },
+    [loadLiveMatchThreads],
+  )
 
   const tabContent: Record<Tab, React.ReactNode> = {
     discover: (
@@ -7347,6 +7322,7 @@ export default function MainScreen({
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         assumeEnqueuePollIntent={instantQueueWaiting}
+        uiBlockedByMatchSplash={matchSplash != null && activeTab === 'instant'}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
         onWaitingStateChange={handleInstantWaitingStateChange}
         onInstantSessionShellActiveChange={setInstantSessionShellActive}
