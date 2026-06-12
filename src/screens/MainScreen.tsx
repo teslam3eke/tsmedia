@@ -6385,7 +6385,6 @@ export default function MainScreen({
         void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
           if (!postPaymentRewardReloadOrderRef.current) setRewardFlash(null)
-          setMatchSplash(null)
           setShowDiscoverPuzzleIntro(false)
           void queryClient.invalidateQueries()
           setForegroundReloadNonce((n) => n + 1)
@@ -7334,7 +7333,7 @@ export default function MainScreen({
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
         assumeEnqueuePollIntent={instantQueueWaiting}
-        uiBlockedByMatchSplash={matchSplash != null && activeTab === 'instant'}
+        uiBlockedByMatchSplash={matchSplash != null}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
         onWaitingStateChange={handleInstantWaitingStateChange}
         onInstantSessionShellActiveChange={setInstantSessionShellActive}

@@ -514,6 +514,32 @@ export default function InstantMatchTab({
   const prevPollStatusRef = useRef<InstantMatchPollResult['status'] | null>(null)
   const sendInFlightRef = useRef(false)
   const introSeenSessionIdsRef = useRef<Set<string>>(new Set())
+  const lastInSessionPeerRef = useRef<string | null>(null)
+  /** 互加成功：先同步擋住即時聊天殼，等主殼 MatchSuccessSplash 蓋上（避免 poll 空窗仍露出聊天 UI） */
+  const [mutualFriendSplashHold, setMutualFriendSplashHold] = useState(false)
+
+  const emitMutualFriendMatch = useCallback(
+    (
+      matchId: string | undefined,
+      peerUserId: string | undefined,
+      sessionId: string,
+    ): boolean => {
+      const mid = matchId?.trim()
+      const peer = peerUserId?.trim()
+      if (!mid || !peer) return false
+      setMutualFriendSplashHold(true)
+      onMutualFriendMatchCreatedRef.current?.({ matchId: mid, peerUserId: peer, sessionId })
+      return true
+    },
+    [],
+  )
+
+  const instantUiBlockedByMatchSplash = uiBlockedByMatchSplash || mutualFriendSplashHold
+
+  useEffect(() => {
+    if (!uiBlockedByMatchSplash) setMutualFriendSplashHold(false)
+  }, [uiBlockedByMatchSplash])
+
   const chainInstantMatchPoll = useCallback((enqueue: boolean): Promise<InstantMatchPollResponse> => {
     const next = pollChainTailRef.current.then(() => instantMatchPoll({ enqueue }))
     pollChainTailRef.current = next
@@ -522,6 +548,9 @@ export default function InstantMatchTab({
 
   const ingestPollOk = useCallback((raw: InstantMatchPollResult) => {
     const data = applyDismissedSessionFilter(raw, dismissedInstantSessionIdsRef.current)
+    if (data.status === 'in_session') {
+      lastInSessionPeerRef.current = data.peer_user_id
+    }
     if (data.status === 'idle' && data.instant_queue_blocked && data.hint) {
       setPollError(data.hint)
       setQueueBlockedModalOpen(true)
@@ -530,15 +559,24 @@ export default function InstantMatchTab({
     }
     /*
      * 雙方互加後 SQL 可能短暫回 in_session+mutual_friend（promoted_match_id 尚未被首段讀到），
-     * 若寫入 snapshot 會露出即時聊天殼；立刻再 poll 並維持上一帧 UI。
+     * 若寫入 snapshot 會露出即時聊天殼；立刻開 splash hold + 再 poll。
      */
     if (data.status === 'in_session' && data.phase === 'mutual_friend') {
+      const peer = data.peer_user_id ?? lastInSessionPeerRef.current ?? undefined
+      const mid = (data as { promoted_match_id?: string }).promoted_match_id
+      if (!emitMutualFriendMatch(mid, peer, data.session_id)) {
+        // match_id 可能下一輪 poll 才帶回；先擋住聊天殼，等 Realtime／done poll 補 splash
+        if (peer) setMutualFriendSplashHold(true)
+      }
       void chainInstantMatchPoll(false).then((res) => {
         if (res.ok === true) ingestPollOk(res.data)
         else if (res.ok === false) setPollError(res.error)
       })
       return
     }
+    const mutualFriendEmitRef: {
+      current: { matchId?: string; peerUserId?: string; sessionId: string } | null
+    } = { current: null }
     setSnapshot((prev) => {
       if (
         prev?.status === 'done' &&
@@ -548,23 +586,27 @@ export default function InstantMatchTab({
         return prev
       }
       if (data.status === 'done' && data.mutual_friend) {
-        const matchId = data.promoted_match_id
-        const peerUserId = prev?.status === 'in_session' ? prev.peer_user_id : undefined
-        if (matchId && peerUserId) {
-          queueMicrotask(() =>
-            onMutualFriendMatchCreatedRef.current?.({
-              matchId,
-              peerUserId,
-              sessionId: data.session_id,
-            }),
-          )
+        mutualFriendEmitRef.current = {
+          matchId: data.promoted_match_id,
+          peerUserId:
+            prev?.status === 'in_session'
+              ? prev.peer_user_id
+              : lastInSessionPeerRef.current ?? undefined,
+          sessionId: data.session_id,
         }
       }
       if (data.status === 'done') doneHoldRef.current = true
       else doneHoldRef.current = false
       return data
     })
-  }, [chainInstantMatchPoll])
+    if (mutualFriendEmitRef.current) {
+      emitMutualFriendMatch(
+        mutualFriendEmitRef.current.matchId,
+        mutualFriendEmitRef.current.peerUserId,
+        mutualFriendEmitRef.current.sessionId,
+      )
+    }
+  }, [chainInstantMatchPoll, emitMutualFriendMatch])
 
   useEffect(() => {
     pollEnqueueWhileWaitingRef.current = snapshot?.status === 'waiting'
@@ -585,11 +627,11 @@ export default function InstantMatchTab({
     const inSession =
       pollReady &&
       snapshot?.status === 'in_session' &&
-      !uiBlockedByMatchSplash &&
+      !instantUiBlockedByMatchSplash &&
       snapshot.phase !== 'mutual_friend'
     onInstantSessionShellActiveChange?.(inSession)
     return () => onInstantSessionShellActiveChange?.(false)
-  }, [pollReady, snapshot, uiBlockedByMatchSplash, onInstantSessionShellActiveChange])
+  }, [pollReady, snapshot, instantUiBlockedByMatchSplash, onInstantSessionShellActiveChange])
 
   /** userId 變更時重置；須優先於輪詢 effect，否則 remount 首輪若以 enqueue:false，053 會刪除本人在等候之列。 */
   useEffect(() => {
@@ -606,6 +648,8 @@ export default function InstantMatchTab({
     setShowMatchIntro(false)
     setManualUnlockedTiles([])
     setPuzzleUnlockNotice(null)
+    lastInSessionPeerRef.current = null
+    setMutualFriendSplashHold(false)
     pollChainTailRef.current = Promise.resolve({ ok: true, data: { status: 'idle' as const } })
   }, [userId])
 
@@ -1228,6 +1272,9 @@ export default function InstantMatchTab({
   }
 
   if (snapshot.status === 'done') {
+    if (snapshot.mutual_friend && instantUiBlockedByMatchSplash) {
+      return <div className="flex min-h-0 flex-1 flex-col bg-slate-950" aria-hidden />
+    }
     const peerEnd = snapshot.instant_end_reason === 'peer_left'
     const selfEnd = snapshot.instant_end_reason === 'self_left'
     const decisionClosed = snapshot.instant_end_reason === 'decision_closed'
@@ -1290,7 +1337,11 @@ export default function InstantMatchTab({
   const showDecide = sess.phase === 'decide'
   const liveChat = sess.phase === 'chat'
 
-  if (uiBlockedByMatchSplash) {
+  if (instantUiBlockedByMatchSplash) {
+    return <div className="flex min-h-0 flex-1 flex-col bg-slate-950" aria-hidden />
+  }
+
+  if (sess.phase === 'mutual_friend') {
     return <div className="flex min-h-0 flex-1 flex-col bg-slate-950" aria-hidden />
   }
 
@@ -1530,21 +1581,12 @@ export default function InstantMatchTab({
                             await onRefreshCredits?.()
                             await onRefreshInstantFriendQuota?.()
                             if (res.data?.mutual_friend === true && res.data?.match_id != null) {
-                              const matchId = String(res.data.match_id)
-                              const peerUserId = inSession?.peer_user_id
                               ingestPollOk({
                                 status: 'done',
                                 session_id: sessionId,
                                 mutual_friend: true,
-                                promoted_match_id: matchId,
+                                promoted_match_id: String(res.data.match_id),
                               })
-                              if (peerUserId) {
-                                onMutualFriendMatchCreatedRef.current?.({
-                                  matchId,
-                                  peerUserId,
-                                  sessionId,
-                                })
-                              }
                               return
                             }
                             const resPoll = await chainInstantMatchPoll(false)
