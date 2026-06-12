@@ -143,6 +143,7 @@ import { discoverDeckLocalStorageKey } from '@/lib/discoverDeckLocalCache'
 import {
   discoverProfileAwaitingPhotoUrls,
   isDisplayablePhotoUrl,
+  mergeDiscoverDeckPreservingPhotoUrls,
   normalizeDiscoverProfileFromCache,
   serializeDiscoverProfileForCache,
 } from '@/lib/discoverDeckProfilePhotos'
@@ -1377,6 +1378,8 @@ function DiscoverTab({
   /** 探索相片漸進載入：最多載入到 `index+1` 位；切換卡片時才擴張 horizon */
   const discoverPhotoHorizonRef = useRef(0)
   const discoverPhotoPipelineEpochRef = useRef(0)
+  /** deck RPC 完成後重啟 pipeline（SWR 不應中斷進行中的簽章） */
+  const [discoverPhotoPipelineKick, setDiscoverPhotoPipelineKick] = useState(0)
   const discoverUiSnap = userId ? takeDiscoverUiSnapshot(userId, discoverDeckDayKey, deckRefresh) : null
   const [celebrateDeck, setCelebrateDeck] = useState(false)
   const prevRolloverTickRef = useRef(0)
@@ -1518,7 +1521,7 @@ function DiscoverTab({
     return () => {
       discoverPhotoPipelineEpochRef.current += 1
     }
-  }, [userId, visibleProfileKeysSig, index, deckRefresh])
+  }, [userId, visibleProfileKeysSig, index, deckRefresh, discoverPhotoPipelineKick])
 
   useEffect(() => {
     getMyBlockedProfileKeys().then(setBlockedKeys)
@@ -1607,7 +1610,6 @@ function DiscoverTab({
         }
 
         const myEpoch = ++deckLoadEpochRef.current
-        discoverPhotoPipelineEpochRef.current += 1
         discoverPhotoHorizonRef.current = 0
 
         actionTrace('discover.deck', 'effect:開始', {
@@ -1702,8 +1704,9 @@ function DiscoverTab({
                     })
                     setDeckLoadDiagnostic(null)
                     clearDiscoverFailAutoReloadFlag()
-                    setLiveDeck(profiles)
+                    setLiveDeck((prev) => mergeDiscoverDeckPreservingPhotoUrls(profiles, prev))
                     setLiveDeckStatus('ready')
+                    setDiscoverPhotoPipelineKick((k) => k + 1)
                     writeDiscoverDeckProfileCache(userId, discoverDeckDayKey, profiles)
                     actionTrace('discover.deck', 'work:完成', {
                       profileCount: profiles.length,

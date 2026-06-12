@@ -82,6 +82,26 @@ export function mergeSignedDiscoverPhotosIntoDeck<T extends DiscoverPhotoProfile
   })
 }
 
+/** RPC 重抓 deck 時保留 pipeline 已簽出的 URL，避免 SWR 把相片清回載入中。 */
+export function mergeDiscoverDeckPreservingPhotoUrls<T extends DiscoverPhotoProfile & { profileKey?: string }>(
+  next: T[],
+  prev: T[],
+): T[] {
+  if (prev.length === 0) return next
+  const prevByKey = new Map(
+    prev
+      .filter((p) => p.profileKey)
+      .map((p) => [p.profileKey as string, p]),
+  )
+  return next.map((p) => {
+    if (!p.profileKey) return p
+    const old = prevByKey.get(p.profileKey)
+    const urls = (old?.photoUrls ?? []).filter(isDisplayablePhotoUrl)
+    if (urls.length === 0) return p
+    return { ...p, photoUrls: urls }
+  })
+}
+
 /** 有 storage path 但尚未簽出可顯示 URL（探索快取 SWR 首屏） */
 export function discoverProfileAwaitingPhotoUrls(p: DiscoverPhotoProfile): boolean {
   if (storagePathsFromDiscoverProfile(p).length === 0) return false

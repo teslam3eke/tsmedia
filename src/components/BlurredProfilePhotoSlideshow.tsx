@@ -44,10 +44,11 @@ export function BlurredProfilePhotoSlideshow({
 
   const gradientBg = `linear-gradient(160deg, ${gradientFrom}, ${gradientTo})`
 
+  /** 探索漸進載入會追加 photoUrls；勿因 append 清空 load state（cached img 不會再觸發 onLoad）。 */
   useEffect(() => {
     setIndex(0)
     setPhotoLoadState({})
-  }, [profileKey, photoUrls.join('|')])
+  }, [profileKey])
 
   const markPhotoLoaded = (i: number) => {
     setPhotoLoadState((prev) => (prev[i] === 'loaded' ? prev : { ...prev, [i]: 'loaded' }))
