@@ -11,6 +11,7 @@ import type {
   PhotoUnlockStateRow, UserFeedbackRow, UserFeedbackWithProfile,
 } from './types'
 import { PROFILE_PHOTO_MAX } from './types'
+import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 
 export const TERMS_VERSION = '2026-04-28'
 
@@ -281,10 +282,30 @@ export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
     return resolved
   }
 
+  const signedMap = new Map<string, string>()
+  const needsSign: string[] = []
+  for (const path of storagePaths) {
+    const cached = peekSignedPhotoUrlCache(path)
+    if (cached) {
+      signedMap.set(path, cached)
+    } else {
+      needsSign.push(path)
+    }
+  }
+
+  if (needsSign.length === 0) {
+    actionTrace('db.resolvePhotoUrls', '全部命中快取', {
+      paths: paths.length,
+      storagePaths: storagePaths.length,
+    })
+    return resolved.map((path) => signedMap.get(path) ?? path)
+  }
+
   actionTrace('db.resolvePhotoUrls', '請求簽章', {
     paths: paths.length,
-    storagePaths: storagePaths.length,
-    firstPath: typeof storagePaths[0] === 'string' ? storagePaths[0].slice(0, 40) : '—',
+    storagePaths: needsSign.length,
+    cachedHits: storagePaths.length - needsSign.length,
+    firstPath: typeof needsSign[0] === 'string' ? needsSign[0].slice(0, 40) : '—',
   })
 
   /** 探索名單已回來但若此請求卡住（換發 JWT ／背景回前景後 zombie fetch），UI 會永遠 loading；Network 只看到 RPC OK。 */
@@ -292,7 +313,7 @@ export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
 
   try {
     const { data, error } = await Promise.race([
-      supabase.storage.from('photos').createSignedUrls(storagePaths, 60 * 60),
+      supabase.storage.from('photos').createSignedUrls(needsSign, 60 * 60),
       new Promise<{ data: null; error: { message: string } }>((resolve) =>
         globalThis.setTimeout(
           () =>
@@ -313,15 +334,21 @@ export async function resolvePhotoUrls(paths: string[]): Promise<string[]> {
       return resolved
     }
 
-    const signedMap = new Map(
-      (data ?? [])
-        .filter((item) => item.path && item.signedUrl)
-        .map((item) => [item.path, item.signedUrl] as const),
-    )
+    const freshMap = new Map<string, string>()
+    for (const item of data ?? []) {
+      const path = item.path?.trim()
+      const url = item.signedUrl?.trim()
+      if (path && url) freshMap.set(path, url)
+    }
+    for (const [path, url] of freshMap) {
+      putSignedPhotoUrlCache(path, url)
+      signedMap.set(path, url)
+    }
 
     actionTrace('db.resolvePhotoUrls', '簽章完成', {
       resolvedSlots: resolved.length,
-      signedCount: signedMap.size,
+      signedCount: freshMap.size,
+      cachedHits: storagePaths.length - needsSign.length,
     })
     return resolved.map((path) => signedMap.get(path) ?? path)
   } catch (e: unknown) {

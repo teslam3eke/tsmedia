@@ -148,6 +148,7 @@ import {
   serializeDiscoverProfileForCache,
 } from '@/lib/discoverDeckProfilePhotos'
 import { runDiscoverDeckPhotoPipeline } from '@/lib/discoverDeckPhotoPipeline'
+import { peekSignedPhotoUrlCache } from '@/lib/signedPhotoUrlCache'
 import {
   markSkipInstantMatchLeaveOnNextFullUnload,
   peekSkipInstantMatchLeaveOnFullUnload,
@@ -4070,7 +4071,11 @@ function EditProfileScreen({
 
   // Photos（僅已上傳至 Storage 的列；新照由 LifePhotoUploadSection 審核後寫入）
   const [photos, setPhotos] = useState<LocalPhoto[]>(() =>
-    (profile.photo_urls ?? []).map((p, i) => ({ id: `existing-${i}`, previewUrl: p, storagePath: p })),
+    (profile.photo_urls ?? []).map((p, i) => ({
+      id: `existing-${i}`,
+      previewUrl: peekSignedPhotoUrlCache(p) ?? p,
+      storagePath: p,
+    })),
   )
   const previewPhotoUrls = useMemo(
     () => photos.map((p) => p.previewUrl).filter(Boolean),
@@ -5601,6 +5606,10 @@ function ProfileTab({
     if (!firstPath) {
       setProfilePhotoPreviewUrl(null)
       return
+    }
+    const cached = peekSignedPhotoUrlCache(firstPath)
+    if (cached) {
+      setProfilePhotoPreviewUrl(cached)
     }
     void resolvePhotoUrls([firstPath]).then(([url]) => {
       if (cancelled) return
