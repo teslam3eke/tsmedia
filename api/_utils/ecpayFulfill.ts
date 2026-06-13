@@ -12,6 +12,9 @@ const FULFILL_ERROR_MESSAGES: Record<string, string> = {
 }
 
 function mapFulfillRpcError(message: string): string {
+  if (message.includes('fulfill_ecpay_order_for_service')) {
+    return '伺服器資料庫尚未更新（缺 fulfill RPC），請聯絡客服並保留付款證明'
+  }
   for (const [code, text] of Object.entries(FULFILL_ERROR_MESSAGES)) {
     if (message.includes(code)) return text
   }

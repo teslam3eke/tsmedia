@@ -28,7 +28,7 @@ import {
   type TPDirectAPI,
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
-import { startEcpayCheckout } from '@/lib/ecpayCheckout'
+import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export type MembershipUpdateEvent =
@@ -103,10 +103,17 @@ export default function MembershipManagementScreen({
   const crownEffectOwned = isCrownEffectPurchased(crownEffectPurchasedAt)
 
   const reloadProfile = useCallback(async () => {
+    if (paymentMode === 'ecpay') {
+      const synced = await syncPendingEcpayOrders()
+      if (synced.ok && synced.synced && synced.productType === 'membership') {
+        setSubscriptionExpiresAt(synced.subscriptionExpiresAt ?? null)
+        onUpdated({ type: 'membership' })
+      }
+    }
     const profile = await getProfile(userId)
     setSubscriptionExpiresAt(profile?.subscription_expires_at ?? null)
     setCrownEffectPurchasedAt(profile?.crown_effect_purchased_at ?? null)
-  }, [userId])
+  }, [userId, paymentMode, onUpdated])
 
   useEffect(() => {
     void reloadProfile()

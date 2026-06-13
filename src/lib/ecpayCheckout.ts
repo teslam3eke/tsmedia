@@ -11,12 +11,14 @@ export type EcpayCheckoutParams = {
 export type EcpayOrderStatus = {
   ok: boolean
   paid?: boolean
+  fulfilled?: boolean
   status?: string
   productType?: string
   packKey?: string | null
   amountNtd?: number
   paidAt?: string | null
   subscriptionExpiresAt?: string | null
+  reconcileError?: string
   error?: string
 }
 
@@ -75,14 +77,20 @@ export async function startEcpayCheckout(params: EcpayCheckoutParams): Promise<v
   })
 }
 
-export async function fetchEcpayOrderStatus(orderNo: string): Promise<EcpayOrderStatus> {
+export async function fetchEcpayOrderStatus(
+  orderNo: string,
+  opts?: { reconcile?: boolean },
+): Promise<EcpayOrderStatus> {
   const { data: sessionData } = await supabase.auth.getSession()
   const token = sessionData.session?.access_token
   if (!token) {
     return { ok: false, error: '登入已過期' }
   }
 
-  const res = await fetch(`/api/ecpay-order-status?order=${encodeURIComponent(orderNo)}`, {
+  const qs = new URLSearchParams({ order: orderNo })
+  if (opts?.reconcile) qs.set('reconcile', '1')
+
+  const res = await fetch(`/api/ecpay-order-status?${qs.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: 'no-store',
   })
@@ -94,17 +102,50 @@ export async function fetchEcpayOrderStatus(orderNo: string): Promise<EcpayOrder
   return json
 }
 
+export type EcpaySyncPendingResult = {
+  ok: boolean
+  synced?: boolean
+  orderNo?: string
+  productType?: string
+  packKey?: string | null
+  subscriptionExpiresAt?: string | null
+  reason?: string
+  error?: string
+}
+
+/** 重啟 PWA 後補查最近 pending 綠界訂單（無 payment=return URL 時） */
+export async function syncPendingEcpayOrders(): Promise<EcpaySyncPendingResult> {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData.session?.access_token
+  if (!token) {
+    return { ok: false, error: '登入已過期' }
+  }
+
+  const res = await fetch('/api/ecpay-sync-pending', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  })
+
+  const json = (await res.json()) as EcpaySyncPendingResult
+  if (!res.ok) {
+    return { ok: false, error: json.error ?? `同步失敗（${res.status}）` }
+  }
+  return json
+}
+
 /** 付款返回後輪詢入帳；綠界 return 已 status=ok 時用較短輪詢（webhook／return 通常已入帳） */
 export async function pollEcpayOrderPaid(
   orderNo: string,
   opts?: { attempts?: number; intervalMs?: number; gatewayConfirmed?: boolean },
 ): Promise<EcpayOrderStatus | null> {
   const gatewayConfirmed = opts?.gatewayConfirmed === true
-  const attempts = opts?.attempts ?? (gatewayConfirmed ? 4 : 10)
-  const intervalMs = opts?.intervalMs ?? (gatewayConfirmed ? 1_200 : 2_000)
+  const attempts = opts?.attempts ?? (gatewayConfirmed ? 8 : 12)
+  const intervalMs = opts?.intervalMs ?? (gatewayConfirmed ? 1_500 : 2_000)
 
   for (let i = 0; i < attempts; i++) {
-    const status = await fetchEcpayOrderStatus(orderNo)
+    const reconcile = i >= 2
+    const status = await fetchEcpayOrderStatus(orderNo, { reconcile })
     if (status.ok && status.paid) return status
     if (!status.ok && status.error !== '找不到訂單') {
       return status

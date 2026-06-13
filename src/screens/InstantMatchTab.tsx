@@ -50,9 +50,19 @@ import {
   pickBlurUnlockGlobalTiles,
 } from '@/lib/puzzleUnlockPick'
 import {
+  clearInstantEnqueueIntent,
+  persistInstantEnqueueIntent,
+} from '@/lib/instantMatchEnqueueIntent'
+import {
   peekSkipInstantMatchLeaveOnFullUnload,
   clearSkipInstantMatchLeaveOnFullUnload,
 } from '@/lib/instantMatchUnloadGuard'
+
+export type InstantNavGuardSnapshot = {
+  waiting: boolean
+  sessionId: string | null
+  sessionPhase: 'chat' | 'decide' | null
+}
 import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
 import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
 import InstantMatchIntroSplash from '@/components/InstantMatchIntroSplash'
@@ -81,8 +91,8 @@ type Props = {
     peerUserId: string
     sessionId: string
   }) => void
-  /** 通知主殼是否在「排隊中」，以便切 tab 時跳出離開確認 */
-  onWaitingStateChange?: (waiting: boolean) => void
+  /** 排隊／in_session 快照：主殼切 tab 攔截與 reload 後還原 enqueue 意圖 */
+  onInstantNavGuardChange?: (snap: InstantNavGuardSnapshot) => void
   /** `in_session` 時對齊配對聊天：隱藏頂／底外殼、main 鎖 overflow:hidden；鍵盤時再配合隱藏底欄 */
   onInstantSessionShellActiveChange?: (active: boolean) => void
   /** 聚焦輸入框時請主殼隱藏底欄，以免與 ChatRoom／即時共用之 visualViewport inset 留白重疊 */
@@ -459,7 +469,7 @@ export default function InstantMatchTab({
   assumeEnqueuePollIntent = false,
   uiBlockedByMatchSplash = false,
   onMutualFriendMatchCreated,
-  onWaitingStateChange,
+  onInstantNavGuardChange,
   onInstantSessionShellActiveChange,
   onInstantComposerKeyboardOpenChange,
   creditBalance,
@@ -618,8 +628,25 @@ export default function InstantMatchTab({
 
   useEffect(() => {
     const waiting = !!(pollReady && snapshot?.status === 'waiting')
-    onWaitingStateChange?.(waiting)
-  }, [pollReady, snapshot, onWaitingStateChange])
+    const sessionId = snapshot?.status === 'in_session' ? snapshot.session_id : null
+    const sessionPhase =
+      snapshot?.status === 'in_session' &&
+      (snapshot.phase === 'chat' || snapshot.phase === 'decide')
+        ? snapshot.phase
+        : null
+    onInstantNavGuardChange?.({ waiting, sessionId, sessionPhase })
+  }, [pollReady, snapshot, onInstantNavGuardChange])
+
+  /** reload 後 remount 首輪須 enqueue:true；離開 waiting 時清 sessionStorage */
+  useEffect(() => {
+    if (snapshot?.status === 'waiting') {
+      persistInstantEnqueueIntent(userId)
+      return
+    }
+    if (pollReady && snapshot && snapshot.status !== 'waiting') {
+      clearInstantEnqueueIntent(userId)
+    }
+  }, [snapshot, pollReady, userId])
 
   useInstantTabLifecycleExit(snapshot, setSnapshot, doneHoldRef, chainInstantMatchPoll)
 
@@ -1034,6 +1061,7 @@ export default function InstantMatchTab({
     busyRef.current = true
     setBusy(true)
     try {
+      clearInstantEnqueueIntent(userId)
       await instantMatchLeaveQueue()
       const res = await chainInstantMatchPoll(false)
       if (res.ok === true) ingestPollOk(res.data)
@@ -1159,6 +1187,7 @@ export default function InstantMatchTab({
     busyRef.current = true
     setBusy(true)
     pollEnqueueWhileWaitingRef.current = false
+    clearInstantEnqueueIntent(userId)
     instantSessionAbandonKeepalive(sid)
     const ab = await instantSessionAbandon(sid)
     if (!ab.ok) setPollError(ab.error ?? '離開失敗')
@@ -1320,6 +1349,7 @@ export default function InstantMatchTab({
               persistDismissedToStorage(userId, dismissedInstantSessionIdsRef.current)
               // 結束頁按「我知道了」仍未表達排隊；須立刻關閉「等候中輪詢送 enqueue:true」以免與 056 前 SQL 行為疊加誤撮合
               pollEnqueueWhileWaitingRef.current = false
+              clearInstantEnqueueIntent(userId)
               void chainInstantMatchPoll(false).then((res) => {
                 if (res.ok === true) ingestPollOk(res.data)
                 else if (res.ok === false) setPollError(res.error)

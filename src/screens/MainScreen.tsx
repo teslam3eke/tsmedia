@@ -55,8 +55,11 @@ import {
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
   instantMatchLeaveQueueKeepalive,
+  instantSessionAbandon,
+  instantSessionAbandonKeepalive,
   subscribeToMyAppNotifications,
 } from '@/lib/db'
+import { readInstantEnqueueIntent, clearInstantEnqueueIntent } from '@/lib/instantMatchEnqueueIntent'
 import { getAppDayKey, msUntilNextAppDayKeyChange, msUntilNextTaipei2200, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
@@ -71,6 +74,7 @@ import {
   pollEcpayOrderPaid,
   readEffectivePaymentReturnQuery,
   releasePaymentReturnRewardEffect,
+  syncPendingEcpayOrders,
   tryClaimPaymentReturnRewardEffect,
 } from '@/lib/ecpayCheckout'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
@@ -86,7 +90,7 @@ import { AI_AUTO_REVIEW_UI_SECONDS, INCOME_WAIT_OVERLAY_MAX_SECONDS } from '@/li
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
-import InstantMatchTab from '@/screens/InstantMatchTab'
+import InstantMatchTab, { type InstantNavGuardSnapshot } from '@/screens/InstantMatchTab'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import {
   DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
@@ -6094,9 +6098,11 @@ export default function MainScreen({
   const activeTabRef = useRef<Tab>(initialTab ?? 'discover')
   activeTabRef.current = activeTab
 
-  /** 即時配對「排隊中」時，攔截切到其他分頁／開聊天等導離行為並先確認 */
+  /** 即時配對「排隊中／聊天／決策」時，攔截切到其他分頁／開聊天等導離行為並先確認 */
   const [instantQueueWaiting, setInstantQueueWaiting] = useState(false)
   const instantQueueWaitingRef = useRef(false)
+  const instantSessionIdRef = useRef<string | null>(null)
+  const instantSessionPhaseRef = useRef<'chat' | 'decide' | null>(null)
   useEffect(() => {
     instantQueueWaitingRef.current = instantQueueWaiting
   }, [instantQueueWaiting])
@@ -6107,10 +6113,15 @@ export default function MainScreen({
       instantWaitingReportLockRef.current = false
     }
   }, [activeTab])
-  const handleInstantWaitingStateChange = useCallback((waiting: boolean) => {
-    if (waiting && instantWaitingReportLockRef.current) return
-    setInstantQueueWaiting(waiting)
+  const handleInstantNavGuardChange = useCallback((snap: InstantNavGuardSnapshot) => {
+    instantSessionIdRef.current = snap.sessionId
+    instantSessionPhaseRef.current = snap.sessionPhase
+    if (snap.waiting && instantWaitingReportLockRef.current) return
+    setInstantQueueWaiting(snap.waiting)
+    instantQueueWaitingRef.current = snap.waiting
   }, [])
+  type InstantLeaveGuardKind = 'waiting' | 'session_chat' | 'session_decide'
+  const [instantLeaveGuardKind, setInstantLeaveGuardKind] = useState<InstantLeaveGuardKind>('waiting')
   const [instantLeaveGuardOpen, setInstantLeaveGuardOpen] = useState(false)
   const pendingInstantNavTabRef = useRef<Tab | null>(null)
   /** 推播／通知要求開聊天室，但被即時排隊攔截時暫存 */
@@ -6120,9 +6131,21 @@ export default function MainScreen({
   )
   const finalizePushDeepLinkConsumptionRef = useRef<() => void>(() => {})
 
-  const blockInstantNavIfWaiting = useCallback((target: Tab): boolean => {
-    if (activeTabRef.current !== 'instant' || !instantQueueWaitingRef.current || target === 'instant') {
+  const blockInstantNavIfBusy = useCallback((target: Tab): boolean => {
+    if (activeTabRef.current !== 'instant' || target === 'instant') {
       return false
+    }
+    const sessionId = instantSessionIdRef.current
+    const waiting = instantQueueWaitingRef.current
+    if (!waiting && !sessionId) {
+      return false
+    }
+    if (sessionId) {
+      setInstantLeaveGuardKind(
+        instantSessionPhaseRef.current === 'decide' ? 'session_decide' : 'session_chat',
+      )
+    } else {
+      setInstantLeaveGuardKind('waiting')
     }
     pendingInstantNavTabRef.current = target
     setInstantLeaveGuardOpen(true)
@@ -6151,7 +6174,16 @@ export default function MainScreen({
     setInstantLeaveGuardOpen(false)
     setInstantQueueWaiting(false)
     instantQueueWaitingRef.current = false
-    await instantMatchLeaveQueue()
+    if (user?.id) clearInstantEnqueueIntent(user.id)
+    const sessionId = instantSessionIdRef.current
+    if (sessionId) {
+      instantSessionAbandonKeepalive(sessionId)
+      await instantSessionAbandon(sessionId)
+      instantSessionIdRef.current = null
+      instantSessionPhaseRef.current = null
+    } else {
+      await instantMatchLeaveQueue()
+    }
     if (next != null) {
       prevTab.current = activeTabRef.current
       setActiveTab(next)
@@ -6169,7 +6201,7 @@ export default function MainScreen({
     } else {
       instantWaitingReportLockRef.current = false
     }
-  }, [])
+  }, [user?.id])
 
   /** 強制關閉時 `visibilitychange` 常漏；若仍標記為排隊中，`keepalive` RPC 盡力離隊。 */
   useEffect(() => {
@@ -6763,6 +6795,36 @@ export default function MainScreen({
     }
   }, [user?.id, refreshCredits, armHardReloadAfterRewardDismiss])
 
+  /** 重啟 PWA 後補同步綠界 pending 訂單（每 session 一次） */
+  useEffect(() => {
+    if (!user?.id) return
+    const syncKey = 'tm_ecpay_pending_sync_v1'
+    try {
+      if (sessionStorage.getItem(syncKey) === user.id) return
+      sessionStorage.setItem(syncKey, user.id)
+    } catch {
+      /* ignore */
+    }
+    let cancelled = false
+    void (async () => {
+      const result = await syncPendingEcpayOrders()
+      if (cancelled || !result.ok || !result.synced) return
+      void queryClient.invalidateQueries()
+      if (result.productType === 'membership') {
+        const expiryLabel = formatMembershipExpiryZhTw(result.subscriptionExpiresAt ?? null)
+        setRewardFlash({
+          variant: 'grant',
+          title: 'VIP 購買成功',
+          subtitle:
+            expiryLabel !== '尚未訂閱' ? `會員到期：${expiryLabel}` : '會員已入帳',
+        })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
+
   useEffect(() => {
     if (!user?.id) return
     let cancelled = false
@@ -6901,7 +6963,7 @@ export default function MainScreen({
   const openMatchRoomFromPush = useCallback(
     (matchUuidLc: string) => {
       if (!matchUuidLc) return false
-      if (blockInstantNavIfWaiting('matches')) {
+      if (blockInstantNavIfBusy('matches')) {
         pendingPushMatchIdRef.current = matchUuidLc
         return false
       }
@@ -6911,7 +6973,7 @@ export default function MainScreen({
       void loadLiveMatchThreads('full')
       return true
     },
-    [blockInstantNavIfWaiting, loadLiveMatchThreads],
+    [blockInstantNavIfBusy, loadLiveMatchThreads],
   )
 
   const markPushNotifConsumed = useCallback((notifId: string) => {
@@ -6940,12 +7002,12 @@ export default function MainScreen({
       const matchTarget = intent.matchId?.trim().toLowerCase() ?? ''
       const tabTarget = intent.tab
 
-      if (tabTarget && blockInstantNavIfWaiting(tabTarget)) {
+      if (tabTarget && blockInstantNavIfBusy(tabTarget)) {
         if (matchTarget) pendingPushMatchIdRef.current = matchTarget
         persistPendingPushDeepLink(intent)
         return 'blocked_instant'
       }
-      if (matchTarget && blockInstantNavIfWaiting('matches')) {
+      if (matchTarget && blockInstantNavIfBusy('matches')) {
         pendingPushMatchIdRef.current = matchTarget
         persistPendingPushDeepLink(intent)
         return 'blocked_instant'
@@ -7160,7 +7222,7 @@ export default function MainScreen({
   // "Start chat with <id>" — 配對分頁內開啟聊天室
   const startChatWith = (id: number | string) => {
     const normalized = typeof id === 'string' ? id.trim().toLowerCase() : id
-    if (blockInstantNavIfWaiting('matches')) {
+    if (blockInstantNavIfBusy('matches')) {
       if (typeof normalized === 'string' && normalized) {
         pendingPushMatchIdRef.current = normalized
       }
@@ -7332,10 +7394,12 @@ export default function MainScreen({
         userId={user.id}
         foregroundReloadNonce={foregroundReloadNonce}
         physicalChannelResubscribeNonce={physicalChannelResubscribeNonce}
-        assumeEnqueuePollIntent={instantQueueWaiting}
+        assumeEnqueuePollIntent={
+          instantQueueWaiting || readInstantEnqueueIntent(user.id)
+        }
         uiBlockedByMatchSplash={matchSplash != null}
         onMutualFriendMatchCreated={notifyInstantMutualFriendMatch}
-        onWaitingStateChange={handleInstantWaitingStateChange}
+        onInstantNavGuardChange={handleInstantNavGuardChange}
         onInstantSessionShellActiveChange={setInstantSessionShellActive}
         onInstantComposerKeyboardOpenChange={setHideTabBarForChatKeyboard}
         creditBalance={creditBalance}
@@ -7469,7 +7533,7 @@ export default function MainScreen({
                 type="button"
                 onClick={() => {
                   const targetTab = tab
-                  if (blockInstantNavIfWaiting(targetTab)) return
+                  if (blockInstantNavIfBusy(targetTab)) return
                   if (user?.id && targetTab === 'discover') {
                     // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
                     void getProfile(user.id).then((profile) => {
@@ -7550,10 +7614,18 @@ export default function MainScreen({
               onClick={(e) => e.stopPropagation()}
             >
               <h2 id="instant-leave-title" className="text-base font-bold text-slate-900">
-                離開將中斷排隊
+                {instantLeaveGuardKind === 'session_decide'
+                  ? '離開將錯過加好友時限'
+                  : instantLeaveGuardKind === 'session_chat'
+                    ? '離開將結束即時聊天'
+                    : '離開將中斷排隊'}
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                離開「即時配對」頁面會取消目前的等候。確定要離開嗎？
+                {instantLeaveGuardKind === 'session_decide'
+                  ? '決策倒數進行中。離開「即時配對」可能來不及完成互加，此場將視為結束。'
+                  : instantLeaveGuardKind === 'session_chat'
+                    ? '離開後此場即時聊天會結束，對方將看到「對方已離開聊天室」。'
+                    : '離開「即時配對」頁面會取消目前的等候。確定要離開嗎？'}
               </p>
               <div className="mt-6 flex flex-col gap-2 sm:flex-row-reverse sm:justify-end">
                 <button
@@ -7568,7 +7640,7 @@ export default function MainScreen({
                   className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 sm:w-auto sm:min-w-[7rem]"
                   onClick={dismissInstantLeaveGuard}
                 >
-                  繼續等候
+                  {instantLeaveGuardKind === 'waiting' ? '繼續等候' : '留在此頁'}
                 </button>
               </div>
             </motion.div>
