@@ -1,6 +1,24 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-/** PaymentInfoURL 背景通知入帳；已 paid 則冪等跳過。 */
+const FULFILL_ERROR_MESSAGES: Record<string, string> = {
+  MISSING_ORDER_NO: '缺少訂單編號',
+  ORDER_NOT_FOUND: '找不到訂單',
+  AMOUNT_MISMATCH: '金額不符',
+  ORDER_NOT_PAYABLE: '訂單狀態無法入帳',
+  GRANT_MEMBERSHIP_FAILED: 'VIP 入帳失敗',
+  GRANT_PACK_FAILED: '入帳失敗',
+  PACK_KEY_MISSING: '道具包資料不完整',
+  UNKNOWN_PRODUCT: '未知商品類型',
+}
+
+function mapFulfillRpcError(message: string): string {
+  for (const [code, text] of Object.entries(FULFILL_ERROR_MESSAGES)) {
+    if (message.includes(code)) return text
+  }
+  return message || '入帳失敗'
+}
+
+/** PaymentInfoURL／OrderResultURL 入帳；DB 端 FOR UPDATE + fulfilled_at 保證只 grant 一次。 */
 export async function fulfillEcpayOrder(
   admin: SupabaseClient,
   notify: Record<string, string>,
@@ -17,98 +35,33 @@ export async function fulfillEcpayOrder(
 
   const tradeNo = notify.TradeNo?.trim() ?? null
   const paidAmt = Number(notify.TradeAmt)
-
-  const { data: order, error: orderErr } = await admin
-    .from('ecpay_orders')
-    .select('*')
-    .eq('merchant_trade_no', merchantTradeNo)
-    .maybeSingle()
-
-  if (orderErr || !order) {
-    console.error('[ecpay] order not found', merchantTradeNo, orderErr)
-    return { ok: false, error: '找不到訂單' }
-  }
-
-  if (order.status === 'paid') {
-    return { ok: true, alreadyPaid: true }
-  }
-
-  if (!Number.isFinite(paidAmt) || paidAmt !== order.amount_ntd) {
-    console.error('[ecpay] amount mismatch', { paidAmt, expected: order.amount_ntd, merchantTradeNo })
+  if (!Number.isFinite(paidAmt)) {
     return { ok: false, error: '金額不符' }
   }
 
-  if (order.product_type === 'membership') {
-    const { data: grantData, error: grantErr } = await admin.rpc('grant_monthly_membership_for_user', {
-      p_user_id: order.user_id,
-    })
-    if (grantErr) {
-      console.error('[ecpay] grant membership', {
-        merchantTradeNo,
-        userId: order.user_id,
-        message: grantErr.message,
-        details: grantErr.details,
-        hint: grantErr.hint,
-        code: grantErr.code,
-      })
-      return { ok: false, error: 'VIP 入帳失敗' }
-    }
-    const grant = grantData as { subscription_expires_at?: string } | null
-    if (!grant?.subscription_expires_at) {
-      console.error('[ecpay] grant membership missing expiry', { merchantTradeNo, grantData })
-      return { ok: false, error: 'VIP 入帳資料不完整' }
-    }
+  const { data, error } = await admin.rpc('fulfill_ecpay_order_for_service', {
+    p_merchant_trade_no: merchantTradeNo,
+    p_ecpay_trade_no: tradeNo,
+    p_paid_amt: paidAmt,
+    p_raw_result: notify as unknown as Record<string, unknown>,
+  })
 
-    const { error: logErr } = await admin.from('subscription_payment_events').insert({
-      user_id: order.user_id,
-      provider: 'ecpay',
-      amount_ntd: order.amount_ntd,
-      rec_trade_id: tradeNo,
-      gateway_status: 0,
+  if (error) {
+    console.error('[ecpay] fulfill rpc', {
+      merchantTradeNo,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
     })
-    if (logErr) console.error('[ecpay] subscription log', logErr)
-  } else if (order.product_type === 'credit_pack') {
-    if (!order.pack_key) {
-      return { ok: false, error: '道具包資料不完整' }
-    }
-    const { error: grantErr } = await admin.rpc('grant_credit_pack_for_user', {
-      p_user_id: order.user_id,
-      p_pack_key: order.pack_key,
-    })
-    if (grantErr) {
-      console.error('[ecpay] grant pack', grantErr)
-      return { ok: false, error: '入帳失敗' }
-    }
-
-    const { error: logErr } = await admin.from('credit_pack_payment_events').insert({
-      user_id: order.user_id,
-      pack_key: order.pack_key,
-      provider: 'ecpay',
-      amount_ntd: order.amount_ntd,
-      rec_trade_id: tradeNo,
-      gateway_status: 0,
-    })
-    if (logErr) console.error('[ecpay] pack log', logErr)
-  } else {
-    return { ok: false, error: '未知商品類型' }
+    return { ok: false, error: mapFulfillRpcError(error.message ?? '') }
   }
 
-  const { error: updErr } = await admin
-    .from('ecpay_orders')
-    .update({
-      status: 'paid',
-      ecpay_trade_no: tradeNo,
-      raw_result: notify as unknown as Record<string, unknown>,
-      paid_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', order.id)
-    .eq('status', 'pending')
-
-  if (updErr) {
-    console.error('[ecpay] mark paid', updErr)
-    return { ok: false, error: '更新訂單失敗' }
+  const row = data as { ok?: boolean; already_fulfilled?: boolean } | null
+  if (!row?.ok) {
+    console.error('[ecpay] fulfill rpc bad payload', { merchantTradeNo, data })
+    return { ok: false, error: '入帳失敗' }
   }
 
-  return { ok: true, alreadyPaid: false }
+  return { ok: true, alreadyPaid: Boolean(row.already_fulfilled) }
 }
