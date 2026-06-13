@@ -641,9 +641,7 @@ export default function InstantMatchTab({
   useEffect(() => {
     if (snapshot?.status === 'waiting') {
       persistInstantEnqueueIntent(userId)
-      return
-    }
-    if (pollReady && snapshot && snapshot.status !== 'waiting') {
+    } else if (pollReady && snapshot) {
       clearInstantEnqueueIntent(userId)
     }
   }, [snapshot, pollReady, userId])
