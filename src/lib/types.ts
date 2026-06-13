@@ -8,7 +8,7 @@ export type AiConfidence = 'high' | 'medium' | 'low'
 
 export type IncomeTier = 'silver' | 'gold' | 'diamond'
 export type VerificationKind = 'employment' | 'income'
-export type AppNotificationKind = 'verification_approved' | 'verification_rejected' | 'super_like_received' | 'match_created' | 'message_received'
+export type AppNotificationKind = 'verification_approved' | 'verification_rejected' | 'super_like_received' | 'match_created' | 'message_received' | 'instant_match_paired'
 export type ReviewMode = 'manual' | 'ai_auto'
 export type ProfileInteractionAction = 'pass' | 'like' | 'super_like'
 export type ReportReason = 'fake_profile' | 'married_or_not_single' | 'harassment' | 'scam_or_sales' | 'inappropriate_content' | 'privacy_violation' | 'other'

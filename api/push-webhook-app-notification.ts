@@ -15,6 +15,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { sendWebPushMessageToUser, sendWebPushToUser } from './_utils/pushSend.js'
 
+const PUSH_OPTIONS_HIGH = { TTL: 86_400, urgency: 'high' as const }
+
 /** 與前端 MainScreen / App 的 `?tab=` 對齊；含 `notif` 以便開啟後標已讀、不重複站內彈窗 */
 function buildOpenUrlForAppNotification(record: {
   id?: string
@@ -32,6 +34,8 @@ function buildOpenUrlForAppNotification(record: {
   } else if (kind === 'match_created') {
     p.set('tab', 'matches')
     if (record.ref_match_id) p.set('match', record.ref_match_id)
+  } else if (kind === 'instant_match_paired') {
+    p.set('tab', 'instant')
   } else if (kind === 'verification_approved' || kind === 'verification_rejected') {
     p.set('tab', 'profile')
   } else {
@@ -79,21 +83,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     const tag = `app-notif-${record.kind ?? 'generic'}`
     const url = buildOpenUrlForAppNotification(record)
-    const sendPush =
-      record.kind === 'message_received' ? sendWebPushMessageToUser : sendWebPushToUser
-    const result = await sendPush(record.user_id, {
-      title: record.title,
-      body: record.body ?? '',
-      tag,
-      url,
-      kind: record.kind,
-      notifId: record.id,
-      matchId:
-        record.kind === 'message_received' && typeof record.ref_match_id === 'string'
-          ? record.ref_match_id
-          : undefined,
-      refMatchId: typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
-    })
+    let result: { sent: number; failed: number; skipped: number }
+    if (record.kind === 'message_received') {
+      result = await sendWebPushMessageToUser(record.user_id, {
+        title: record.title,
+        body: record.body ?? '',
+        tag,
+        url,
+        kind: record.kind,
+        notifId: record.id,
+        matchId:
+          typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
+        refMatchId: typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
+      })
+    } else {
+      result = await sendWebPushToUser(
+        record.user_id,
+        {
+          title: record.title,
+          body: record.body ?? '',
+          tag,
+          url,
+          kind: record.kind,
+          notifId: record.id,
+          refMatchId: typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
+        },
+        record.kind === 'instant_match_paired' ? PUSH_OPTIONS_HIGH : undefined,
+      )
+    }
     res.status(200).json({ ok: true, ...result })
   } catch (e) {
     console.error('[push-webhook-app-notification]', e)

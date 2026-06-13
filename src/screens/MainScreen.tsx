@@ -5493,6 +5493,14 @@ function appNotificationModalMeta(kind: AppNotificationKind) {
         bodyClass: 'text-slate-700',
         Icon: MessageCircle,
       }
+    case 'instant_match_paired':
+      return {
+        ring: 'ring-violet-200',
+        bg: 'bg-violet-50',
+        titleClass: 'text-violet-900',
+        bodyClass: 'text-violet-800',
+        Icon: Zap,
+      }
   }
 }
 

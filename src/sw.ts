@@ -270,6 +270,7 @@ self.addEventListener('push', (event: PushEvent) => {
       let payloadMatchLc: string | null = null
       let payloadRefMatchId: string | null = null
       let payloadBadgeCount: number | null = null
+      let payloadKind: string | null = null
       try {
         if (event.data) {
           const j = event.data.json() as {
@@ -286,6 +287,7 @@ self.addEventListener('push', (event: PushEvent) => {
           if (j.title) title = j.title
           if (typeof j.body === 'string') body = j.body
           if (j.tag) tag = j.tag
+          if (typeof j.kind === 'string') payloadKind = j.kind
           if (typeof j.url === 'string') openUrl = j.url
           if (typeof j.refMatchId === 'string' && j.refMatchId.trim()) {
             payloadRefMatchId = j.refMatchId.trim()
@@ -308,6 +310,8 @@ self.addEventListener('push', (event: PushEvent) => {
       }
 
       const isDiscoverDeckTag = tag.startsWith('tsm-discover-deck-day-')
+      const isInstantMatchPairedTag =
+        tag === 'app-notif-instant_match_paired' || payloadKind === 'instant_match_paired'
       const isAppNotifTag =
         tag.startsWith('app-notif-') || (tag.includes('app-notif') && !tag.includes('discover'))
       const isMessageReceivedTag =
@@ -315,7 +319,12 @@ self.addEventListener('push', (event: PushEvent) => {
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
       /** 站內事件（驗證／超喜等）：前景不秀 OS 橫幅，改與背景點擊相同的 deep link 路徑 */
-      if (isAppNotifTag && !isMessageReceivedTag && hasForegroundOriginClient(clients)) {
+      if (
+        !isInstantMatchPairedTag &&
+        isAppNotifTag &&
+        !isMessageReceivedTag &&
+        hasForegroundOriginClient(clients)
+      ) {
         await pingClientsPushOpenQuiet(openUrl)
         return
       }
