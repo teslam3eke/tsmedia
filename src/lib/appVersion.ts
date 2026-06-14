@@ -3,7 +3,8 @@
  * 不一致時強制重新載入以取得最新前端（優先 /api/git-sha，備援 /build-id.txt）。
  *
  * 僅 reload() 時，舊 Service Worker 仍可能持續用 precache 餵舊 HTML/JS（尤其「加到主畫面」的 PWA）。
- * 因此在 mismatch 時先 unregister SW + 清掉本網域 Cache Storage，再重整。
+ * 因此在 mismatch 且確定可 reload 時才 unregister SW + 清 Cache Storage，再重整。
+ * 相簿 grace／註冊填表保護中則略過（勿先 unregister 卻不 reload，否則推播會中斷）。
  */
 
 import { isWithinMediaPickerGracePeriod } from './resumeHardReload'
@@ -64,9 +65,9 @@ export async function checkRemoteBuildIdAndReload(): Promise<void> {
   try {
     const remote = await fetchRemoteBuildId()
     if (!remote || remote === embedded) return
-    await unregisterSwAndClearSiteCaches()
     if (isWithinMediaPickerGracePeriod()) return
     if (isOnboardingResumeProtectActive()) return
+    await unregisterSwAndClearSiteCaches()
     markSkipInstantMatchLeaveOnNextFullUnload()
     window.location.reload()
   } catch {
