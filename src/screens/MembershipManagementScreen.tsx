@@ -44,13 +44,9 @@ const TAPPAY_FIELD_PREFIX = 'membership-mgmt-card'
 function ProductPriceLine({
   listPriceNtd,
   priceNtd,
-  promoLabel,
-  discountTenths,
 }: {
   listPriceNtd: number
   priceNtd: number
-  promoLabel?: string | null
-  discountTenths?: number | null
 }) {
   const showDiscount = isPromoPriceActive(listPriceNtd, priceNtd)
   return (
@@ -59,12 +55,6 @@ function ProductPriceLine({
         <span className="text-xs font-semibold text-slate-500 line-through">NT$ {listPriceNtd}</span>
       )}
       <span className="text-sm font-black text-amber-400">NT$ {priceNtd}</span>
-      {showDiscount && discountTenths != null && (
-        <span className="text-[10px] font-bold text-fuchsia-300">
-          {promoLabel ? `${promoLabel} · ` : ''}
-          特價 {formatDiscountTenthsZh(discountTenths)}
-        </span>
-      )}
     </p>
   )
 }
@@ -111,8 +101,6 @@ export default function MembershipManagementScreen({
 
   const monthlyListPrice = MEMBERSHIP_LIST_PRICE_NTD[gender]
   const monthlyPrice = pricing?.membership[gender].priceNtd ?? monthlyListPrice
-  const promoLabel = pricing?.promo?.label ?? null
-  const promoDiscountTenths = pricing?.promo?.discountTenths ?? null
   const memberActive = isMembershipActive(subscriptionExpiresAt)
   const crownEffectOwned = isCrownEffectPurchased(crownEffectPurchasedAt)
 
@@ -414,7 +402,7 @@ export default function MembershipManagementScreen({
           <section>
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">購買道具</p>
             {pricing?.promo && (
-              <p className="mb-3 rounded-xl bg-fuchsia-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-fuchsia-200 ring-1 ring-fuchsia-400/20">
+              <p className="mb-4 rounded-xl bg-fuchsia-500/10 px-4 py-3 text-sm font-bold leading-snug text-fuchsia-100 ring-1 ring-fuchsia-400/25">
                 {pricing.promo.label} · 全站 {formatDiscountTenthsZh(pricing.promo.discountTenths)}
               </p>
             )}
@@ -434,12 +422,7 @@ export default function MembershipManagementScreen({
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-black text-slate-100">{pack.title}</p>
                     <p className="text-[11px] font-semibold text-slate-400">{pack.subtitle}</p>
-                    <ProductPriceLine
-                      listPriceNtd={listPriceNtd}
-                      priceNtd={priceNtd}
-                      promoLabel={promoLabel}
-                      discountTenths={promoDiscountTenths}
-                    />
+                    <ProductPriceLine listPriceNtd={listPriceNtd} priceNtd={priceNtd} />
                   </div>
                   <button
                     type="button"
@@ -473,8 +456,6 @@ export default function MembershipManagementScreen({
                     <ProductPriceLine
                       listPriceNtd={pricing?.packs.crown_effect?.listPriceNtd ?? CROWN_EFFECT_PRODUCT.listPriceNtd}
                       priceNtd={pricing?.packs.crown_effect?.priceNtd ?? CROWN_EFFECT_PRODUCT.listPriceNtd}
-                      promoLabel={promoLabel}
-                      discountTenths={promoDiscountTenths}
                     />
                   </div>
                   {crownEffectOwned ? (
@@ -518,12 +499,6 @@ export default function MembershipManagementScreen({
               )}
               NT$ {monthlyPrice}／30 天
             </p>
-            {isPromoPriceActive(monthlyListPrice, monthlyPrice) && promoDiscountTenths != null && (
-              <p className="mt-1 text-center text-[11px] font-bold text-fuchsia-300">
-                {promoLabel ? `${promoLabel} · ` : ''}
-                特價 {formatDiscountTenthsZh(promoDiscountTenths)}
-              </p>
-            )}
             <p className="mt-1 text-center text-xs font-semibold text-slate-400">
               {gender === 'male' ? '男性 VIP' : '女性 VIP'} · 單次購買，到期需再購買（非自動續扣）
             </p>
