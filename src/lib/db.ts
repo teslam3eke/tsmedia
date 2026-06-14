@@ -1070,6 +1070,45 @@ export async function purchaseCrownEffectMock(): Promise<{
   return { ok: true }
 }
 
+export async function claimFirstLoginWelcomeBonus(): Promise<{
+  ok: boolean
+  reason?: string
+  hearts?: number
+  blurUnlock?: number
+}> {
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
+  if (visible) await ensureConnectionWithBudget()
+
+  const rpc = async () =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).rpc('claim_first_login_welcome_bonus')
+
+  let { data, error } = await rpc()
+  if (error && visible) {
+    await ensureConnectionWithBudget()
+    ;({ data, error } = await rpc())
+  }
+
+  if (error) {
+    console.error('[db] claimFirstLoginWelcomeBonus error:', error.message)
+    return { ok: false, reason: error.message }
+  }
+  const row = data as {
+    ok?: boolean
+    reason?: string
+    hearts?: number
+    blur_unlock?: number
+  } | null
+  if (!row?.ok) {
+    return { ok: false, reason: row?.reason ?? 'unknown' }
+  }
+  return {
+    ok: true,
+    hearts: row?.hearts,
+    blurUnlock: row?.blur_unlock,
+  }
+}
+
 export async function claimDailyMemberHearts(): Promise<{
   ok: boolean
   reason?: string

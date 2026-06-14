@@ -52,6 +52,7 @@ import {
   getInstantSessionPuzzleUnlockedTiles,
   getMyMatches, getMatchMessages, fetchMatchThreadsSidebarState, markMatchIncomingMessagesRead, sendMatchMessage, subscribeToMatchMessages,
   formatChatMessageFromRow, mergeUniqueChatMessages, patchChatMessageReadAt,
+  claimFirstLoginWelcomeBonus,
   claimDailyMemberHearts, refreshProfileTabStats, subscribeToNewMatches, subscribeToMyIncomingMatchMessages,
   instantMatchLeaveQueue,
   instantMatchLeaveQueueKeepalive,
@@ -6839,13 +6840,14 @@ export default function MainScreen({
     ;(async () => {
       const before = await getCreditBalance(user.id)
       if (cancelled) return
+      const welcome = await claimFirstLoginWelcomeBonus()
+      if (cancelled) return
       const claim = await claimDailyMemberHearts()
       if (cancelled) return
       await refreshCredits()
       if (cancelled) return
       const after = await getCreditBalance(user.id)
       if (cancelled) return
-      if (!claim.ok) return
       const dh = after.heart - before.heart
       const ds = after.super_like - before.super_like
       const db = after.blur_unlock - before.blur_unlock
@@ -6854,9 +6856,16 @@ export default function MainScreen({
       if (ds > 0) parts.push(`超級喜歡 +${ds}`)
       if (db > 0) parts.push(`拼圖解鎖 +${db}`)
       if (parts.length > 0) {
+        const welcomeGranted = welcome.ok
+        const dailyGranted = claim.ok
         setRewardFlash({
-          variant: 'daily',
-          title: '今日獎勵已入帳',
+          variant: welcomeGranted && !dailyGranted ? 'grant' : 'daily',
+          title:
+            welcomeGranted && dailyGranted
+              ? '歡迎禮與今日獎勵已入帳'
+              : welcomeGranted
+                ? '歡迎禮已入帳'
+                : '今日獎勵已入帳',
           subtitle: parts.join(' · '),
         })
       }
