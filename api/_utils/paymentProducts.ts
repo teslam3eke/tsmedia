@@ -16,8 +16,8 @@ export const CREDIT_PACKS: Record<
 > = {
   heart_5: {
     listPriceNtd: PACK_LIST_PRICE_NTD.heart_5,
-    details: 'tsMedia 加購：愛心 x5',
-    itemName: '愛心 x5',
+    details: 'tsMedia 加購：愛心 x10',
+    itemName: '愛心 x10',
   },
   super_like_5: {
     listPriceNtd: PACK_LIST_PRICE_NTD.super_like_5,

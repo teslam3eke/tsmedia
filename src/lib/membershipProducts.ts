@@ -22,10 +22,10 @@ export type CreditPackProduct = {
 export const CREDIT_PACK_PRODUCTS: CreditPackProduct[] = [
   {
     key: 'heart_5',
-    title: '愛心 x5',
+    title: '愛心 x10',
     subtitle: '探索送出喜歡、男性即時加好友時消耗',
     listPriceNtd: PACK_LIST_PRICE_NTD.heart_5,
-    creditLabel: '5 顆愛心',
+    creditLabel: '10 顆愛心',
   },
   {
     key: 'super_like_5',

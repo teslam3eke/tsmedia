@@ -1633,7 +1633,7 @@ export default function InstantMatchTab({
                           : instantFriendCost.applies && instantFriendCost.freeRemaining > 0
                             ? `加為好友（本次免消耗，尚餘 ${instantFriendCost.freeRemaining} 次）`
                             : instantFriendCost.applies
-                              ? '加為好友（消耗 1 顆愛心）'
+                              ? '加為好友（送出一顆愛心）'
                               : '加為好友'}
                     </button>
                     <button

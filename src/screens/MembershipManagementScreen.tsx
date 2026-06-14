@@ -415,7 +415,7 @@ export default function MembershipManagementScreen({
             <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">購買道具</p>
             {pricing?.promo && (
               <p className="mb-3 rounded-xl bg-fuchsia-500/10 px-3 py-2 text-[11px] font-semibold leading-snug text-fuchsia-200 ring-1 ring-fuchsia-400/20">
-                {pricing.promo.label} · 全站 {formatDiscountTenthsZh(pricing.promo.discountTenths)}（刪除線為原價）
+                {pricing.promo.label} · 全站 {formatDiscountTenthsZh(pricing.promo.discountTenths)}
               </p>
             )}
             <div className="space-y-3">
@@ -532,7 +532,7 @@ export default function MembershipManagementScreen({
               {[
                 { icon: Heart, text: '每次購買即贈 5 顆愛心 + 3 次超級喜歡' },
                 { icon: Eye, text: '每次購買即贈 20 次解除拼圖模糊' },
-                { icon: Sparkles, text: '每日登入 1 愛心 + 2 拼圖解鎖；VIP 另加 2 愛心（每晚 10 點換日）' },
+                { icon: Sparkles, text: 'VIP 會員每日額外增加 2 顆愛心（每晚 10 點換日）' },
               ].map(({ icon: Icon, text }) => (
                 <li
                   key={text}
