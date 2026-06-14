@@ -2412,6 +2412,67 @@ export async function updateUserFeedbackStatus(
   return { ok: true }
 }
 
+export type PaymentPromoCampaignRow = {
+  id: string
+  label: string
+  discount_tenths: number
+  product_keys: string[]
+  starts_at: string
+  ends_at: string
+  cancelled_at: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export async function getAdminPaymentPromoCampaigns(): Promise<PaymentPromoCampaignRow[]> {
+  const { data, error } = await supabase.rpc('admin_list_payment_promo_campaigns')
+  if (error) {
+    console.error('[db] getAdminPaymentPromoCampaigns error:', error.message)
+    return []
+  }
+  return (data ?? []) as PaymentPromoCampaignRow[]
+}
+
+export async function createAdminPaymentPromoCampaign(input: {
+  label: string
+  discountTenths: number
+  endsAtIso: string
+}): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.rpc('admin_create_payment_promo_campaign', {
+    p_label: input.label.trim(),
+    p_discount_tenths: input.discountTenths,
+    p_ends_at: input.endsAtIso,
+    p_product_keys: ['all'],
+  })
+  if (error) {
+    console.error('[db] createAdminPaymentPromoCampaign error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as { ok?: boolean; reason?: string } | null
+  if (row?.ok === false) {
+    return { ok: false, error: row.reason ?? '建立失敗' }
+  }
+  return { ok: true }
+}
+
+export async function cancelAdminPaymentPromoCampaign(
+  campaignId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.rpc('admin_cancel_payment_promo_campaign', {
+    p_id: campaignId,
+  })
+  if (error) {
+    console.error('[db] cancelAdminPaymentPromoCampaign error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as { ok?: boolean; reason?: string } | null
+  if (!row?.ok) {
+    return { ok: false, error: row?.reason ?? '取消失敗' }
+  }
+  return { ok: true }
+}
+
 /** Normalize stored path (bucket-relative) — tolerate accidental `proofs/` prefix or absolute object URLs */
 export function normalizeProofStoragePath(pathOrUrl: string): string {
   let path = pathOrUrl.trim()

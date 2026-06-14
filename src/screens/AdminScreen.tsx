@@ -15,10 +15,11 @@ import {
   getAdminUserFeedback, updateUserFeedbackStatus,
   blockProfile,
 } from '@/lib/db'
+import AdminPricingTab from '@/screens/AdminPricingTab'
 import type { MessageReportRow, ProfileReportRow, UserFeedbackWithProfile, VerificationDocWithProfile } from '@/lib/types'
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all'
-type AdminTab = 'verifications' | 'reports' | 'feedback'
+type AdminTab = 'verifications' | 'reports' | 'feedback' | 'pricing'
 
 interface Props {
   onBack: () => void
@@ -61,7 +62,7 @@ export default function AdminScreen({ onBack }: Props) {
       ])
       setProfileReports(profileData)
       setMessageReports(messageData)
-    } else {
+    } else if (tab === 'feedback') {
       const data = await getAdminUserFeedback()
       setFeedbackItems(data)
     }
@@ -124,7 +125,7 @@ export default function AdminScreen({ onBack }: Props) {
           </button>
           <div className="flex-1">
             <h1 className="text-base font-bold text-slate-900">管理後台</h1>
-            <p className="text-xs text-slate-400">驗證文件 / 檢舉 / 意見反映</p>
+            <p className="text-xs text-slate-400">驗證文件 / 檢舉 / 意見 / 定價</p>
           </div>
           <button
             onClick={load}
@@ -134,11 +135,12 @@ export default function AdminScreen({ onBack }: Props) {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-2">
+        <div className="grid grid-cols-2 gap-2 mb-2">
           {([
             ['verifications', '驗證審核'],
             ['reports', `檢舉${openReportCount ? ` ${openReportCount}` : ''}`],
             ['feedback', `意見${openFeedbackCount ? ` ${openFeedbackCount}` : ''}`],
+            ['pricing', '付費特價'],
           ] as [AdminTab, string][]).map(([value, label]) => (
             <button
               key={value}
@@ -181,7 +183,7 @@ export default function AdminScreen({ onBack }: Props) {
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 5rem)',
         }}
       >
-        {loading ? (
+        {loading && tab !== 'pricing' ? (
           <div className="flex items-center justify-center py-16">
             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
               <Cpu className="w-6 h-6 text-slate-400" />
@@ -242,6 +244,8 @@ export default function AdminScreen({ onBack }: Props) {
               load()
             }}
           />
+        ) : tab === 'pricing' ? (
+          <AdminPricingTab />
         ) : (
           <FeedbackAdminList
             items={feedbackItems}

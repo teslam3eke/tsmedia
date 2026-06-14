@@ -11,8 +11,12 @@ import {
   CREDIT_PACKS,
   formatEcpayMerchantTradeDate,
   makeMerchantTradeNo,
-  membershipAmountNtd,
 } from './_utils/paymentProducts.js'
+import {
+  fetchPublicPaymentPricing,
+  membershipAmountFromPricing,
+  packAmountFromPricing,
+} from './_utils/pricingResolver.js'
 
 type Body = {
   productType?: 'membership' | 'credit_pack'
@@ -51,6 +55,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const admin = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey)
 
+  let pricing
+  try {
+    pricing = await fetchPublicPaymentPricing(admin)
+  } catch (e) {
+    console.error('[ecpay-create-order] pricing', e)
+    return res.status(500).json({ ok: false, error: '無法取得商品價格，請稍後再試。' })
+  }
+
   let amount: number
   let itemDesc: string
   let itemName: string
@@ -67,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
     }
 
-    amount = membershipAmountNtd(profile.gender as 'male' | 'female')
+    amount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
     itemDesc = 'tsMedia VIP 月卡 30 天'
     itemName = 'tsMedia VIP 月卡 30 天'
   } else if (productType === 'credit_pack') {
@@ -91,7 +103,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    amount = pack.amount
+    const resolvedAmount = packAmountFromPricing(pricing, packKey)
+    if (resolvedAmount == null) {
+      return res.status(400).json({ ok: false, error: '無效的道具包。' })
+    }
+    amount = resolvedAmount
     itemDesc = pack.details
     itemName = pack.itemName
     packKeyToStore = packKey

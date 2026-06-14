@@ -1,24 +1,43 @@
+import { useEffect, useState } from 'react'
 import { ChevronLeft, Crown } from 'lucide-react'
 import {
   CREDIT_PACK_PRODUCTS,
   CROWN_EFFECT_PRODUCT,
-  membershipMonthlyPriceNtd,
   MEMBERSHIP_LIST_PRICE_NTD,
-  PAYMENT_TEST_MODE,
 } from '@/lib/membershipProducts'
+import {
+  fetchPublicPaymentPricing,
+  formatDiscountTenthsZh,
+  isPromoPriceActive,
+  type PublicPaymentPricing,
+} from '@/lib/paymentPricing'
 import SupportEmailFooter from '@/components/SupportEmailFooter'
 
 interface Props {
   onBack: () => void
 }
 
-function PriceCell({ listPriceNtd, priceNtd }: { listPriceNtd: number; priceNtd: number }) {
-  if (PAYMENT_TEST_MODE && listPriceNtd !== priceNtd) {
+function PriceCell({
+  listPriceNtd,
+  priceNtd,
+  promoLabel,
+  discountTenths,
+}: {
+  listPriceNtd: number
+  priceNtd: number
+  promoLabel?: string | null
+  discountTenths?: number | null
+}) {
+  if (isPromoPriceActive(listPriceNtd, priceNtd)) {
     return (
       <span>
         <span className="mr-1 text-slate-400 line-through">NT$ {listPriceNtd}</span>
         NT$ {priceNtd}
-        <span className="ml-1 text-[10px] font-bold text-fuchsia-600">（測試 2 折）</span>
+        {discountTenths != null && (
+          <span className="ml-1 text-[10px] font-bold text-fuchsia-600">
+            （{promoLabel ? `${promoLabel} · ` : ''}特價 {formatDiscountTenthsZh(discountTenths)}）
+          </span>
+        )}
       </span>
     )
   }
@@ -27,8 +46,16 @@ function PriceCell({ listPriceNtd, priceNtd }: { listPriceNtd: number; priceNtd:
 
 /** 金流審核用：僅展示收付資訊，無購買功能 */
 export default function MembershipPaymentDisclosureScreen({ onBack }: Props) {
-  const malePrice = membershipMonthlyPriceNtd('male')
-  const femalePrice = membershipMonthlyPriceNtd('female')
+  const [pricing, setPricing] = useState<PublicPaymentPricing | null>(null)
+
+  useEffect(() => {
+    void fetchPublicPaymentPricing().then(setPricing)
+  }, [])
+
+  const promoLabel = pricing?.promo?.label ?? null
+  const promoDiscountTenths = pricing?.promo?.discountTenths ?? null
+  const malePrice = pricing?.membership.male.priceNtd ?? MEMBERSHIP_LIST_PRICE_NTD.male
+  const femalePrice = pricing?.membership.female.priceNtd ?? MEMBERSHIP_LIST_PRICE_NTD.female
 
   return (
     <div className="min-h-dvh flex flex-col bg-[#fafafa]">
@@ -53,9 +80,9 @@ export default function MembershipPaymentDisclosureScreen({ onBack }: Props) {
             以下為 tsMedia 網站對外揭露之收費項目，供查核參考。本頁僅供資訊展示，無法在此完成付款。
           </p>
 
-          {PAYMENT_TEST_MODE && (
+          {pricing?.promo && (
             <p className="rounded-xl bg-fuchsia-50 px-4 py-3 text-xs font-semibold leading-relaxed text-fuchsia-800 ring-1 ring-fuchsia-100">
-              目前為測試階段：實際結帳金額為原價 2 折；括號內刪除線為正式定價。
+              目前特價：{pricing.promo.label} · 全站 {formatDiscountTenthsZh(pricing.promo.discountTenths)}；刪除線為原價。
             </p>
           )}
 
@@ -74,14 +101,24 @@ export default function MembershipPaymentDisclosureScreen({ onBack }: Props) {
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
                 <dt className="font-semibold text-slate-700">男性會員</dt>
                 <dd className="text-right font-black text-slate-900">
-                  <PriceCell listPriceNtd={MEMBERSHIP_LIST_PRICE_NTD.male} priceNtd={malePrice} />
+                  <PriceCell
+                    listPriceNtd={MEMBERSHIP_LIST_PRICE_NTD.male}
+                    priceNtd={malePrice}
+                    promoLabel={promoLabel}
+                    discountTenths={promoDiscountTenths}
+                  />
                   ／30 天
                 </dd>
               </div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
                 <dt className="font-semibold text-slate-700">女性會員</dt>
                 <dd className="text-right font-black text-slate-900">
-                  <PriceCell listPriceNtd={MEMBERSHIP_LIST_PRICE_NTD.female} priceNtd={femalePrice} />
+                  <PriceCell
+                    listPriceNtd={MEMBERSHIP_LIST_PRICE_NTD.female}
+                    priceNtd={femalePrice}
+                    promoLabel={promoLabel}
+                    discountTenths={promoDiscountTenths}
+                  />
                   ／30 天
                 </dd>
               </div>
@@ -105,23 +142,35 @@ export default function MembershipPaymentDisclosureScreen({ onBack }: Props) {
           <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/80">
             <h2 className="text-base font-black text-slate-900">加購道具</h2>
             <dl className="mt-4 space-y-3 text-sm">
-              {CREDIT_PACK_PRODUCTS.map((pack) => (
-                <div
-                  key={pack.key}
-                  className="flex justify-between gap-4 border-b border-slate-100 pb-3 last:border-0 last:pb-0"
-                >
-                  <dt className="font-semibold text-slate-700">{pack.title}</dt>
-                  <dd className="text-right font-black text-slate-900">
-                    <PriceCell listPriceNtd={pack.listPriceNtd} priceNtd={pack.priceNtd} />
-                  </dd>
-                </div>
-              ))}
+              {CREDIT_PACK_PRODUCTS.map((pack) => {
+                const packPricing = pricing?.packs[pack.key]
+                const listPriceNtd = packPricing?.listPriceNtd ?? pack.listPriceNtd
+                const priceNtd = packPricing?.priceNtd ?? pack.listPriceNtd
+                return (
+                  <div
+                    key={pack.key}
+                    className="flex justify-between gap-4 border-b border-slate-100 pb-3 last:border-0 last:pb-0"
+                  >
+                    <dt className="font-semibold text-slate-700">{pack.title}</dt>
+                    <dd className="text-right font-black text-slate-900">
+                      <PriceCell
+                        listPriceNtd={listPriceNtd}
+                        priceNtd={priceNtd}
+                        promoLabel={promoLabel}
+                        discountTenths={promoDiscountTenths}
+                      />
+                    </dd>
+                  </div>
+                )
+              })}
               <div className="flex justify-between gap-4 border-t border-slate-100 pt-3">
                 <dt className="font-semibold text-slate-700">{CROWN_EFFECT_PRODUCT.title}</dt>
                 <dd className="text-right font-black text-slate-900">
                   <PriceCell
-                    listPriceNtd={CROWN_EFFECT_PRODUCT.listPriceNtd}
-                    priceNtd={CROWN_EFFECT_PRODUCT.priceNtd}
+                    listPriceNtd={pricing?.packs.crown_effect?.listPriceNtd ?? CROWN_EFFECT_PRODUCT.listPriceNtd}
+                    priceNtd={pricing?.packs.crown_effect?.priceNtd ?? CROWN_EFFECT_PRODUCT.listPriceNtd}
+                    promoLabel={promoLabel}
+                    discountTenths={promoDiscountTenths}
                   />
                 </dd>
               </div>

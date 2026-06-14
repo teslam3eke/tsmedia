@@ -5,6 +5,10 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
+import {
+  fetchPublicPaymentPricing,
+  membershipAmountFromPricing,
+} from './_utils/pricingResolver.js'
 
 type Cardholder = {
   phone_number: string
@@ -75,6 +79,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const admin = createClient(url, serviceKey)
 
+  let pricing
+  try {
+    pricing = await fetchPublicPaymentPricing(admin)
+  } catch (e) {
+    console.error('[tappay-membership] pricing', e)
+    return res.status(500).json({ ok: false, error: '無法取得商品價格，請稍後再試。' })
+  }
+
   const { data: profile, error: profileErr } = await admin
     .from('profiles')
     .select('gender')
@@ -85,12 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
   }
 
-  const amount =
-    profile.gender === 'male' ? 399 : profile.gender === 'female' ? 299 : null
-
-  if (amount == null) {
-    return res.status(400).json({ ok: false, error: '無法決定方案價格。' })
-  }
+  const amount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
 
   const payUrl = sandbox
     ? 'https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime'

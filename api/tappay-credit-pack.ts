@@ -11,13 +11,7 @@ import {
 } from './_utils/tappayPayByPrime'
 
 import { CREDIT_PACKS } from './_utils/paymentProducts.js'
-
-const PACKS: Record<string, { amount: number; details: string }> = {
-  heart_5: { amount: CREDIT_PACKS.heart_5.amount, details: CREDIT_PACKS.heart_5.details },
-  super_like_5: { amount: CREDIT_PACKS.super_like_5.amount, details: CREDIT_PACKS.super_like_5.details },
-  blur_unlock_16: { amount: CREDIT_PACKS.blur_unlock_16.amount, details: CREDIT_PACKS.blur_unlock_16.details },
-  crown_effect: { amount: CREDIT_PACKS.crown_effect.amount, details: CREDIT_PACKS.crown_effect.details },
-}
+import { fetchPublicPaymentPricing, packAmountFromPricing } from './_utils/pricingResolver.js'
 
 type Body = {
   packKey?: string
@@ -51,8 +45,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) as Body
   const packKey = body.packKey?.trim() ?? ''
-  const pack = PACKS[packKey]
-  if (!pack) {
+  const packMeta = CREDIT_PACKS[packKey as keyof typeof CREDIT_PACKS]
+  if (!packMeta) {
     return res.status(400).json({ ok: false, error: '無效的商品。' })
   }
 
@@ -78,11 +72,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, error: '請填寫持卡人姓名、電話與 Email。' })
   }
 
+  const admin = createClient(cfg.url, cfg.serviceKey)
+
+  let pricing
+  try {
+    pricing = await fetchPublicPaymentPricing(admin)
+  } catch (e) {
+    console.error('[tappay-credit-pack] pricing', e)
+    return res.status(500).json({ ok: false, error: '無法取得商品價格，請稍後再試。' })
+  }
+
+  const amount = packAmountFromPricing(pricing, packKey)
+  if (amount == null) {
+    return res.status(400).json({ ok: false, error: '無效的商品。' })
+  }
+
   const pay = await tappayPayByPrime({
     prime,
     cardholder: ch,
-    amount: pack.amount,
-    details: pack.details,
+    amount,
+    details: packMeta.details,
     sandbox: cfg.sandbox,
     partnerKey: cfg.partnerKey,
     merchantId: cfg.merchantId,
@@ -93,7 +102,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, error: pay.error })
   }
 
-  const admin = createClient(cfg.url, cfg.serviceKey)
   const { data: grantData, error: grantErr } = await admin.rpc('grant_credit_pack_for_user', {
     p_user_id: auth.userId,
     p_pack_key: packKey,
@@ -111,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     user_id: auth.userId,
     pack_key: packKey,
     provider: 'tappay',
-    amount_ntd: pack.amount,
+    amount_ntd: amount,
     rec_trade_id: pay.recTradeId ?? null,
     gateway_status: pay.gatewayStatus,
   })
