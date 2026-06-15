@@ -497,6 +497,44 @@ export async function getTodayVerificationSubmissionCount(userId: string): Promi
   return count ?? 0
 }
 
+/** 職業認證送審次數（當地日曆日 00:00 起算） */
+export async function getTodayEmploymentVerificationSubmissionCount(userId: string): Promise<number> {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+
+  const { count, error } = await supabase
+    .from('verification_docs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('verification_kind', 'employment')
+    .gte('submitted_at', start.toISOString())
+
+  if (error) {
+    console.error('[db] getTodayEmploymentVerificationSubmissionCount error:', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+/** 收入認證送審次數（當地日曆日 00:00 起算） */
+export async function getTodayIncomeVerificationSubmissionCount(userId: string): Promise<number> {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+
+  const { count, error } = await supabase
+    .from('verification_docs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('verification_kind', 'income')
+    .gte('submitted_at', start.toISOString())
+
+  if (error) {
+    console.error('[db] getTodayIncomeVerificationSubmissionCount error:', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
 let finalizeDueAiReviewsInFlight: Promise<{ ok: boolean; error?: string }> | null = null
 
 export async function finalizeDueAiReviews(): Promise<{ ok: boolean; error?: string }> {

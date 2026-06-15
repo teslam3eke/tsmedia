@@ -13,7 +13,7 @@
  * - PUSH_WEBHOOK_SECRET（隨機字串）
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { sendWebPushMessageToUser, sendWebPushToUser } from './_utils/pushSend.js'
+import { sendWebPushMessageToUser, sendWebPushToUser, sendWebPushVerificationApprovedToUser } from './_utils/pushSend.js'
 
 const PUSH_OPTIONS_HIGH = { TTL: 86_400, urgency: 'high' as const }
 
@@ -96,6 +96,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
         refMatchId: typeof record.ref_match_id === 'string' ? record.ref_match_id : undefined,
       })
+    } else if (record.kind === 'verification_approved') {
+      result = await sendWebPushVerificationApprovedToUser(
+        record.user_id,
+        {
+          title: record.title,
+          body: record.body ?? '',
+          tag,
+          url,
+          kind: record.kind,
+          notifId: record.id,
+        },
+      )
     } else {
       result = await sendWebPushToUser(
         record.user_id,

@@ -14,6 +14,7 @@ import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
 import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
+import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -162,15 +163,21 @@ export default function App() {
   const [paymentReturnRecoveryExhausted, setPaymentReturnRecoveryExhausted] = useState(false)
   const routeSignedInUserFlightRef = useRef<Promise<void> | null>(null)
 
+  /** 登入後心跳：認證通過推播略過前景 PWA（見 migration 117） */
+  useAppPresenceHeartbeat(user?.id)
+
   const getActiveUser = async () => {
     if (user) return user
     const { data } = await supabase.auth.getUser()
     return data.user ?? null
   }
 
-  /** 男性須職業驗證 approved 才可進入主畫面（pending／submitted／rejected 皆不可）。 */
+  /** 男性須生活照齊全且職業驗證 approved 才可進探索；submitted／rejected／pending 皆須留 onboarding。 */
   const maleNeedsIdentityVerify = (profile: import('@/lib/types').ProfileRow | null) =>
-    Boolean(profile?.gender === 'male' && profile.verification_status !== 'approved')
+    Boolean(
+      profile?.gender === 'male'
+      && (!profileHasMinPhotos(profile) || profile.verification_status !== 'approved'),
+    )
 
   const profileHasMinPhotos = (profile: import('@/lib/types').ProfileRow | null) =>
     (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN

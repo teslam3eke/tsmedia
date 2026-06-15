@@ -8,8 +8,10 @@ import {
 import { cn } from '@/lib/utils'
 import {
   uploadProofDoc, submitVerificationDoc,
-  submitIncomeVerification, upsertProfile, getTodayVerificationSubmissionCount,
-  getProfile, getIncomeVerification, finalizeDueAiReviews, resolvePhotoUrls,
+  submitIncomeVerification, upsertProfile,
+  getTodayEmploymentVerificationSubmissionCount,
+  getTodayIncomeVerificationSubmissionCount,
+  getProfile, finalizeDueAiReviews, resolvePhotoUrls,
   type AiResult,
 } from '@/lib/db'
 import { parseCompany, resolveEmploymentCompany, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
@@ -50,6 +52,7 @@ interface ProofItem {
 }
 
 const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（選填）']
+const VERIFICATION_DAILY_SUBMIT_LIMIT = 5
 /** 女生 onboarding 僅生活照；收入／薪資認證改由站內「編輯個人資訊」處理 */
 const STEPS_FEMALE = ['生活照上傳']
 
@@ -153,9 +156,11 @@ export default function IdentityVerifyScreen({
   const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: Company | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
 
   const [incomeApprovalWait, setIncomeApprovalWait] = useState(false)
-  const [incomeApprovalWaitMessage, setIncomeApprovalWaitMessage] = useState('等待收入認證審核…')
+  const [incomeApprovalWaitMessage, setIncomeApprovalWaitMessage] = useState('正在處理收入認證…')
+  const [employmentDailyCount, setEmploymentDailyCount] = useState<number | null>(null)
+  const [incomeDailyCount, setIncomeDailyCount] = useState<number | null>(null)
 
-  /** 男性：非 approved 時阻擋進主殼；submitted 顯示審核中並輪詢 finalize */
+  /** 男性職業驗證狀態（須 approved 才可進探索） */
   const [maleVerifyGate, setMaleVerifyGate] = useState<VerificationStatus | 'loading' | null>(
     gender === 'male' && userId ? 'loading' : null,
   )
@@ -211,21 +216,10 @@ export default function IdentityVerifyScreen({
           }
         } else if (st === 'submitted' && storedPaths.length >= PROFILE_PHOTO_MIN) {
           employmentSubmittedRef.current = true
+          setStep(2)
+        } else if (st === 'rejected' && storedPaths.length >= PROFILE_PHOTO_MIN) {
+          employmentSubmittedRef.current = false
           setStep(1)
-          setEmploymentManualWait(true)
-          setEmploymentWaitMessage('職業驗證審核中')
-          void (async () => {
-            const result = await waitForEmploymentApproval((msg) => setEmploymentWaitMessage(msg))
-            if (result.ok) {
-              setEmploymentManualWait(false)
-              setStep(2)
-            } else if (result.error) {
-              setEmploymentManualWait(false)
-              setMaleVerifyGate('rejected')
-              setAiStatus('fail')
-              setAiMessage(result.error)
-            }
-          })()
         }
       } else {
         setMaleVerifyGate(null)
@@ -275,37 +269,29 @@ export default function IdentityVerifyScreen({
     return () => { cancelled = true }
   }, [userId, gender])
 
-  /** 重新進入（step 0）且仍 submitted：輪詢直到 approved 再進主殼 */
   useEffect(() => {
-    if (gender !== 'male' || !userId || maleVerifyGate !== 'submitted') return
-    if (step !== 0 || employmentManualWait) return
+    if (gender !== 'male' || !userId || step !== 1) return
     let cancelled = false
-    const tick = async () => {
-      await finalizeDueAiReviews()
-      const p = await getProfile(userId)
-      if (cancelled) return
-      const st = p?.verification_status ?? 'submitted'
-      if (st === 'approved') {
-        employmentSubmittedRef.current = true
-        setMaleVerifyGate('approved')
-        onCompleteRef.current()
-        return
-      }
-      if (st === 'rejected') setMaleVerifyGate('rejected')
-    }
-    void tick()
-    const iv = window.setInterval(() => void tick(), 4000)
-    return () => {
-      cancelled = true
-      window.clearInterval(iv)
-    }
-  }, [gender, userId, maleVerifyGate, step, employmentManualWait])
+    void getTodayEmploymentVerificationSubmissionCount(userId).then((count) => {
+      if (!cancelled) setEmploymentDailyCount(count)
+    })
+    return () => { cancelled = true }
+  }, [gender, userId, step, proofs.length])
+
+  useEffect(() => {
+    if (gender !== 'male' || !userId || step !== 2) return
+    let cancelled = false
+    void getTodayIncomeVerificationSubmissionCount(userId).then((count) => {
+      if (!cancelled) setIncomeDailyCount(count)
+    })
+    return () => { cancelled = true }
+  }, [gender, userId, step, incomeDoc])
 
   const waitForEmploymentApproval = async (
     setPhase?: (msg: string) => void,
   ): Promise<{ ok: boolean; error?: string }> => {
     if (!userId) return { ok: false, error: '請先登入。' }
-    setPhase?.('等待審核通過…')
+    setPhase?.('等待職業驗證通過…')
     while (true) {
       await finalizeDueAiReviews()
       const p = await getProfile(userId)
@@ -315,23 +301,8 @@ export default function IdentityVerifyScreen({
       }
       if (p?.verification_status === 'rejected') {
         employmentSubmittedRef.current = false
+        setMaleVerifyGate('rejected')
         return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
-      }
-      await new Promise((r) => setTimeout(r, 800))
-    }
-  }
-
-  const waitForIncomeApproval = async (
-    setPhase?: (msg: string) => void,
-  ): Promise<{ ok: boolean; error?: string }> => {
-    if (!userId) return { ok: false, error: '請先登入。' }
-    setPhase?.('等待收入認證通過…')
-    while (true) {
-      await finalizeDueAiReviews()
-      const row = await getIncomeVerification(userId)
-      if (row?.status === 'approved') return { ok: true }
-      if (row?.status === 'rejected') {
-        return { ok: false, error: '收入認證未通過，請重新上傳文件。' }
       }
       await new Promise((r) => setTimeout(r, 800))
     }
@@ -594,12 +565,24 @@ export default function IdentityVerifyScreen({
   const canAdvance  = (() => {
     const label = steps[step]
     if (label === '生活照上傳')     return photosReady
-    if (label === '職業驗證文件')   return jobReady
-    if (label === '收入認證（選填）') return incomeReady
+    if (label === '職業驗證文件') {
+      if (employmentSubmittedRef.current) return true
+      const underDailyLimit = employmentDailyCount === null
+        || employmentDailyCount < VERIFICATION_DAILY_SUBMIT_LIMIT
+      return jobReady && underDailyLimit
+    }
+    if (label === '收入認證（選填）') {
+      if (!incomeReady) return false
+      if (selectedTier && incomeDoc) {
+        return incomeDailyCount === null
+          || incomeDailyCount < VERIFICATION_DAILY_SUBMIT_LIMIT
+      }
+      return true
+    }
     return false
   })()
 
-  /** 上傳並送審職業文件；輪詢直到 approved 或 rejected */
+  /** 上傳並送審職業文件；送審成功即可進入收入步驟，不等待審核結果 */
   const submitEmploymentProof = async (
     setPhase?: (msg: string) => void,
   ): Promise<{ ok: boolean; error?: string }> => {
@@ -612,16 +595,16 @@ export default function IdentityVerifyScreen({
         return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
       }
       if (p?.verification_status === 'submitted') {
-        return waitForEmploymentApproval(setPhase)
+        return { ok: true }
       }
     }
     if (proofs.length === 0 || !proofs[0].file) {
       return { ok: false, error: '請上傳驗證文件。' }
     }
 
-    const submissionCount = await getTodayVerificationSubmissionCount(userId)
-    if (submissionCount >= 20) {
-      return { ok: false, error: '今天已達送審上限 20 次，請明天再試。' }
+    const submissionCount = await getTodayEmploymentVerificationSubmissionCount(userId)
+    if (submissionCount >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
+      return { ok: false, error: `今天職業認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，請明天再試。` }
     }
 
     const proofFile = proofs[0].file
@@ -690,7 +673,8 @@ export default function IdentityVerifyScreen({
 
     employmentSubmittedRef.current = true
     setMaleVerifyGate('submitted')
-    return waitForEmploymentApproval(setPhase)
+    void getTodayEmploymentVerificationSubmissionCount(userId).then(setEmploymentDailyCount)
+    return { ok: true }
   }
 
   const advanceFromEmploymentStep = async () => {
@@ -735,79 +719,92 @@ export default function IdentityVerifyScreen({
         return
       }
 
-      // 職業應已在步驟 2 完成；若尚未 approved 則擋下
-      if (gender === 'male') {
-        const p = await getProfile(userId)
-        if (p?.verification_status !== 'approved') {
+      // 選填：收入認證（送審後不等待審核；通過與否不影響進探索）
+      if (selectedTier && incomeDoc) {
+        const incomeSubmissions = await getTodayIncomeVerificationSubmissionCount(userId)
+        if (incomeSubmissions >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
           setAiStatus('fail')
-          setAiMessage('請先完成並通過職業驗證後再繼續。')
-          return
+          setAiMessage(`今天收入認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，已略過，仍可進入探索。`)
+        } else {
+          setIncomeApprovalWait(true)
+          setIncomeApprovalWaitMessage('收入證明處理中…')
+
+          let extraAi: AiResult | undefined
+          let reviewMode: 'ai_auto' | 'manual' = 'manual'
+          let manualReason = `收入文件由人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
+
+          try {
+            if (incomeDoc.file.type.startsWith('image/')) {
+              setIncomeApprovalWaitMessage('AI 正在辨識收入文件…')
+              await fetchIncomeAiOutcome(incomeDoc.file, selectedTier)
+              const boxed = incomeAiOutcomeRef.current
+              if (boxed) {
+                extraAi = boxed.aiResult
+                reviewMode = boxed.reviewMode
+                if (boxed.reviewMode === 'manual') {
+                  manualReason = boxed.manualReason || manualReason
+                }
+              }
+            }
+
+            setIncomeApprovalWaitMessage('正在上傳並送審…')
+            const r = await uploadProofDoc(userId, incomeDoc.file)
+            if (!r.ok) {
+              setAiStatus('fail')
+              setAiMessage(r.error ?? '收入文件上傳失敗，仍可進入探索。')
+            } else {
+              const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
+              const incomeSubmit = await submitIncomeVerification(
+                userId,
+                selectedTier,
+                docType,
+                r.path,
+                extraAi,
+                reviewMode,
+                reviewMode === 'manual'
+                  ? resolveManualReviewReason(extraAi?.reason, manualReason)
+                  : undefined,
+              )
+              if (!incomeSubmit.ok) {
+                setAiStatus('fail')
+                setAiMessage(incomeSubmit.error ?? '收入認證送審失敗，仍可進入探索。')
+              } else {
+                void getTodayIncomeVerificationSubmissionCount(userId).then(setIncomeDailyCount)
+              }
+            }
+          } finally {
+            setIncomeApprovalWait(false)
+          }
         }
       }
 
-      // 選填：收入認證
-      if (selectedTier && incomeDoc) {
-        const submissionCount = await getTodayVerificationSubmissionCount(userId)
-        if (submissionCount >= 20) {
+      // 職業驗證須 approved 才可進探索
+      if (gender === 'male') {
+        let emStatus = (await getProfile(userId))?.verification_status ?? 'pending'
+        if (emStatus === 'pending') {
           setAiStatus('fail')
-          setAiMessage('今天已達送審上限 20 次，請明天再試。')
+          setAiMessage('請先完成職業驗證送審。')
+          setStep(1)
           return
         }
-
-        setIncomeApprovalWait(true)
-        setIncomeApprovalWaitMessage('收入證明審核中…')
-
-        let extraAi: AiResult | undefined
-        let reviewMode: 'ai_auto' | 'manual' = 'manual'
-        let manualReason = `收入文件由人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
-
-        if (incomeDoc.file.type.startsWith('image/')) {
-          setIncomeApprovalWaitMessage('AI 正在辨識收入文件…')
-          await fetchIncomeAiOutcome(incomeDoc.file, selectedTier)
-          const boxed = incomeAiOutcomeRef.current
-          if (boxed) {
-            extraAi = boxed.aiResult
-            reviewMode = boxed.reviewMode
-            if (boxed.reviewMode === 'manual') {
-              manualReason = boxed.manualReason || manualReason
-            }
+        if (emStatus === 'rejected') {
+          employmentSubmittedRef.current = false
+          setAiStatus('fail')
+          setAiMessage('職業驗證未通過，請重新上傳文件。')
+          setStep(1)
+          return
+        }
+        if (emStatus === 'submitted') {
+          setEmploymentManualWait(true)
+          setEmploymentWaitMessage('等待職業驗證通過…')
+          const emResult = await waitForEmploymentApproval((msg) => setEmploymentWaitMessage(msg))
+          setEmploymentManualWait(false)
+          if (!emResult.ok) {
+            setAiStatus('fail')
+            setAiMessage(emResult.error ?? '職業驗證未通過，請重新上傳文件。')
+            setStep(1)
+            return
           }
-        }
-
-        setIncomeApprovalWaitMessage('正在上傳並送審…')
-        const r = await uploadProofDoc(userId, incomeDoc.file)
-        if (!r.ok) {
-          setIncomeApprovalWait(false)
-          setAiStatus('fail')
-          setAiMessage(r.error ?? '收入文件上傳失敗，請再試一次。')
-          return
-        }
-        const docType: DocType = incomeDoc.type === 'application/pdf' ? 'tax_return' : 'other'
-        const incomeSubmit = await submitIncomeVerification(
-          userId,
-          selectedTier,
-          docType,
-          r.path,
-          extraAi,
-          reviewMode,
-          reviewMode === 'manual'
-            ? resolveManualReviewReason(extraAi?.reason, manualReason)
-            : undefined,
-        )
-        if (!incomeSubmit.ok) {
-          setIncomeApprovalWait(false)
-          setAiStatus('fail')
-          setAiMessage(incomeSubmit.error ?? '收入認證送審失敗，請稍後再試。')
-          return
-        }
-
-        setIncomeApprovalWaitMessage('等待收入認證審核…')
-        const incomeApproved = await waitForIncomeApproval((msg) => setIncomeApprovalWaitMessage(msg))
-        setIncomeApprovalWait(false)
-        if (!incomeApproved.ok) {
-          setAiStatus('fail')
-          setAiMessage(incomeApproved.error ?? '收入認證未通過，請重新上傳。')
-          return
         }
       }
 
@@ -830,29 +827,6 @@ export default function IdentityVerifyScreen({
           <Cpu className="w-8 h-8 text-slate-400" />
         </motion.div>
         <p className="text-sm text-slate-500">載入驗證狀態…</p>
-      </div>
-    )
-  }
-
-  if (gender === 'male' && maleVerifyGate === 'submitted' && step === 0 && !employmentManualWait) {
-    return (
-      <div className="max-w-md mx-auto min-h-[100dvh] bg-[#fafafa] flex flex-col px-6 pt-safe pb-safe">
-        <div className="flex-1 flex flex-col items-center justify-center text-center">
-          <ShieldCheck className="w-12 h-12 text-amber-500 mb-4" />
-          <h1 className="text-xl font-bold text-slate-900 mb-2">職業驗證審核中</h1>
-          <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-            已收到你的證明文件。通過審核後即可使用探索、聊天等功能；若需人工複核，可能需要超過 12 小時。
-          </p>
-          <p className="text-xs text-slate-400 mt-4 max-w-[280px] leading-relaxed">
-            審核期間你仍可修改個人資料或問卷，或先登出稍後再回來。
-          </p>
-        </div>
-        <VerifyWaitActions
-          onEditProfile={onEditProfile}
-          onEditQuestionnaire={onEditQuestionnaire}
-          onSignOut={onSignOut}
-          className="mx-auto pb-2"
-        />
       </div>
     )
   }
@@ -918,7 +892,7 @@ export default function IdentityVerifyScreen({
                   <h2 className="text-xl font-bold text-slate-900">身份驗證文件</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  請上傳任職證明文件，AI 會自動辨識並完成公司驗證。
+                  請上傳任職證明文件，AI 會自動辨識。送審後可先填寫收入認證；<span className="font-semibold text-slate-600">職業驗證通過後</span>才可進入探索。
                 </p>
                 <p className="text-sm text-slate-500 leading-relaxed mt-2">
                   <span className="font-bold text-slate-800">您必須符合指定的頂尖企業</span>
@@ -933,7 +907,7 @@ export default function IdentityVerifyScreen({
                   <h2 className="text-xl font-bold text-slate-900">收入認證</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  選擇對應的收入等級並上傳證明文件，通過審核後可啟用照片皇冠特效。此步驟為選填。
+                  選填。通過與否不影響進入探索；每日最多送審 {VERIFICATION_DAILY_SUBMIT_LIMIT} 次。
                 </p>
               </>
             )}
@@ -1038,6 +1012,13 @@ export default function IdentityVerifyScreen({
                   <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
                     上傳扣繳憑單或薪資單時請選對類型；AI 會以中文姓名比對，避免誤讀英文拼音。
                   </p>
+                  {employmentDailyCount !== null && (
+                    <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                      今日尚可送審{' '}
+                      {Math.max(0, VERIFICATION_DAILY_SUBMIT_LIMIT - employmentDailyCount)} 次
+                      （每日最多 {VERIFICATION_DAILY_SUBMIT_LIMIT} 次）
+                    </p>
+                  )}
                 </div>
 
                 {/* Upload area */}
@@ -1063,7 +1044,7 @@ export default function IdentityVerifyScreen({
                       <p className="text-sm font-semibold text-slate-700">
                         上傳職業驗證文件
                       </p>
-                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · 送出後會等待審核完成</p>
+                      <p className="text-xs text-slate-400 mt-1">JPG / PNG / PDF · 送審後可繼續下一步</p>
                     </div>
                   </button>
                 ) : (
@@ -1201,6 +1182,13 @@ export default function IdentityVerifyScreen({
                 {/* Document upload only after a tier is picked */}
                 {selectedTier && (
                   <>
+                    {incomeDailyCount !== null && (
+                      <p className="text-[11px] text-slate-500 px-1 leading-relaxed">
+                        今日尚可送審{' '}
+                        {Math.max(0, VERIFICATION_DAILY_SUBMIT_LIMIT - incomeDailyCount)} 次
+                        （每日最多 {VERIFICATION_DAILY_SUBMIT_LIMIT} 次）
+                      </p>
+                    )}
                     <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100">
                       <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">
                         接受的收入證明（任選一種）
@@ -1334,9 +1322,7 @@ export default function IdentityVerifyScreen({
             </>
           ) : (
             <>
-              {isLastStep
-                ? (stepLabel === '收入認證（選填）' && !selectedTier ? '完成（略過收入認證）' : '提交審核申請')
-                : '繼續'}
+              {isLastStep ? '完成並進入探索' : '繼續'}
               <ChevronRight className="w-5 h-5" />
             </>
           )}
@@ -1356,7 +1342,9 @@ export default function IdentityVerifyScreen({
               </motion.div>
               <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
               <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-                審核完成後會自動進入下一步；若需人工複核，可能需要超過 12 小時。
+                {employmentWaitMessage.startsWith('等待職業驗證')
+                  ? '通過後會自動進入探索；若需人工複核，可能需要超過 12 小時。'
+                  : '送審完成後會自動進入下一步；職業驗證通過後才可進入探索。'}
               </p>
             </div>
             <VerifyWaitActions
@@ -1382,7 +1370,7 @@ export default function IdentityVerifyScreen({
               </motion.div>
               <p className="text-lg font-bold text-slate-900 mb-2">{incomeApprovalWaitMessage}</p>
               <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-                收入認證通過後會自動完成註冊；若需人工複核，可能需要超過 12 小時。
+                處理完成後繼續；收入審核結果不影響進入探索。
               </p>
             </div>
             <VerifyWaitActions
