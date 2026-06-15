@@ -22,7 +22,6 @@ import {
 } from '@/lib/verificationAiUtils'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type IncomeTier, type VerificationStatus } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
-import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
 import {
   loadOnboardingJsonDraft,
@@ -153,8 +152,8 @@ export default function IdentityVerifyScreen({
   const [aiMessage,    setAiMessage]    = useState('')
   const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: Company | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
 
-  type IncomeRunningHold = { phase: 'running'; countdown: number }
-  const [incomeHold, setIncomeHold] = useState<IncomeRunningHold | null>(null)
+  const [incomeApprovalWait, setIncomeApprovalWait] = useState(false)
+  const [incomeApprovalWaitMessage, setIncomeApprovalWaitMessage] = useState('等待收入認證審核…')
 
   /** 男性：非 approved 時阻擋進主殼；submitted 顯示審核中並輪詢 finalize */
   const [maleVerifyGate, setMaleVerifyGate] = useState<VerificationStatus | 'loading' | null>(
@@ -164,8 +163,6 @@ export default function IdentityVerifyScreen({
   const [employmentManualWait, setEmploymentManualWait] = useState(false)
   /** employmentManualWait overlay 動態訊息 */
   const [employmentWaitMessage, setEmploymentWaitMessage] = useState('職業驗證審核中')
-  const [incomeApprovalWait, setIncomeApprovalWait] = useState(false)
-  const [incomeApprovalWaitMessage, setIncomeApprovalWaitMessage] = useState('等待收入認證審核…')
 
   /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
   const employmentSubmittedRef = useRef(false)
@@ -353,7 +350,6 @@ export default function IdentityVerifyScreen({
     reviewMode: 'ai_auto' | 'manual'
     manualReason: string
   } | null>(null)
-  const incomeHoldResolveRef = useRef<(() => void) | null>(null)
 
   const proofInputRef  = useRef<HTMLInputElement>(null)
   const incomeInputRef = useRef<HTMLInputElement>(null)
@@ -480,32 +476,6 @@ export default function IdentityVerifyScreen({
       }
     }
   }
-
-  useEffect(() => {
-    if (!incomeHold || incomeHold.phase !== 'running') return
-    if (incomeHold.countdown <= 0) return
-    const t = window.setTimeout(() => {
-      setIncomeHold((h) =>
-        h ? { ...h, countdown: h.countdown - 1 } : h,
-      )
-    }, 1000)
-    return () => window.clearTimeout(t)
-  }, [incomeHold])
-
-  useEffect(() => {
-    if (!incomeHold || incomeHold.phase !== 'running' || incomeHold.countdown !== 0) return
-    let cancelled = false
-    ;(async () => {
-      while (!incomeAiOutcomeRef.current && !cancelled) {
-        await new Promise((r) => setTimeout(r, 80))
-      }
-      if (cancelled) return
-      incomeHoldResolveRef.current?.()
-      incomeHoldResolveRef.current = null
-      setIncomeHold(null)
-    })()
-    return () => { cancelled = true }
-  }, [incomeHold])
 
   useEffect(() => {
     if (!draftProofAiQueuedRef.current) return
@@ -784,22 +754,17 @@ export default function IdentityVerifyScreen({
           return
         }
 
+        setIncomeApprovalWait(true)
+        setIncomeApprovalWaitMessage('收入證明審核中…')
+
         let extraAi: AiResult | undefined
         let reviewMode: 'ai_auto' | 'manual' = 'manual'
         let manualReason = `收入文件由人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
 
         if (incomeDoc.file.type.startsWith('image/')) {
-          incomeAiOutcomeRef.current = null
-          void fetchIncomeAiOutcome(incomeDoc.file, selectedTier)
-          setIncomeHold({ phase: 'running', countdown: AI_AUTO_REVIEW_UI_SECONDS })
-          await new Promise<void>((resolve) => {
-            incomeHoldResolveRef.current = resolve
-          })
-          const boxed = incomeAiOutcomeRef.current as {
-            aiResult: AiResult
-            reviewMode: 'ai_auto' | 'manual'
-            manualReason: string
-          } | null
+          setIncomeApprovalWaitMessage('AI 正在辨識收入文件…')
+          await fetchIncomeAiOutcome(incomeDoc.file, selectedTier)
+          const boxed = incomeAiOutcomeRef.current
           if (boxed) {
             extraAi = boxed.aiResult
             reviewMode = boxed.reviewMode
@@ -809,8 +774,10 @@ export default function IdentityVerifyScreen({
           }
         }
 
+        setIncomeApprovalWaitMessage('正在上傳並送審…')
         const r = await uploadProofDoc(userId, incomeDoc.file)
         if (!r.ok) {
+          setIncomeApprovalWait(false)
           setAiStatus('fail')
           setAiMessage(r.error ?? '收入文件上傳失敗，請再試一次。')
           return
@@ -828,12 +795,12 @@ export default function IdentityVerifyScreen({
             : undefined,
         )
         if (!incomeSubmit.ok) {
+          setIncomeApprovalWait(false)
           setAiStatus('fail')
           setAiMessage(incomeSubmit.error ?? '收入認證送審失敗，請稍後再試。')
           return
         }
 
-        setIncomeApprovalWait(true)
         setIncomeApprovalWaitMessage('等待收入認證審核…')
         const incomeApproved = await waitForIncomeApproval((msg) => setIncomeApprovalWaitMessage(msg))
         setIncomeApprovalWait(false)
@@ -846,6 +813,7 @@ export default function IdentityVerifyScreen({
 
       onCompleteRef.current()
     } catch {
+      setIncomeApprovalWait(false)
       setAiStatus('fail')
       setAiMessage('提交失敗，請檢查網路後再試。')
     } finally {
@@ -951,6 +919,10 @@ export default function IdentityVerifyScreen({
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
                   請上傳任職證明文件，AI 會自動辨識並完成公司驗證。
+                </p>
+                <p className="text-sm text-slate-500 leading-relaxed mt-2">
+                  <span className="font-bold text-slate-800">您必須符合指定的頂尖企業</span>
+                  正式員工，方可通過職業驗證。
                 </p>
               </>
             )}
@@ -1419,21 +1391,6 @@ export default function IdentityVerifyScreen({
               onSignOut={onSignOut}
               className="mx-auto pb-2"
             />
-          </div>,
-          document.body,
-        )
-      : null}
-    {incomeHold
-      ? createPortal(
-          <div className="fixed inset-0 z-[200] bg-[#fafafa]/95 backdrop-blur-sm flex flex-col items-center justify-center px-6 pt-safe pb-safe">
-            <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }} className="mb-5">
-              <Cpu className="w-10 h-10 text-slate-400" />
-            </motion.div>
-            <p className="text-lg font-bold text-slate-900 mb-2">收入證明 AI 審核</p>
-            <p className="text-5xl font-black text-slate-900 tabular-nums mb-3">{incomeHold.countdown}</p>
-            <p className="text-sm text-slate-500 text-center leading-relaxed max-w-[280px]">
-              送出後即開始辨識；倒數結束後會繼續上傳並送出審核。
-            </p>
           </div>,
           document.body,
         )

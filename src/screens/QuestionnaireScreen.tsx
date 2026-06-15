@@ -249,14 +249,14 @@ export default function QuestionnaireScreen({
 
             {/* Navigation hint */}
             {!isLast && (
-              <p className="text-xs text-slate-400 text-center px-4 leading-relaxed">
-                你的回答將用於 AI 契合度分析，請如實填寫。
+              <p className="text-xs text-slate-500 text-center px-4 leading-relaxed">
+                您的回答將會影響異性對您的第一印象，請展現您的獨特之處，讓對的人看見您。
               </p>
             )}
             {isLast && (
               <div className="bg-slate-50 rounded-2xl p-4 text-center">
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  最後一題！完成後系統將根據你的價值觀進行精準配對分析。
+                  最後一題！您的回答將會影響異性對您的第一印象，請展現您的獨特之處，讓對的人看見您。
                 </p>
               </div>
             )}
