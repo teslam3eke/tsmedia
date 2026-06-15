@@ -21,6 +21,7 @@ import {
   resolveManualReviewReason,
   verifyIdReasonFromBody,
   VERIFICATION_MANUAL_REVIEW_TAIL,
+  VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
 } from '@/lib/verificationAiUtils'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type IncomeTier, type VerificationStatus } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
@@ -629,12 +630,12 @@ export default function IdentityVerifyScreen({
           setAiMessage(o.message)
         } else {
           setAiStatus('fail')
-          setAiMessage(`${o.message}。已轉人工審核，人工審核時間可能大於 12 小時。`)
+          setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
         }
       }
     } else {
       setAiStatus('ok')
-      setAiMessage('PDF 文件將由人工審核確認')
+      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
       aiForSubmit = null
     }
 
@@ -1121,7 +1122,7 @@ export default function IdentityVerifyScreen({
                 <div className="flex items-start gap-2 px-1">
                   <AlertCircle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    僅限頂尖企業正式員工。文件不符資格將不予通過；審核約 1–3 個工作天。
+                    僅限頂尖企業正式員工。文件不符資格將不予通過。
                   </p>
                 </div>
               </>

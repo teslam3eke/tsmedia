@@ -2,11 +2,13 @@ import { sanitizeVerificationUserMessage } from './companyDisplay'
 
 export const VERIFICATION_MANUAL_REVIEW_TAIL = '人工審核時間可能大於 12 小時。'
 
-export const VERIFICATION_AI_USER_UNAVAILABLE =
-  `AI 暫時無法完成審核，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
+/** 前端顯示：轉人工審核時不揭露具體原因（後台仍保留 ai_reason／manual_review_reason） */
+export const VERIFICATION_MANUAL_REVIEW_USER_MESSAGE =
+  `已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
 
-export const VERIFICATION_AI_INCOME_USER_UNAVAILABLE =
-  `AI 暫時無法完成收入審核，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`
+export const VERIFICATION_AI_USER_UNAVAILABLE = VERIFICATION_MANUAL_REVIEW_USER_MESSAGE
+
+export const VERIFICATION_AI_INCOME_USER_UNAVAILABLE = VERIFICATION_MANUAL_REVIEW_USER_MESSAGE
 
 export function summarizeVerificationApiError(err: unknown): string {
   if (err instanceof DOMException && err.name === 'AbortError') {

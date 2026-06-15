@@ -24,6 +24,7 @@ import {
   resolveManualReviewReason,
   verifyIdReasonFromBody,
   VERIFICATION_MANUAL_REVIEW_TAIL,
+  VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
 } from '@/lib/verificationAiUtils'
 import { signOut } from '@/lib/auth'
 import {
@@ -4152,7 +4153,6 @@ function EditProfileScreen({
 
   const finishIncomeWaitOverlay = async (
     outcome: 'approved' | 'rejected' | 'pending',
-    manualReasonText?: string,
   ) => {
     setIncomeReviewCountdown(0)
     setIncomeWaitOverlay(false)
@@ -4171,9 +4171,7 @@ function EditProfileScreen({
     } else if (outcome === 'rejected') {
       setIncomeSubmitMsg('收入認證未通過，請重新上傳更清晰的文件。')
     } else {
-      setIncomeSubmitMsg(
-        manualReasonText || `已送審，若 AI 無法確認將轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
-      )
+      setIncomeSubmitMsg(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
     }
   }
 
@@ -4393,7 +4391,7 @@ function EditProfileScreen({
       const outcome = await waitForIncomeOverlayResult()
       await finishIncomeWaitOverlay(outcome)
     } else {
-      await finishIncomeWaitOverlay('pending', manualReason || undefined)
+      await finishIncomeWaitOverlay('pending')
     }
 
     setUploadingIncome(false)
@@ -4961,7 +4959,7 @@ function CompanyVerifyScreen({
         setAiMessage('AI 審核已通過，公司認證完成。')
       } else {
         setAiMessage((prev) =>
-          prev.trim() !== '' ? prev : '若 AI 無法確認將轉人工審核，人工審核時間可能大於 12 小時。',
+          prev.trim() !== '' ? prev : VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
         )
       }
     })()
@@ -5165,7 +5163,7 @@ function CompanyVerifyScreen({
         aiResult.reason,
         `AI 初審未通過，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
       )
-      setAiMessage(manualReason)
+      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
       companyAiFinalizePendingRef.current = false
       setCompanyReviewCountdown(0)
     } else if (selectedDocType === 'employee_id') {
@@ -5173,7 +5171,7 @@ function CompanyVerifyScreen({
     } else {
       reviewMode = 'manual'
       manualReason = `AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。${VERIFICATION_MANUAL_REVIEW_TAIL}`
-      setAiMessage(manualReason)
+      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
       companyAiFinalizePendingRef.current = false
       setCompanyReviewCountdown(0)
     }
@@ -5303,7 +5301,7 @@ function CompanyVerifyScreen({
             <div>
               <p className="text-sm font-bold text-amber-800">審核中</p>
               <p className="text-xs text-amber-600 mt-0.5">
-                文件已送出。{companyReviewCountdown > 0 ? `AI 審核倒數 ${companyReviewCountdown} 秒。` : (aiMessage || `AI 審核時間為 ${AI_AUTO_REVIEW_UI_SECONDS} 秒；若 AI 無法確認，會轉人工審核，人工審核時間可能大於 12 小時。`)}
+                文件已送出。{companyReviewCountdown > 0 ? `AI 審核倒數 ${companyReviewCountdown} 秒。` : (aiMessage || VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)}
               </p>
             </div>
           </div>
