@@ -250,13 +250,18 @@ export default function QuestionnaireScreen({
             {/* Navigation hint */}
             {!isLast && (
               <p className="text-xs text-slate-500 text-center px-4 leading-relaxed">
-                您的回答將會影響異性對您的第一印象，請展現您的獨特之處，讓對的人看見您。
+                <span className="block">初期異性無法直接瀏覽您的照片</span>
+                <span className="block">您的回答將會影響異性對您的第一印象</span>
+                <span className="block">請展現您的獨特之處，讓對的人看見您。</span>
               </p>
             )}
             {isLast && (
               <div className="bg-slate-50 rounded-2xl p-4 text-center">
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  最後一題！您的回答將會影響異性對您的第一印象，請展現您的獨特之處，讓對的人看見您。
+                  <span className="block font-semibold text-slate-600 mb-1">最後一題！</span>
+                  <span className="block">初期異性無法直接瀏覽您的照片</span>
+                  <span className="block">您的回答將會影響異性對您的第一印象</span>
+                  <span className="block">請展現您的獨特之處，讓對的人看見您。</span>
                 </p>
               </div>
             )}
