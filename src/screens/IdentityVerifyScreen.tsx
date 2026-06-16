@@ -11,6 +11,7 @@ import {
   submitIncomeVerification, upsertProfile,
   getTodayEmploymentVerificationSubmissionCount,
   getTodayIncomeVerificationSubmissionCount,
+  getLatestEmploymentVerification,
   getProfile, finalizeDueAiReviews, resolvePhotoUrls,
   type AiResult,
 } from '@/lib/db'
@@ -22,7 +23,9 @@ import {
   verifyIdReasonFromBody,
   VERIFICATION_MANUAL_REVIEW_TAIL,
   VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
+  VERIFICATION_DAILY_SUBMIT_LIMIT,
 } from '@/lib/verificationAiUtils'
+import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type IncomeTier, type VerificationStatus } from '@/lib/types'
 import { IncomeBorder } from '@/components/IncomeBorder'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
@@ -53,7 +56,9 @@ interface ProofItem {
 }
 
 const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（選填）']
-const VERIFICATION_DAILY_SUBMIT_LIMIT = 5
+/** AI 自動審核最長等待（秒）＋緩衝；逾時或已轉人工則改靜態等待頁 */
+const EMPLOYMENT_AI_WAIT_MAX_MS = (AI_AUTO_REVIEW_UI_SECONDS + 15) * 1000
+const EMPLOYMENT_PENDING_POLL_MS = 5_000
 /** 女生 onboarding 僅生活照；收入／薪資認證改由站內「編輯個人資訊」處理 */
 const STEPS_FEMALE = ['生活照上傳']
 
@@ -169,6 +174,8 @@ export default function IdentityVerifyScreen({
   const [employmentManualWait, setEmploymentManualWait] = useState(false)
   /** employmentManualWait overlay 動態訊息 */
   const [employmentWaitMessage, setEmploymentWaitMessage] = useState('職業驗證審核中')
+  /** 人工審核中：靜態等待頁（慢速輪詢，避免無限高頻請求） */
+  const [employmentReviewPendingHold, setEmploymentReviewPendingHold] = useState(false)
 
   /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
   const employmentSubmittedRef = useRef(false)
@@ -218,6 +225,11 @@ export default function IdentityVerifyScreen({
         } else if (st === 'submitted' && storedPaths.length >= PROFILE_PHOTO_MIN) {
           employmentSubmittedRef.current = true
           setStep(2)
+          const empDoc = await getLatestEmploymentVerification(userId)
+          if (cancelled) return
+          if (empDoc?.review_mode === 'manual') {
+            setEmploymentReviewPendingHold(true)
+          }
         } else if (st === 'rejected' && storedPaths.length >= PROFILE_PHOTO_MIN) {
           employmentSubmittedRef.current = false
           setStep(1)
@@ -290,10 +302,11 @@ export default function IdentityVerifyScreen({
 
   const waitForEmploymentApproval = async (
     setPhase?: (msg: string) => void,
-  ): Promise<{ ok: boolean; error?: string }> => {
+  ): Promise<{ ok: boolean; error?: string; pendingManual?: boolean }> => {
     if (!userId) return { ok: false, error: '請先登入。' }
     setPhase?.('等待職業驗證通過…')
-    while (true) {
+    const deadline = Date.now() + EMPLOYMENT_AI_WAIT_MAX_MS
+    while (Date.now() < deadline) {
       await finalizeDueAiReviews()
       const p = await getProfile(userId)
       if (p?.verification_status === 'approved') {
@@ -305,9 +318,45 @@ export default function IdentityVerifyScreen({
         setMaleVerifyGate('rejected')
         return { ok: false, error: '職業驗證未通過，請重新上傳文件。' }
       }
+      const empDoc = await getLatestEmploymentVerification(userId)
+      if (empDoc?.review_mode === 'manual' && empDoc.status === 'pending') {
+        return { ok: false, pendingManual: true }
+      }
       await new Promise((r) => setTimeout(r, 800))
     }
+    return { ok: false, pendingManual: true }
   }
+
+  /** 人工審核靜態等待：通過後自動進探索，拒絕則回職業步驟 */
+  useEffect(() => {
+    if (!employmentReviewPendingHold || !userId || gender !== 'male') return
+    let cancelled = false
+    const tick = async () => {
+      await finalizeDueAiReviews()
+      const p = await getProfile(userId)
+      if (cancelled) return
+      if (p?.verification_status === 'approved') {
+        setMaleVerifyGate('approved')
+        setEmploymentReviewPendingHold(false)
+        onCompleteRef.current()
+        return
+      }
+      if (p?.verification_status === 'rejected') {
+        employmentSubmittedRef.current = false
+        setMaleVerifyGate('rejected')
+        setEmploymentReviewPendingHold(false)
+        setStep(1)
+        setAiStatus('fail')
+        setAiMessage('職業驗證未通過，請重新上傳文件。')
+      }
+    }
+    void tick()
+    const iv = window.setInterval(() => void tick(), EMPLOYMENT_PENDING_POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(iv)
+    }
+  }, [employmentReviewPendingHold, userId, gender])
 
   const employmentAiOutcomeRef = useRef<{
     passed: boolean
@@ -800,7 +849,12 @@ export default function IdentityVerifyScreen({
           setEmploymentWaitMessage('等待職業驗證通過…')
           const emResult = await waitForEmploymentApproval((msg) => setEmploymentWaitMessage(msg))
           setEmploymentManualWait(false)
-          if (!emResult.ok) {
+          if (emResult.ok) {
+            /* 繼續 onComplete */
+          } else if (emResult.pendingManual) {
+            setEmploymentReviewPendingHold(true)
+            return
+          } else {
             setAiStatus('fail')
             setAiMessage(emResult.error ?? '職業驗證未通過，請重新上傳文件。')
             setStep(1)
@@ -828,6 +882,29 @@ export default function IdentityVerifyScreen({
           <Cpu className="w-8 h-8 text-slate-400" />
         </motion.div>
         <p className="text-sm text-slate-500">載入驗證狀態…</p>
+      </div>
+    )
+  }
+
+  if (gender === 'male' && employmentReviewPendingHold) {
+    return (
+      <div className="max-w-md mx-auto min-h-[100dvh] bg-[#fafafa] flex flex-col px-6 pt-safe pb-safe">
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <ShieldCheck className="w-12 h-12 text-amber-500 mb-4" />
+          <h1 className="text-xl font-bold text-slate-900 mb-2">職業驗證審核中</h1>
+          <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
+            已收到你的證明文件。通過審核後即可進入探索；若需人工複核，可能需要超過 12 小時。
+          </p>
+          <p className="text-xs text-slate-400 mt-4 max-w-[280px] leading-relaxed">
+            審核期間你仍可修改個人資料或問卷，或先登出稍後再回來。
+          </p>
+        </div>
+        <VerifyWaitActions
+          onEditProfile={onEditProfile}
+          onEditQuestionnaire={onEditQuestionnaire}
+          onSignOut={onSignOut}
+          className="mx-auto pb-2"
+        />
       </div>
     )
   }

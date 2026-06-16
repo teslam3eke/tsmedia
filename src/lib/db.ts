@@ -2568,3 +2568,21 @@ export async function getIncomeVerification(userId: string) {
   }
   return data
 }
+
+/** 最新一筆職業認證送審（判斷 AI 自動／人工審核） */
+export async function getLatestEmploymentVerification(userId: string) {
+  const { data, error } = await supabase
+    .from('verification_docs')
+    .select('id, status, review_mode, submitted_at')
+    .eq('user_id', userId)
+    .eq('verification_kind', 'employment')
+    .order('submitted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[db] getLatestEmploymentVerification error:', error.message)
+    return null
+  }
+  return data
+}

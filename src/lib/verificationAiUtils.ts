@@ -10,6 +10,9 @@ export const VERIFICATION_AI_USER_UNAVAILABLE = VERIFICATION_MANUAL_REVIEW_USER_
 
 export const VERIFICATION_AI_INCOME_USER_UNAVAILABLE = VERIFICATION_MANUAL_REVIEW_USER_MESSAGE
 
+/** 職業／收入認證各自每日送審上限（onboarding 與站內一致） */
+export const VERIFICATION_DAILY_SUBMIT_LIMIT = 5
+
 export function summarizeVerificationApiError(err: unknown): string {
   if (err instanceof DOMException && err.name === 'AbortError') {
     return '請求逾時'

@@ -25,6 +25,7 @@ import {
   verifyIdReasonFromBody,
   VERIFICATION_MANUAL_REVIEW_TAIL,
   VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
+  VERIFICATION_DAILY_SUBMIT_LIMIT,
 } from '@/lib/verificationAiUtils'
 import { signOut } from '@/lib/auth'
 import {
@@ -45,7 +46,9 @@ import {
   getProfile, resolvePhotoUrls, upsertProfile, getIncomeVerification,
   uploadProofDoc, submitVerificationDoc, submitIncomeVerification,
   getUnreadAppNotifications, markAppNotificationRead,
-  getTodayVerificationSubmissionCount, finalizeDueAiReviews,
+  getTodayEmploymentVerificationSubmissionCount,
+  getTodayIncomeVerificationSubmissionCount,
+  finalizeDueAiReviews,
   recordProfileInteraction, fetchDailyDiscoverDeck, submitProfileReport, blockProfile, endMatch,
   getMyBlockedProfileKeys, submitMessageReport, getCreditBalance, spendBlurUnlockTile,
   loadMatchPuzzleManualTiles,
@@ -4314,9 +4317,9 @@ function EditProfileScreen({
       return
     }
     setUploadingIncome(true)
-    const count = await getTodayVerificationSubmissionCount(userId)
-    if (count >= 20) {
-      setIncomeSubmitMsg('今天已達送審上限 20 次，請明天再試。')
+    const count = await getTodayIncomeVerificationSubmissionCount(userId)
+    if (count >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
+      setIncomeSubmitMsg(`今天收入認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，請明天再試。`)
       setUploadingIncome(false)
       return
     }
@@ -5119,9 +5122,9 @@ function CompanyVerifyScreen({
     setSubmitError('')
     setAiMessage('')
     setSubmitting(true)
-    const count = await getTodayVerificationSubmissionCount(userId)
-    if (count >= 20) {
-      setSubmitError('今天已達送審上限 20 次，請明天再試。')
+    const count = await getTodayEmploymentVerificationSubmissionCount(userId)
+    if (count >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
+      setSubmitError(`今天職業認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，請明天再試。`)
       setSubmitting(false)
       return
     }
