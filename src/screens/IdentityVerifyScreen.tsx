@@ -21,6 +21,7 @@ import {
   parseVerifyIdResponse,
   resolveManualReviewReason,
   verifyIdReasonFromBody,
+  VERIFICATION_AI_PREFLIGHT_FAIL_USER_MESSAGE,
   VERIFICATION_MANUAL_REVIEW_TAIL,
   VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
   VERIFICATION_DAILY_SUBMIT_LIMIT,
@@ -501,12 +502,6 @@ export default function IdentityVerifyScreen({
   useEffect(() => {
     if (!draftProofAiQueuedRef.current) return
     draftProofAiQueuedRef.current = false
-    const file = proofs[0]?.file
-    if (!file?.type.startsWith('image/')) return
-    void fetchEmploymentAiOutcome(
-      file,
-      employmentDocType || (file.type === 'application/pdf' ? 'tax_return' : undefined),
-    )
   }, [proofs, employmentDocType])
 
   useEffect(() => {
@@ -590,10 +585,6 @@ export default function IdentityVerifyScreen({
     setAiMessage('')
     setAiResultData(null)
     employmentAiOutcomeRef.current = null
-    const file = newProofs[0]?.file
-    if (file?.type.startsWith('image/')) {
-      void fetchEmploymentAiOutcome(file, employmentDocType)
-    }
   }
 
   const removeProof = () => {
@@ -652,19 +643,19 @@ export default function IdentityVerifyScreen({
       return { ok: false, error: '請上傳驗證文件。' }
     }
 
-    const submissionCount = await getTodayEmploymentVerificationSubmissionCount(userId)
-    if (submissionCount >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
+    const attemptBefore = await getTodayEmploymentVerificationSubmissionCount(userId)
+    if (attemptBefore >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
       return { ok: false, error: `今天職業認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，請明天再試。` }
     }
+    const isLastAttempt = attemptBefore + 1 >= VERIFICATION_DAILY_SUBMIT_LIMIT
 
     const proofFile = proofs[0].file
-    let aiForSubmit = aiResultData
+    let aiForSubmit: AiResult | null = null
 
     if (proofFile.type.startsWith('image/')) {
       setPhase?.('AI 審核中…')
-      if (!employmentAiOutcomeRef.current) {
-        await fetchEmploymentAiOutcome(proofFile)
-      }
+      employmentAiOutcomeRef.current = null
+      await fetchEmploymentAiOutcome(proofFile, employmentDocType || undefined)
       const o = employmentAiOutcomeRef.current
       if (o) {
         aiForSubmit = {
@@ -674,30 +665,12 @@ export default function IdentityVerifyScreen({
           reason: o.reason,
         }
         setAiResultData(aiForSubmit)
-        if (o.passed) {
-          setAiStatus('ok')
-          setAiMessage(o.message)
-        } else {
-          setAiStatus('fail')
-          setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
-        }
       }
-    } else {
-      setAiStatus('ok')
-      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
-      aiForSubmit = null
     }
 
     const profile = await getProfile(userId)
     const companyForSubmit = resolveEmploymentCompany(aiForSubmit?.company ?? null, profile?.company)
-    if (!companyForSubmit) {
-      return {
-        ok: false,
-        error: proofFile.type.startsWith('image/')
-          ? 'AI 無法判定任職公司，請確認文件含清楚的公司名稱後再試。'
-          : '請先上傳圖片格式文件以便 AI 判定任職公司；PDF 需待 AI 或人工辨識後才能送審。',
-      }
-    }
+    const aiPassed = aiForSubmit?.passed === true
 
     setPhase?.('正在上傳文件…')
     const proofResult = await uploadProofDoc(userId, proofFile)
@@ -708,14 +681,38 @@ export default function IdentityVerifyScreen({
     const docType: DocType = employmentDocType || (
       proofFile.type === 'application/pdf' ? 'tax_return' : 'payslip'
     )
+
+    const shouldSubmitForReview = (aiPassed && !!companyForSubmit) || isLastAttempt
+
+    if (!shouldSubmitForReview) {
+      const attemptResult = await submitVerificationDoc(
+        userId,
+        companyForSubmit,
+        docType,
+        proofResult.path,
+        aiForSubmit ?? undefined,
+        'manual',
+        resolveManualReviewReason(aiForSubmit?.reason),
+        { attemptOnly: true, status: 'rejected' },
+      )
+      if (!attemptResult.ok) {
+        return { ok: false, error: attemptResult.error ?? '送審失敗，請稍後再試。' }
+      }
+      void getTodayEmploymentVerificationSubmissionCount(userId).then(setEmploymentDailyCount)
+      setAiStatus('fail')
+      setAiMessage(VERIFICATION_AI_PREFLIGHT_FAIL_USER_MESSAGE)
+      return { ok: false, error: VERIFICATION_AI_PREFLIGHT_FAIL_USER_MESSAGE }
+    }
+
+    const reviewMode: 'ai_auto' | 'manual' = aiPassed ? 'ai_auto' : 'manual'
     const submitResult = await submitVerificationDoc(
       userId,
       companyForSubmit,
       docType,
       proofResult.path,
       aiForSubmit ?? undefined,
-      aiForSubmit?.passed ? 'ai_auto' : 'manual',
-      aiForSubmit?.passed ? undefined : resolveManualReviewReason(aiForSubmit?.reason),
+      reviewMode,
+      aiPassed ? undefined : resolveManualReviewReason(aiForSubmit?.reason),
     )
     if (!submitResult.ok) {
       return { ok: false, error: submitResult.error ?? '送審失敗，請稍後再試。' }
@@ -724,6 +721,10 @@ export default function IdentityVerifyScreen({
     employmentSubmittedRef.current = true
     setMaleVerifyGate('submitted')
     void getTodayEmploymentVerificationSubmissionCount(userId).then(setEmploymentDailyCount)
+    if (!aiPassed || reviewMode === 'manual') {
+      setAiStatus('ok')
+      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
+    }
     return { ok: true }
   }
 

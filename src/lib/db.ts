@@ -397,15 +397,23 @@ function addSeconds(date: Date, seconds: number) {
   return new Date(date.getTime() + seconds * 1000).toISOString()
 }
 
+export type EmploymentVerificationSubmitOptions = {
+  /** 僅計入每日次數，不更新 profiles.verification_status */
+  attemptOnly?: boolean
+  status?: 'pending' | 'rejected'
+}
+
 export async function submitVerificationDoc(
   userId: string,
-  company: Company,
+  company: Company | null,
   docType: DocType,
   docPath: string,
   aiResult?: AiResult,
   reviewMode: ReviewSubmissionMode = aiResult?.passed ? 'ai_auto' : 'manual',
   manualReviewReason?: string,
+  options?: EmploymentVerificationSubmitOptions,
 ): Promise<{ ok: boolean; error?: string }> {
+  const status = options?.status ?? 'pending'
   const { error } = await supabase
     .from('verification_docs')
     .insert({
@@ -413,10 +421,12 @@ export async function submitVerificationDoc(
       company,
       doc_type: docType,
       doc_url: docPath,
-      status: 'pending',
+      status,
       verification_kind: 'employment',
       review_mode: reviewMode,
-      ai_review_ready_at: reviewMode === 'ai_auto' ? addSeconds(new Date(), AI_AUTO_REVIEW_UI_SECONDS) : null,
+      ai_review_ready_at: reviewMode === 'ai_auto' && status === 'pending'
+        ? addSeconds(new Date(), AI_AUTO_REVIEW_UI_SECONDS)
+        : null,
       manual_review_reason: manualReviewReason ?? null,
       ...(aiResult && {
         ai_passed:     aiResult.passed,
@@ -431,10 +441,12 @@ export async function submitVerificationDoc(
     return { ok: false, error: error.message }
   }
 
-  await supabase
-    .from('profiles')
-    .update({ verification_status: 'submitted' })
-    .eq('id', userId)
+  if (!options?.attemptOnly) {
+    await supabase
+      .from('profiles')
+      .update({ verification_status: 'submitted' })
+      .eq('id', userId)
+  }
 
   return { ok: true }
 }

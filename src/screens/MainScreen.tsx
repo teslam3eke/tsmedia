@@ -23,6 +23,7 @@ import {
   parseVerifyIdResponse,
   resolveManualReviewReason,
   verifyIdReasonFromBody,
+  VERIFICATION_AI_PREFLIGHT_FAIL_USER_MESSAGE,
   VERIFICATION_MANUAL_REVIEW_TAIL,
   VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
   VERIFICATION_DAILY_SUBMIT_LIMIT,
@@ -5122,31 +5123,18 @@ function CompanyVerifyScreen({
     setSubmitError('')
     setAiMessage('')
     setSubmitting(true)
-    const count = await getTodayEmploymentVerificationSubmissionCount(userId)
-    if (count >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
+    companyAiFinalizePendingRef.current = false
+    setCompanyReviewCountdown(0)
+
+    const attemptBefore = await getTodayEmploymentVerificationSubmissionCount(userId)
+    if (attemptBefore >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
       setSubmitError(`今天職業認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，請明天再試。`)
       setSubmitting(false)
       return
     }
-
-    companyAiFinalizePendingRef.current = false
-    setSubmitted(true)
-    onVerified({ ...profile, verification_status: 'submitted' })
-
-    /** 送出後立即顯示 5 秒倒數（AI 辨識與上傳在背景進行） */
-    const isImageDoc = docFile.type.startsWith('image/')
-    if (isImageDoc) {
-      companyAiFinalizePendingRef.current = true
-      setCompanyReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
-      setAiMessage(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
-    } else {
-      setCompanyReviewCountdown(0)
-      setAiMessage('正在上傳並送審⋯')
-    }
+    const isLastAttempt = attemptBefore + 1 >= VERIFICATION_DAILY_SUBMIT_LIMIT
 
     let aiResult: Awaited<ReturnType<typeof verifyCompanyDocWithAI>>
-    let reviewMode: 'ai_auto' | 'manual' = 'manual'
-    let manualReason = ''
     try {
       aiResult = await verifyCompanyDocWithAI(docFile)
     } catch (err) {
@@ -5161,44 +5149,63 @@ function CompanyVerifyScreen({
       }
     }
 
-    if (!aiResult.passed) {
-      manualReason = resolveManualReviewReason(
-        aiResult.reason,
-        `AI 初審未通過，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
-      )
-      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
-      companyAiFinalizePendingRef.current = false
-      setCompanyReviewCountdown(0)
-    } else if (selectedDocType === 'employee_id') {
-      reviewMode = 'ai_auto'
-    } else {
-      reviewMode = 'manual'
-      manualReason = `AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。${VERIFICATION_MANUAL_REVIEW_TAIL}`
-      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
-      companyAiFinalizePendingRef.current = false
-      setCompanyReviewCountdown(0)
-    }
-
     const companyForSubmit = resolveEmploymentCompany(aiResult.company, profile.company)
-    if (!companyForSubmit) {
-      setSubmitError('AI 無法判定任職公司，請上傳含清楚公司名稱的圖片文件後再試。')
-      companyAiFinalizePendingRef.current = false
-      setSubmitted(false)
-      setCompanyReviewCountdown(0)
-      setSubmitting(false)
-      setAiMessage('')
-      return
-    }
+    const aiPassed = aiResult.passed === true
 
     const res = await uploadProofDoc(userId, docFile)
     if (!res.ok) {
       setSubmitError(`文件上傳失敗：${res.error}`)
-      companyAiFinalizePendingRef.current = false
-      setSubmitted(false)
-      setCompanyReviewCountdown(0)
       setSubmitting(false)
       setAiMessage('')
       return
+    }
+
+    const shouldSubmitForReview = (aiPassed && !!companyForSubmit) || isLastAttempt
+
+    if (!shouldSubmitForReview) {
+      const attemptResult = await submitVerificationDoc(
+        userId,
+        companyForSubmit,
+        selectedDocType,
+        res.path,
+        aiResult,
+        'manual',
+        resolveManualReviewReason(aiResult.reason),
+        { attemptOnly: true, status: 'rejected' },
+      )
+      if (!attemptResult.ok) {
+        setSubmitError(`送出審核失敗：${attemptResult.error ?? '請稍後再試'}`)
+        setSubmitting(false)
+        setAiMessage('')
+        return
+      }
+      setAiMessage(VERIFICATION_AI_PREFLIGHT_FAIL_USER_MESSAGE)
+      setSubmitting(false)
+      return
+    }
+
+    let reviewMode: 'ai_auto' | 'manual' = 'manual'
+    let manualReason = ''
+    if (aiPassed && selectedDocType === 'employee_id') {
+      reviewMode = 'ai_auto'
+    } else if (aiPassed) {
+      manualReason = `AI 已初步辨識文件內容；扣繳憑單/薪資單字體較小，需人工覆核公司與姓名後才會通過。${VERIFICATION_MANUAL_REVIEW_TAIL}`
+    } else {
+      manualReason = resolveManualReviewReason(
+        aiResult.reason,
+        `AI 初審未通過，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
+      )
+    }
+
+    setSubmitted(true)
+    onVerified({ ...profile, verification_status: 'submitted' })
+
+    if (reviewMode === 'ai_auto') {
+      companyAiFinalizePendingRef.current = true
+      setCompanyReviewCountdown(AI_AUTO_REVIEW_UI_SECONDS)
+      setAiMessage(`AI 審核倒數 ${AI_AUTO_REVIEW_UI_SECONDS} 秒。`)
+    } else {
+      setAiMessage(VERIFICATION_MANUAL_REVIEW_USER_MESSAGE)
     }
 
     const docResult = await submitVerificationDoc(
@@ -5257,7 +5264,7 @@ function CompanyVerifyScreen({
       )
     }
 
-    onVerified({ ...profile, company: companyForSubmit, verification_status: 'submitted' })
+    onVerified({ ...profile, company: companyForSubmit ?? profile.company, verification_status: 'submitted' })
     setSubmitting(false)
     if (reviewMode === 'ai_auto') {
       companyAiFinalizePendingRef.current = true
