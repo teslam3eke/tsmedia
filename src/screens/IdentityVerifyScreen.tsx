@@ -1138,7 +1138,7 @@ export default function IdentityVerifyScreen({
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-800 truncate">{proofs[0].name}</p>
-                      <p className="text-xs text-emerald-500 mt-0.5">✓ 文件已上傳</p>
+                      <p className="text-xs text-emerald-500 mt-0.5">已選擇檔案，按繼續送審</p>
                     </div>
                     <button
                       onClick={removeProof}
