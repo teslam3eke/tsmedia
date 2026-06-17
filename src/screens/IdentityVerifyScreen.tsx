@@ -874,8 +874,8 @@ export default function IdentityVerifyScreen({
   }
 
   const stepLabel = steps[step]
-  const showIncomeSkipButton =
-    stepLabel === '收入認證（選填）' && selectedTier !== null && !canAdvance
+  const isIncomeStep = stepLabel === '收入認證（選填）'
+  const incomeTierSelected = selectedTier !== null
 
   if (gender === 'male' && maleVerifyGate === 'loading') {
     return (
@@ -1370,59 +1370,89 @@ export default function IdentityVerifyScreen({
             <p className="text-xs text-red-600 leading-relaxed">{aiMessage}</p>
           </div>
         )}
-        <motion.button
-          whileTap={{ scale: canAdvance ? 0.97 : 1 }}
-          onClick={async () => {
-            if (!canAdvance || submitting) return
-            if (isLastStep) {
-              await handleSubmit()
-            } else if (stepLabel === '職業驗證文件') {
-              await advanceFromEmploymentStep()
-            } else {
-              setStep(step + 1)
-            }
-          }}
-          disabled={submitting || !canAdvance || employmentManualWait || incomeApprovalWait}
-          className={cn(
-            'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
-            canAdvance && !submitting
-              ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20'
-              : 'bg-slate-100 text-slate-300',
-          )}
-        >
-          {submitting ? (
-            <>
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-              >
-                <Cpu className="w-5 h-5" />
-              </motion.div>
-              提交中⋯
-            </>
-          ) : (
-            <>
-              {isLastStep
-                ? (selectedTier && incomeDoc ? '送審並進入探索' : '完成並進入探索')
-                : '繼續'}
-              <ChevronRight className="w-5 h-5" />
-            </>
-          )}
-        </motion.button>
-        {showIncomeSkipButton && (
-          <button
-            type="button"
+        {isIncomeStep && !incomeTierSelected ? (
+          <motion.button
+            whileTap={{ scale: submitting ? 1 : 0.97 }}
             onClick={() => void handleSubmit({ skipIncome: true })}
             disabled={submitting || employmentManualWait || incomeApprovalWait}
             className={cn(
-              'w-full rounded-2xl py-3.5 font-semibold text-sm transition-all',
+              'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
               submitting || employmentManualWait || incomeApprovalWait
-                ? 'text-slate-300'
-                : 'text-slate-600 active:scale-[0.98]',
+                ? 'bg-slate-100 text-slate-300'
+                : 'bg-slate-900 text-white shadow-lg shadow-slate-900/20',
             )}
           >
-            略過認證，進入探索
-          </button>
+            {submitting ? (
+              <>
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                >
+                  <Cpu className="w-5 h-5" />
+                </motion.div>
+                提交中⋯
+              </>
+            ) : (
+              '略過，之後再上傳'
+            )}
+          </motion.button>
+        ) : (
+          <>
+            <motion.button
+              whileTap={{ scale: canAdvance ? 0.97 : 1 }}
+              onClick={async () => {
+                if (!canAdvance || submitting) return
+                if (isLastStep) {
+                  await handleSubmit()
+                } else if (stepLabel === '職業驗證文件') {
+                  await advanceFromEmploymentStep()
+                } else {
+                  setStep(step + 1)
+                }
+              }}
+              disabled={submitting || !canAdvance || employmentManualWait || incomeApprovalWait}
+              className={cn(
+                'w-full rounded-2xl py-4 font-bold text-base flex items-center justify-center gap-2 transition-all',
+                canAdvance && !submitting
+                  ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20'
+                  : 'bg-slate-100 text-slate-300',
+              )}
+            >
+              {submitting ? (
+                <>
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+                  >
+                    <Cpu className="w-5 h-5" />
+                  </motion.div>
+                  提交中⋯
+                </>
+              ) : (
+                <>
+                  {isLastStep
+                    ? (isIncomeStep && incomeTierSelected ? '送審並進入探索' : '完成並進入探索')
+                    : '繼續'}
+                  <ChevronRight className="w-5 h-5" />
+                </>
+              )}
+            </motion.button>
+            {isIncomeStep && incomeTierSelected && (
+              <button
+                type="button"
+                onClick={() => void handleSubmit({ skipIncome: true })}
+                disabled={submitting || employmentManualWait || incomeApprovalWait}
+                className={cn(
+                  'w-full rounded-2xl py-3.5 font-semibold text-sm transition-all',
+                  submitting || employmentManualWait || incomeApprovalWait
+                    ? 'text-slate-300'
+                    : 'text-slate-600 active:scale-[0.98]',
+                )}
+              >
+                略過，之後再上傳
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
