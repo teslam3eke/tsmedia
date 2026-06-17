@@ -53,6 +53,11 @@ export function sanitizeVerificationUserMessage(message: string | null | undefin
   for (const pattern of COMPANY_NAME_PATTERNS) {
     out = out.replace(pattern, VERIFIED_EMPLOYER_LABEL)
   }
+  out = out
+    .replace(/[。.]?AI 審核時間：約 \d+ 秒。?/g, '。')
+    .replace(/[。.]?等待時間約\s*\d+\s*秒。?/g, '。')
+    .replace(/。+/g, '。')
+    .replace(/。$/g, '')
   return out
     .replace(/頂尖企業或頂尖企業/g, VERIFIED_EMPLOYER_LABEL)
     .replace(/不是頂尖企業或頂尖企業/g, '不符合頂尖企業限定')
