@@ -160,7 +160,6 @@ export default function IdentityVerifyScreen({
   // ── AI verification state ────────────────────────────────────────
   const [aiStatus,     setAiStatus]     = useState<'idle' | 'ok' | 'fail'>('idle')
   const [aiMessage,    setAiMessage]    = useState('')
-  const [aiResultData, setAiResultData] = useState<{ passed: boolean; company: Company | null; confidence: 'high' | 'medium' | 'low' | null; reason: string | null } | null>(null)
 
   const [incomeApprovalWait, setIncomeApprovalWait] = useState(false)
   const [incomeApprovalWaitMessage, setIncomeApprovalWaitMessage] = useState('正在處理收入認證…')
@@ -384,10 +383,12 @@ export default function IdentityVerifyScreen({
       reader.readAsDataURL(file)
     })
 
+  type EmploymentAiOutcome = NonNullable<typeof employmentAiOutcomeRef.current>
+
   const fetchEmploymentAiOutcome = async (
     file: File,
     docTypeOverride?: 'employee_id' | 'tax_return' | 'payslip',
-  ) => {
+  ): Promise<EmploymentAiOutcome | null> => {
     employmentAiOutcomeRef.current = null
     try {
       const imageBase64 = await fileToBase64(file)
@@ -414,7 +415,7 @@ export default function IdentityVerifyScreen({
           confidence: null,
           reason,
         }
-        return
+        return employmentAiOutcomeRef.current
       }
       const aiCompany = parseCompany(data.company)
       const aiConf = (data.confidence === 'high' || data.confidence === 'medium' || data.confidence === 'low') ? data.confidence : null
@@ -426,6 +427,7 @@ export default function IdentityVerifyScreen({
         confidence: aiConf,
         reason: data.ok ? (data.reason ? sanitizeVerificationUserMessage(data.reason) : null) : reason,
       }
+      return employmentAiOutcomeRef.current
     } catch (err) {
       console.error('[IdentityVerify] employment verify-id failed:', err)
       const reason = buildVerificationApiFailureReason(err)
@@ -436,6 +438,7 @@ export default function IdentityVerifyScreen({
         confidence: null,
         reason,
       }
+      return employmentAiOutcomeRef.current
     }
   }
 
@@ -583,7 +586,6 @@ export default function IdentityVerifyScreen({
     setProofs(newProofs)
     setAiStatus('idle')
     setAiMessage('')
-    setAiResultData(null)
     employmentAiOutcomeRef.current = null
   }
 
@@ -592,7 +594,7 @@ export default function IdentityVerifyScreen({
     setProofs([])
     setAiStatus('idle')
     setAiMessage('')
-    setAiResultData(null)
+    employmentAiOutcomeRef.current = null
   }
 
   // Step index mapping differs by gender. Build helpers to check readiness.
@@ -654,9 +656,7 @@ export default function IdentityVerifyScreen({
 
     if (proofFile.type.startsWith('image/')) {
       setPhase?.('AI 審核中…')
-      employmentAiOutcomeRef.current = null
-      await fetchEmploymentAiOutcome(proofFile, employmentDocType || undefined)
-      const o = employmentAiOutcomeRef.current
+      const o = await fetchEmploymentAiOutcome(proofFile, employmentDocType || undefined)
       if (o) {
         aiForSubmit = {
           passed: o.passed,
@@ -664,7 +664,6 @@ export default function IdentityVerifyScreen({
           confidence: o.confidence,
           reason: o.reason,
         }
-        setAiResultData(aiForSubmit)
       }
     }
 
