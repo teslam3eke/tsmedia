@@ -747,7 +747,7 @@ export default function IdentityVerifyScreen({
     }
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (options?: { skipIncome?: boolean }) => {
     setSubmitting(true)
     try {
       if (!userId) {
@@ -770,7 +770,7 @@ export default function IdentityVerifyScreen({
       }
 
       // 選填：收入認證（送審後不等待審核；通過與否不影響進探索）
-      if (selectedTier && incomeDoc) {
+      if (!options?.skipIncome && selectedTier && incomeDoc) {
         const incomeSubmissions = await getTodayIncomeVerificationSubmissionCount(userId)
         if (incomeSubmissions >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
           setAiStatus('fail')
@@ -874,6 +874,8 @@ export default function IdentityVerifyScreen({
   }
 
   const stepLabel = steps[step]
+  const showIncomeSkipButton =
+    stepLabel === '收入認證（選填）' && selectedTier !== null && !canAdvance
 
   if (gender === 'male' && maleVerifyGate === 'loading') {
     return (
@@ -1400,11 +1402,28 @@ export default function IdentityVerifyScreen({
             </>
           ) : (
             <>
-              {isLastStep ? '完成並進入探索' : '繼續'}
+              {isLastStep
+                ? (selectedTier && incomeDoc ? '送審並進入探索' : '完成並進入探索')
+                : '繼續'}
               <ChevronRight className="w-5 h-5" />
             </>
           )}
         </motion.button>
+        {showIncomeSkipButton && (
+          <button
+            type="button"
+            onClick={() => void handleSubmit({ skipIncome: true })}
+            disabled={submitting || employmentManualWait || incomeApprovalWait}
+            className={cn(
+              'w-full rounded-2xl py-3.5 font-semibold text-sm transition-all',
+              submitting || employmentManualWait || incomeApprovalWait
+                ? 'text-slate-300'
+                : 'text-slate-600 active:scale-[0.98]',
+            )}
+          >
+            略過認證，進入探索
+          </button>
+        )}
       </div>
     </div>
     {employmentManualWait
