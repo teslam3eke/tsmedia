@@ -3369,15 +3369,20 @@ function ChatRoomView({
   useEffect(() => {
     if (!isLive || !conversation.matchId) return
     const arm = () => armChatPresenceIfForeground(conversation.matchId)
+    const disarmForBackground = () => {
+      clearChatPresence()
+    }
     arm()
     const hb = window.setInterval(arm, 15_000)
     document.addEventListener('visibilitychange', arm)
+    window.addEventListener('pagehide', disarmForBackground)
     const sw = navigator.serviceWorker
     const onCtl = () => arm()
     sw?.addEventListener('controllerchange', onCtl)
     return () => {
       clearInterval(hb)
       document.removeEventListener('visibilitychange', arm)
+      window.removeEventListener('pagehide', disarmForBackground)
       sw?.removeEventListener('controllerchange', onCtl)
       clearChatPresence()
     }
@@ -3418,9 +3423,11 @@ function ChatRoomView({
         const mid = conversation.matchId
         if (!mid || !currentUserId) return
         if (row.sender_id !== currentUserId) {
-          void markMatchIncomingMessagesRead(mid).then(() => {
-            onMatchIncomingMarkedRead?.()
-          })
+          if (typeof document !== 'undefined' && document.visibilityState === 'visible' && !document.hidden) {
+            void markMatchIncomingMessagesRead(mid).then(() => {
+              onMatchIncomingMarkedRead?.()
+            })
+          }
         }
       },
       (row) => {
@@ -6482,13 +6489,24 @@ export default function MainScreen({
   useEffect(() => {
     if (!user?.id) return
     const onHide = () => {
-      if (document.visibilityState !== 'hidden') return
       void upsertUserChatPresenceOnServer(null, 'hidden')
       notifyServiceWorkerActiveChatMatch(null)
       syncActiveChatMatchToLocationUrl(null)
     }
-    document.addEventListener('visibilitychange', onHide)
-    return () => document.removeEventListener('visibilitychange', onHide)
+    const onVisibilityHide = () => {
+      if (document.visibilityState !== 'hidden') return
+      onHide()
+    }
+    const onPageHide = (ev: PageTransitionEvent) => {
+      if (ev.persisted) return
+      onHide()
+    }
+    document.addEventListener('visibilitychange', onVisibilityHide)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityHide)
+      window.removeEventListener('pagehide', onPageHide)
+    }
   }, [user?.id])
 
   /** 後台 app_notifications：全分頁彈窗；同一 id 會話內只會排入佇列一次，按「知道了」後標已讀再顯示下一則。 */

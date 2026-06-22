@@ -65,11 +65,11 @@ export function notifyServiceWorkerActiveChatMatch(matchUuid: string | null | un
   }
 }
 
-/** 僅 App 在前景時才標記 active chat；背景／鎖屏一律清掉，避免 SW 誤擋推播。 */
+/** 僅 App 在前景時才標記 active chat；背景／鎖屏／切 App 一律清掉，避免 SW 誤擋推播。 */
 export function notifyServiceWorkerActiveChatMatchIfForeground(
   matchUuid: string | null | undefined,
 ): void {
-  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+  if (typeof document !== 'undefined' && (document.visibilityState !== 'visible' || document.hidden)) {
     notifyServiceWorkerActiveChatMatch(null)
     syncActiveChatMatchToLocationUrl(null)
     return

@@ -1538,8 +1538,11 @@ export async function fetchMatchThreadsSidebarState(
 
 /** 將對方傳入且尚未讀取的訊息標為已讀（僅配對參與者可執行）。 */
 export async function markMatchIncomingMessagesRead(matchId: string): Promise<{ ok: boolean; error?: string }> {
-  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-  if (visible) await ensureConnectionWithBudget()
+  const visible = typeof document !== 'undefined' && document.visibilityState === 'visible' && !document.hidden
+  if (!visible) {
+    return { ok: true }
+  }
+  await ensureConnectionWithBudget()
   const query = () =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase as any).rpc('mark_match_incoming_messages_read', { p_match_id: matchId })

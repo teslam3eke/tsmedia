@@ -32,6 +32,12 @@ export function getPushClientKey(): string {
   }
 }
 
+/** 是否視為「使用者正在看聊天室」（背景／切 App 不算） */
+export function isChatPresenceForeground(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.visibilityState === 'visible' && !document.hidden
+}
+
 export async function upsertUserChatPresenceOnServer(
   activeMatchId: string | null,
   visibility: 'visible' | 'hidden',
@@ -53,8 +59,7 @@ export async function upsertUserChatPresenceOnServer(
  */
 export function armChatPresenceIfForeground(matchUuid: string | null | undefined): void {
   notifyServiceWorkerActiveChatMatchIfForeground(matchUuid)
-  const visible =
-    typeof document === 'undefined' || document.visibilityState === 'visible'
+  const visible = isChatPresenceForeground()
   const mid =
     visible && typeof matchUuid === 'string' && matchUuid.trim()
       ? matchUuid.trim().toLowerCase()
