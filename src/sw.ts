@@ -90,18 +90,28 @@ async function writeBadgeCountCache(n: number): Promise<void> {
   }
 }
 
-/** SW 內僅寫 registration；主執行緒用 navigator，兩者勿在同 context 各寫一次（iOS 可能顯示加總） */
+type BadgeApiTarget = {
+  setAppBadge?: (contents?: number) => Promise<void>
+  clearAppBadge?: () => Promise<void>
+}
+
+/** iOS PWA：WebKit 建議 SW 用 navigator.setAppBadge；Chrome 亦可能掛在 registration */
+function serviceWorkerBadgeTarget(): BadgeApiTarget | null {
+  const nav = self.navigator as Navigator & BadgeApiTarget
+  if ('setAppBadge' in nav) return nav
+  const reg = self.registration as ServiceWorkerRegistration & BadgeApiTarget
+  if ('setAppBadge' in reg) return reg
+  return null
+}
+
+/** SW 內更新主畫面角標；主執行緒用 navigator.syncAppIconBadge，勿雙寫同一 context */
 async function applyServiceWorkerRegistrationBadge(n: number): Promise<void> {
   const count = clampBadgeCount(n)
-  type BadgeTarget = {
-    setAppBadge?: (contents?: number) => Promise<void>
-    clearAppBadge?: () => Promise<void>
-  }
+  const target = serviceWorkerBadgeTarget()
+  if (!target?.setAppBadge) return
   try {
-    const reg = self.registration as ServiceWorkerRegistration & BadgeTarget
-    if (!('setAppBadge' in reg)) return
-    if (count <= 0) await reg.clearAppBadge!()
-    else await reg.setAppBadge!(count)
+    if (count <= 0) await target.clearAppBadge?.()
+    else await target.setAppBadge(count)
   } catch {
     /* ignore */
   }
@@ -370,15 +380,19 @@ self.addEventListener('push', (event: PushEvent) => {
         /** 換日 tag 固定；renotify 會在 Cron + 前景各 show 一次時連跳兩則 */
         renotify: !isDiscoverDeckTag,
       }
-      await self.registration.showNotification(title, o)
       /** 僅 App 真正在背景時更新角標；server 傳 badgeCount 絕對值，避免累加漂移／重複推播 +2 */
-      if (isMessageReceivedTag && !hasForegroundOriginClient(clients)) {
-        if (payloadBadgeCount != null) {
-          await applyBackgroundMessageBadge(payloadBadgeCount)
-        } else {
-          await bumpAppIconBadgeForBackgroundMessage()
-        }
-      }
+      const shouldUpdateBackgroundBadge =
+        isMessageReceivedTag && !hasForegroundOriginClient(clients)
+      const badgeWork = shouldUpdateBackgroundBadge
+        ? payloadBadgeCount != null
+          ? applyBackgroundMessageBadge(payloadBadgeCount)
+          : bumpAppIconBadgeForBackgroundMessage()
+        : Promise.resolve()
+      /** WebKit：push 時 showNotification 與 setAppBadge 並行（iOS 主畫面角標） */
+      await Promise.all([
+        self.registration.showNotification(title, o),
+        badgeWork,
+      ])
       if (isDiscoverDeckTag) {
         const dayKey = tag.slice('tsm-discover-deck-day-'.length)
         if (dayKey) await pingClientsDiscoverRolloverNotified(dayKey)
