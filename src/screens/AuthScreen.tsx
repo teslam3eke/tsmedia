@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, ChevronRight, Cpu, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { requestPasswordReset, signIn, signUp } from '@/lib/auth'
 import { iosEmailAuthSafariHint } from '@/lib/authBrowser'
+import { trackMetaCompleteRegistration } from '@/lib/metaPixel'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -53,6 +54,10 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
     if (!result.ok) {
       setError(result.error)
       return
+    }
+
+    if (mode === 'signup') {
+      trackMetaCompleteRegistration(result.user.id)
     }
 
     if (mode === 'signup' && !result.session) {

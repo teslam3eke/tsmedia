@@ -26,6 +26,8 @@ interface ImportMetaEnv {
   readonly VITE_TAPPAY_SERVER_TYPE?: string
   /** 設為 1 時，讀取餘額前會呼叫 DB RPC test_ensure_daily_ten_credits（須 migration 017 + app_feature_flags 開啟） */
   readonly VITE_TEST_DAILY_TEN?: string
+  /** Meta Pixel ID（事件管理工具）；未設則不載入追蹤 */
+  readonly VITE_META_PIXEL_ID?: string
 }
 
 interface ImportMeta {

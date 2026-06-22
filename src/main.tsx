@@ -21,6 +21,7 @@ import { isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
 import { markDiscoverRolloverNotified } from '@/lib/appDay'
+import { initMetaPixel } from '@/lib/metaPixel'
 import {
   mergePushDeepLinkIntent,
   markPushNotificationLaunchToken,
@@ -32,6 +33,7 @@ import {
 
 void maybeInitEruda()
 markPwaStandaloneSeenIfNeeded()
+initMetaPixel()
 
 /** SW：推播點擊 → replaceState（避免 navigate 不重跑 SPA）再通知 MainScreen 吃 tab/match */
 function applyHrefFromServiceWorker(hrefLike: string) {
