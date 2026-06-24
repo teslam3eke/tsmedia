@@ -194,7 +194,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
             <div>
               <p className="text-[13px] font-bold tracking-wide text-slate-900">男性</p>
               <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
-                採邀請制與資格審核。
+                採資格審核。
                 <br />
                 男性目前僅開放以下公司之員工。
               </p>
