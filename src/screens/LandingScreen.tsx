@@ -113,16 +113,21 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           className="relative z-10"
         >
           <h1
-            className="text-white font-medium leading-[1.15]"
+            className="text-white font-medium leading-snug"
             style={{
-              fontSize: 'clamp(1.65rem, 5.8vw, 2.35rem)',
-              letterSpacing: '-0.04em',
+              fontSize: 'clamp(1.5rem, 5.2vw, 2.1rem)',
+              letterSpacing: '-0.03em',
               fontFamily: '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif',
             }}
           >
-            <span className="block text-white">先認識彼此，</span>
-            <span className="block text-white/90">再看見彼此</span>
+            先認識彼此，再看見彼此。
           </h1>
+          <p className="mt-3 text-sm text-white/55 leading-relaxed">
+            照片採漸進式解鎖
+          </p>
+          <p className="mt-1.5 text-sm text-white/50 leading-relaxed max-w-sm">
+            透過價值觀配對與深度交流，找到更適合的人
+          </p>
         </motion.div>
 
         {/* Photo hero */}
@@ -185,7 +190,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
             為了維持健康的男女比例，
           </p>
 
-          <div className="mt-5 space-y-5">
+          <div className="mt-5">
             <div>
               <p className="text-[13px] font-bold tracking-wide text-slate-900">男性</p>
               <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
@@ -197,11 +202,6 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
                 <li>晶圓製造龍頭</li>
                 <li>IC 設計龍頭</li>
               </ol>
-            </div>
-
-            <div className="border-t border-slate-200/90 pt-5">
-              <p className="text-[13px] font-bold tracking-wide text-slate-900">女性</p>
-              <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">限額開放申請。</p>
             </div>
           </div>
         </motion.div>
