@@ -1,6 +1,5 @@
 import { motion } from 'framer-motion'
 import { ChevronRight, Cpu, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
-import DiscoverPuzzleIntroDemo from '@/components/DiscoverPuzzleIntroDemo'
 import SupportEmailFooter from '@/components/SupportEmailFooter'
 
 interface Props {
@@ -126,32 +125,31 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           </h1>
         </motion.div>
 
-        {/* 探索拼圖示意（女性視角：對方為男性 demo） */}
+        {/* Photo hero */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.4 }}
           className="relative z-10 mt-8"
         >
-          <div
-            className="relative overflow-hidden rounded-[28px] bg-white ring-1 ring-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
-            style={{ height: 'min(520px, 72vh)' }}
-          >
-            <div className="pointer-events-none h-full" aria-hidden>
-              <DiscoverPuzzleIntroDemo
-                active
-                viewerGender="female"
-                embedded
-                loop
-                svgIdPrefix="landing-puzzle-intro"
-                titleId="landing-puzzle-intro-title"
-                className="h-full w-full max-w-none"
-              />
+          <div className="relative overflow-hidden rounded-[28px] ring-1 ring-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+            <img
+              src="/landing-photo.png"
+              alt="tsMedia hero"
+              className="block w-full h-[260px] object-cover scale-[1.02]"
+              style={{ filter: 'blur(4px)' }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 p-4">
+              <div className="inline-flex items-center gap-1.5 bg-white/14 backdrop-blur-md rounded-full px-3 py-1.5 ring-1 ring-white/15">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
+                <span className="text-white/90 text-xs font-semibold">隱私保護模式展示</span>
+              </div>
             </div>
           </div>
 
           <div className="mt-3 flex items-center justify-end px-1">
-            <p className="text-xs text-white/55">聊天解鎖拼圖 · 產品實際畫面</p>
+            <p className="text-xs text-white/55">單張主視覺 · 輕霧化處理</p>
           </div>
         </motion.div>
 

@@ -48,7 +48,6 @@ import {
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
-import { trackMetaCompleteRegistrationForRecentAccount } from '@/lib/metaPixel'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
 // profileSetupData is collected but used for future profile enrichment
@@ -598,7 +597,6 @@ export default function App() {
     }
 
     const flight = (async () => {
-      trackMetaCompleteRegistrationForRecentAccount(u)
       const paymentReturn = hasPendingPaymentReturn()
       const onboarded =
         !needsPwaEncapsulationGate() &&
@@ -1046,7 +1044,6 @@ export default function App() {
 
         {screen === 'auth' && (
           <AuthScreen
-            initialMode="signup"
             onSuccess={async (signedInUser) => {
               if (needsIosSafariBrowserGate()) return
               setUser(signedInUser)

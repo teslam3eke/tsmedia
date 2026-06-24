@@ -10,15 +10,13 @@ import { cn } from '@/lib/utils'
 interface Props {
   onSuccess: (user: User) => void | Promise<void>
   onBack: () => void
-  /** 從 landing「開始」進入時預設申請加入，避免誤用「已有帳號」漏送 CompleteRegistration */
-  initialMode?: Mode
 }
 
 type Mode = 'signin' | 'signup'
 type AuthPanel = 'form' | 'signupDone' | 'forgotPassword' | 'forgotDone'
 
-export default function AuthScreen({ onSuccess, onBack, initialMode = 'signin' }: Props) {
-  const [mode, setMode] = useState<Mode>(initialMode)
+export default function AuthScreen({ onSuccess, onBack }: Props) {
+  const [mode, setMode] = useState<Mode>('signin')
   const [panel, setPanel] = useState<AuthPanel>('form')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
