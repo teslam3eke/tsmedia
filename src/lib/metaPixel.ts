@@ -1,5 +1,8 @@
+import type { User } from '@supabase/supabase-js'
+
 const META_PIXEL_ID = (import.meta.env.VITE_META_PIXEL_ID ?? '').trim()
 const REG_DEDUPE_PREFIX = 'tm_meta_reg_v1_'
+const NEW_ACCOUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 type FbqStub = {
   (...args: unknown[]): void
@@ -62,17 +65,37 @@ export function trackMetaEvent(eventName: string, params?: Record<string, unknow
   }
 }
 
+function registrationAlreadyTracked(userId?: string | null): boolean {
+  if (!userId) return false
+  try {
+    return localStorage.getItem(`${REG_DEDUPE_PREFIX}${userId}`) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markRegistrationTracked(userId?: string | null): void {
+  if (!userId) return
+  try {
+    localStorage.setItem(`${REG_DEDUPE_PREFIX}${userId}`, '1')
+  } catch {
+    /* 私密模式 */
+  }
+}
+
 /** 註冊成功（同一 user id 只送一次，避免重複登入重複計轉換）。 */
 export function trackMetaCompleteRegistration(userId?: string | null): void {
-  if (!pixelEnabled()) return
-  if (userId) {
-    const key = `${REG_DEDUPE_PREFIX}${userId}`
-    try {
-      if (localStorage.getItem(key)) return
-      localStorage.setItem(key, '1')
-    } catch {
-      /* 私密模式 */
-    }
-  }
+  if (!pixelEnabled() || registrationAlreadyTracked(userId)) return
   trackMetaEvent('CompleteRegistration')
+  markRegistrationTracked(userId)
+}
+
+/**
+ * Email 確認信／首次登入等路徑的備援：帳號建立 7 日內且尚未送過轉換時補送。
+ * （按「申請加入」當下已送過則 dedupe 略過，不會重複計。）
+ */
+export function trackMetaCompleteRegistrationForRecentAccount(user: User): void {
+  const created = Date.parse(user.created_at)
+  if (!Number.isFinite(created) || Date.now() - created > NEW_ACCOUNT_WINDOW_MS) return
+  trackMetaCompleteRegistration(user.id)
 }

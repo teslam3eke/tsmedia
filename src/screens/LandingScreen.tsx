@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { ChevronRight, Cpu, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
+import DiscoverPuzzleIntroDemo from '@/components/DiscoverPuzzleIntroDemo'
 import SupportEmailFooter from '@/components/SupportEmailFooter'
 
 interface Props {
@@ -12,7 +13,7 @@ const FEATURES = [
   {
     icon: ShieldCheck,
     title: '嚴格身份審核',
-    desc: '頂尖企業限定，職業文件人工核驗。',
+    desc: '邀請制與文件核驗並行，維持社群信任與男女比例。',
     accent: '#6366f1',
   },
   {
@@ -112,50 +113,45 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           transition={{ delay: 0.12, duration: 0.5 }}
           className="relative z-10"
         >
-          <p className="text-white/38 text-[11px] font-semibold tracking-[0.22em] uppercase mb-3">
-            頂尖企業限定・菁英專屬
-          </p>
           <h1
-            className="text-white font-medium leading-[1.04]"
+            className="text-white font-medium leading-[1.15]"
             style={{
-              fontSize: 'clamp(1.72rem, 6.4vw, 2.55rem)',
-              letterSpacing: '-0.07em',
+              fontSize: 'clamp(1.65rem, 5.8vw, 2.35rem)',
+              letterSpacing: '-0.04em',
               fontFamily: '"PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif',
             }}
           >
-            <span className="block whitespace-nowrap text-white">在矽晶圓之外，</span>
-            <span className="block whitespace-nowrap text-white/92">找到屬於你的那個人</span>
+            <span className="block text-white">先認識彼此，</span>
+            <span className="block text-white/90">再看見彼此</span>
           </h1>
-          <p className="max-w-xs mt-3 text-sm text-white/50 leading-relaxed">
-            為重視隱私、品質與真實連結的工程師，打造更克制也更有溫度的相遇方式。
-          </p>
         </motion.div>
 
-        {/* Photo hero */}
+        {/* 探索拼圖示意（女性視角：對方為男性 demo） */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.4 }}
           className="relative z-10 mt-8"
         >
-          <div className="relative overflow-hidden rounded-[28px] ring-1 ring-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
-            <img
-              src="/landing-photo.png"
-              alt="tsMedia hero"
-              className="block w-full h-[260px] object-cover scale-[1.02]"
-              style={{ filter: 'blur(4px)' }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-black/10 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 p-4">
-              <div className="inline-flex items-center gap-1.5 bg-white/14 backdrop-blur-md rounded-full px-3 py-1.5 ring-1 ring-white/15">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-                <span className="text-white/90 text-xs font-semibold">隱私保護模式展示</span>
-              </div>
+          <div
+            className="relative overflow-hidden rounded-[28px] bg-white ring-1 ring-white/10 shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+            style={{ height: 'min(520px, 72vh)' }}
+          >
+            <div className="pointer-events-none h-full" aria-hidden>
+              <DiscoverPuzzleIntroDemo
+                active
+                viewerGender="female"
+                embedded
+                loop
+                svgIdPrefix="landing-puzzle-intro"
+                titleId="landing-puzzle-intro-title"
+                className="h-full w-full max-w-none"
+              />
             </div>
           </div>
 
           <div className="mt-3 flex items-center justify-end px-1">
-            <p className="text-xs text-white/55">單張主視覺 · 輕霧化處理</p>
+            <p className="text-xs text-white/55">聊天解鎖拼圖 · 產品實際畫面</p>
           </div>
         </motion.div>
 
@@ -179,6 +175,38 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
 
       {/* ── Body ──────────────────────────────────────────────────── */}
       <div className="flex-1 px-5 pt-7 pb-6 space-y-5">
+
+        {/* 會員資格說明 */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.32, duration: 0.45 }}
+          className="rounded-2xl bg-slate-50 px-5 py-6 ring-1 ring-slate-100"
+        >
+          <p className="text-[15px] text-slate-600 leading-[1.75]">
+            為了維持健康的男女比例，
+          </p>
+
+          <div className="mt-5 space-y-5">
+            <div>
+              <p className="text-[13px] font-bold tracking-wide text-slate-900">男性</p>
+              <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
+                採邀請制與資格審核。
+                <br />
+                男性目前僅開放以下公司之員工。
+              </p>
+              <ol className="mt-3 space-y-1.5 pl-4 text-[14px] text-slate-700 leading-relaxed list-decimal marker:text-slate-400">
+                <li>晶圓製造龍頭</li>
+                <li>IC 設計龍頭</li>
+              </ol>
+            </div>
+
+            <div className="border-t border-slate-200/90 pt-5">
+              <p className="text-[13px] font-bold tracking-wide text-slate-900">女性</p>
+              <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">限額開放申請。</p>
+            </div>
+          </div>
+        </motion.div>
 
         {/* Features */}
         <motion.div
