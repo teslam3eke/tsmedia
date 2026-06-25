@@ -211,6 +211,9 @@ export default function ProfileSetupScreen({
             placeholder="僅用於認證，不會公開顯示"
             className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none transition-all"
           />
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+            名字必須與政府核發的證件完全相同，否則不予以通過。
+          </p>
         </motion.div>
 
         {/* Nickname */}
