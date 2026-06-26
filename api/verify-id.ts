@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { sanitizeVerificationUserMessage } from './_utils/companySanitize.js'
 import {
   hasTopTierEmployerEvidence,
+  looksLikeTsmcEwcVirtualBadge,
   resolveTopTierCompanyFromFields,
   type TopTierCompany,
 } from './_utils/employerMatch.js'
@@ -64,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : docType === 'payslip'
       ? '這張文件類型是薪資單。detectedName 必須只填員工姓名欄位的繁體中文姓名，忽略英文／羅馬拼音；公司請看雇主、公司、發薪單位。'
       : docType === 'employee_id'
-        ? '這張文件類型是員工證/識別證。證件若同時有中文姓名與英文姓名（或羅馬拼音），detectedName 必須優先包含清晰的中文姓名（與使用者資料比對以中文為準）；不得僅填英文而忽略可看見的中文。若中英文並列，請填「中文姓名／英文姓名」同一字串（例如「陳怡君／CHEN YI-CHUN」）。'
+        ? '這張文件類型是員工證/識別證。證件若同時有中文姓名與英文姓名（或羅馬拼音），detectedName 必須優先包含清晰的中文姓名（與使用者資料比對以中文為準）；不得僅填英文而忽略可看見的中文。若中英文並列，請填「中文姓名／英文姓名」同一字串（例如「陳怡君／CHEN YI-CHUN」）。若為台積電「EWC Mobile Badges／職工福利委員會」App 螢幕上的「虛擬識別證」（含 tsmc logo、台灣積體電路製造股份有限公司、工號、姓名、動態日期浮水印），此為正式員工數位識別證；「虛擬」意指 App 數位版而非實體塑膠卡，仍應 isEmployeeId=true、containsVendorTerms=false。'
         : '若文件是扣繳憑單，姓名請只讀「所得人姓名」的中文；若是薪資單，姓名請只讀中文員工姓名；若是員工證，請優先讀中文姓名；中英文並列時以「中文／英文」填入 detectedName。'
   if (verificationKind === 'employment' && !normalizedClaimedName) {
     return res.status(200).json({
@@ -138,6 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 判斷標準：
 - 可接受正式員工識別證、薪資單、扣繳憑單、報稅/薪資資料；但必須能看出使用者是台積電或聯發科正式員工
+- **必須接受**台積電官方「EWC Mobile Badges／職工福利委員會」App 顯示的**虛擬識別證**（螢幕截圖可）：含 tsmc logo、「台灣積體電路製造股份有限公司」、工號、姓名；「虛擬識別證」= 正式員工數位員工證，**不是**造假、訪客證、廠商證或臨時證；containsVendorTerms 必須為 false；勿因「虛擬」二字拒絕
 - 若是扣繳憑單，detectedName 必須取自「所得人姓名」（或同義欄位「納稅義務人」、「姓名」）的繁體中文，忽略英文／羅馬拼音；company 必須依文件實際雇主判斷，**優先讀右上角「扣繳單位」區塊**（統編旁單位名稱），其次才是「給付單位」、「雇主名稱」
 - 使用者選擇公司可能選錯；只要文件實際雇主/公司是台積電或聯發科正式員工文件即可通過，company 請回文件實際公司
 - 若是扣繳憑單或薪資單，detectedEmployer 必須逐字抄出文件上的扣繳單位/給付單位/雇主名稱；不得根據使用者選擇公司或文件外資訊推測
@@ -147,7 +149,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 僅接受台積電或聯發科，其他公司也為 false
 - 需看到公司名稱、logo、雇主名稱或明顯識別特徵
 - 如果證件、職稱、備註、公司欄位、識別證類別出現「廠商」、「承攬商」、「外包」、「駐廠」、「vendor」、「contractor」、「外部人員」等字眼，必須 isEmployeeId 為 false
-- 如果只是台積電/聯發科廠區通行證、訪客證、廠商工作證、施工證、臨時證，而非正式員工證，必須 isEmployeeId 為 false
+- 如果只是台積電/聯發科廠區通行證、訪客證、廠商工作證、施工證、臨時證，而非正式員工證，必須 isEmployeeId 為 false（**例外：台積電職工福利委員會 App 的虛擬識別證屬正式員工證，必須通過**）
 - 文件上的姓名必須與使用者姓名「${normalizedClaimedName}」相同或高度一致（員工證若中英文並列，只要中文姓名與使用者姓名一致即可通過 nameMatches）
 - detectedName 必須填入你從文件上看到的使用者姓名；員工識別證請優先抄錄中文姓名，並與英文並列時使用「中文／英文」格式；扣繳憑單與薪資單只填中文姓名；若看不到中文姓名，detectedName 為 null 且 nameMatches 為 false
 - detectedEmployer 必須填入你從文件上看到的公司、扣繳單位、給付單位或雇主名稱
@@ -267,13 +269,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const taxOrPayslipNeedsEmployer = docType === 'tax_return' || docType === 'payslip'
+    const virtualEmployeeBadge = docType === 'employee_id' && looksLikeTsmcEwcVirtualBadge(parsed)
     const resolvedCompany = resolveTopTierCompanyFromFields(parsed)
     const topTierEmployerSeen = hasTopTierEmployerEvidence(parsed)
     const employmentAcceptableConfidence = parsed.confidence === 'high'
       || (taxOrPayslipNeedsEmployer && parsed.confidence === 'medium' && resolvedCompany && topTierEmployerSeen)
+      || (virtualEmployeeBadge && parsed.confidence === 'medium' && resolvedCompany && serverNameMatches)
     const isLowConfidenceEmployment = !employmentAcceptableConfidence
     const employmentNameMismatch = Boolean(normalizedClaimedName) && !serverNameMatches
-    const employmentVendorDoc = parsed.containsVendorTerms === true
+    const employmentVendorDoc = parsed.containsVendorTerms === true && !virtualEmployeeBadge
     const employerEvidenceMissing = taxOrPayslipNeedsEmployer && !topTierEmployerSeen
     const employerMismatch = taxOrPayslipNeedsEmployer
       && Boolean(parsed.detectedEmployer?.trim())
@@ -283,7 +287,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       && topTierEmployerSeen
       && serverNameMatches
       && !employmentVendorDoc
-    const effectiveIsEmployeeId = parsed.isEmployeeId || taxPayslipLooksValid
+    const virtualBadgeLooksValid = virtualEmployeeBadge
+      && Boolean(resolvedCompany)
+      && serverNameMatches
+    const effectiveIsEmployeeId = parsed.isEmployeeId || taxPayslipLooksValid || virtualBadgeLooksValid
     if (
       !effectiveIsEmployeeId
       || !resolvedCompany

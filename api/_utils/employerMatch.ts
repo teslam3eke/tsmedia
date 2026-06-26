@@ -40,3 +40,16 @@ export function hasTopTierEmployerEvidence(fields: {
 }): boolean {
   return resolveTopTierCompanyFromFields(fields) !== null
 }
+
+/** 台積電職工福利委員會 App「EWC Mobile Badges」螢幕上的虛擬識別證（正式員工數位證，非訪客／廠商證） */
+export function looksLikeTsmcEwcVirtualBadge(fields: {
+  detectedEmployer?: string | null
+  employerEvidenceQuote?: string | null
+  reason?: string | null
+}): boolean {
+  const blob = [fields.detectedEmployer, fields.employerEvidenceQuote, fields.reason]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .join('\n')
+  if (!blob.includes('虛擬識別證')) return false
+  return detectTopTierCompanyFromText(blob) === 'TSMC'
+}
