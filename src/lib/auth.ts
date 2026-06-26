@@ -426,6 +426,45 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut()
 }
 
+/** 刪除目前登入帳號（需有效 session；成功後本地 session 一併清除）。 */
+export async function deleteAccount(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: { session } } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) {
+    return { ok: false, error: '請先登入後再試。' }
+  }
+
+  let res: Response
+  try {
+    res = await fetch('/api/delete-account', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+  } catch {
+    return { ok: false, error: '網路連線異常，請稍後再試。' }
+  }
+
+  let body: { ok?: boolean; message?: string } = {}
+  try {
+    body = await res.json() as { ok?: boolean; message?: string }
+  } catch {
+    /* ignore */
+  }
+
+  if (!res.ok || !body.ok) {
+    return { ok: false, error: body.message ?? '刪除帳號失敗，請稍後再試。' }
+  }
+
+  await unsubscribeWebPushOnSignOut()
+  clearAppQueryCache()
+  try {
+    await supabase.auth.signOut()
+  } catch {
+    /* 帳號已刪除時 signOut 可能失敗，可忽略 */
+  }
+  return { ok: true }
+}
+
 // ── 取得目前登入用戶 ──────────────────────────────────────────
 export async function getCurrentUser(): Promise<User | null> {
   const { data } = await supabase.auth.getUser()

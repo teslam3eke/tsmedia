@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronDown, Send, Bell, BellOff,
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   BellRing, AlertCircle, Gem,
-  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Star, UserMinus,
+  FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Star, UserMinus, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -28,7 +28,7 @@ import {
   VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
   VERIFICATION_DAILY_SUBMIT_LIMIT,
 } from '@/lib/verificationAiUtils'
-import { signOut } from '@/lib/auth'
+import { signOut, deleteAccount } from '@/lib/auth'
 import {
   wakeSupabaseAuthFromBackground,
   reconnectSupabaseRealtimeOnly,
@@ -5622,6 +5622,9 @@ function ProfileTab({
   const [showAdmin, setShowAdmin] = useState(false)
   const [showTermsNotice, setShowTermsNotice] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false)
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false)
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null)
   const [tabStats, setTabStats] = useState<ProfileTabStats | null>(null)
   const profileLoadEpochRef = useRef(0)
   const profilePollGenRef = useRef(0)
@@ -5971,11 +5974,23 @@ function ProfileTab({
         <motion.button
           whileTap={{ backgroundColor: '#f8fafc' }}
           onClick={() => setShowFeedback(true)}
-          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700"
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
         >
           <MessageSquare className="w-4 h-4 text-slate-400" />
           <span>意見反映</span>
           <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
+        </motion.button>
+        <motion.button
+          whileTap={{ backgroundColor: '#fff1f2' }}
+          onClick={() => {
+            setDeleteAccountError(null)
+            setShowDeleteAccountConfirm(true)
+          }}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-red-600"
+        >
+          <Trash2 className="w-4 h-4 text-red-400" />
+          <span>刪除帳號</span>
+          <ChevronRight className="w-4 h-4 text-red-300 ml-auto" />
         </motion.button>
       </div>
 
@@ -6073,6 +6088,82 @@ function ProfileTab({
 
       <AnimatePresence>
         {showFeedback && <FeedbackScreen onClose={() => setShowFeedback(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDeleteAccountConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[240] flex items-center justify-center bg-slate-950/50 px-5"
+            onClick={() => {
+              if (deleteAccountBusy) return
+              setShowDeleteAccountConfirm(false)
+              setDeleteAccountError(null)
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.98, opacity: 0, y: 6 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+              className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl ring-1 ring-slate-100"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-account-title"
+            >
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50">
+                <Trash2 className="h-6 w-6 text-red-600" aria-hidden />
+              </div>
+              <h2 id="delete-account-title" className="text-lg font-black text-slate-900">
+                確定刪除帳號？
+              </h2>
+              <div className="mt-3 space-y-2 text-sm leading-relaxed text-slate-600">
+                <p>刪除後將無法復原，包含個人資料、配對、聊天紀錄與認證資料都會一併移除。</p>
+                <p className="font-semibold text-red-600">此操作無法撤銷。</p>
+              </div>
+              {deleteAccountError ? (
+                <p className="mt-3 rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+                  {deleteAccountError}
+                </p>
+              ) : null}
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  disabled={deleteAccountBusy}
+                  onClick={() => {
+                    setShowDeleteAccountConfirm(false)
+                    setDeleteAccountError(null)
+                  }}
+                  className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-bold text-slate-600 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteAccountBusy}
+                  onClick={async () => {
+                    setDeleteAccountBusy(true)
+                    setDeleteAccountError(null)
+                    const result = await deleteAccount()
+                    setDeleteAccountBusy(false)
+                    if (!result.ok) {
+                      setDeleteAccountError(result.error)
+                      return
+                    }
+                    setShowDeleteAccountConfirm(false)
+                    onSignOut()
+                  }}
+                  className="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  {deleteAccountBusy ? '刪除中…' : '確定刪除'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Admin screen */}
