@@ -17,6 +17,48 @@ export const VERIFICATION_AI_INCOME_USER_UNAVAILABLE = VERIFICATION_MANUAL_REVIE
 /** 職業／收入認證各自每日送審上限（onboarding 與站內一致） */
 export const VERIFICATION_DAILY_SUBMIT_LIMIT = 5
 
+/** 與站內 MainScreen 一致：`/api/verify-id` 最長等待 */
+export const VERIFY_ID_FETCH_TIMEOUT_MS = 5 * 60 * 1000
+
+/** onboarding 送審 overlay：API／整段逾時 */
+export const VERIFICATION_SUBMIT_TIMEOUT_USER_MESSAGE =
+  '送審逾時，請檢查網路後再試一次。'
+
+/** onboarding 送審 overlay：背景過久或連線中斷 */
+export const VERIFICATION_SUBMIT_INTERRUPT_USER_MESSAGE =
+  '送審已中斷（可能因切換 App 或連線中斷），請重新按「下一步」再送一次。'
+
+export async function postVerifyId(
+  body: Record<string, unknown>,
+  opts?: { signal?: AbortSignal },
+): Promise<Response> {
+  const timeoutCtrl = new AbortController()
+  const timeoutId = globalThis.setTimeout(() => timeoutCtrl.abort(), VERIFY_ID_FETCH_TIMEOUT_MS)
+
+  let onParentAbort: (() => void) | undefined
+  if (opts?.signal) {
+    if (opts.signal.aborted) timeoutCtrl.abort()
+    else {
+      onParentAbort = () => timeoutCtrl.abort()
+      opts.signal.addEventListener('abort', onParentAbort, { once: true })
+    }
+  }
+
+  try {
+    return await fetch('/api/verify-id', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: timeoutCtrl.signal,
+    })
+  } finally {
+    globalThis.clearTimeout(timeoutId)
+    if (opts?.signal && onParentAbort) {
+      opts.signal.removeEventListener('abort', onParentAbort)
+    }
+  }
+}
+
 export function summarizeVerificationApiError(err: unknown): string {
   if (err instanceof DOMException && err.name === 'AbortError') {
     return '請求逾時'

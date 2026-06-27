@@ -19,12 +19,16 @@ import { parseCompany, resolveEmploymentCompany, sanitizeVerificationUserMessage
 import {
   buildVerificationApiFailureReason,
   parseVerifyIdResponse,
+  postVerifyId,
   resolveManualReviewReason,
   verifyIdReasonFromBody,
   VERIFICATION_AI_PREFLIGHT_FAIL_USER_MESSAGE,
   VERIFICATION_MANUAL_REVIEW_TAIL,
   VERIFICATION_MANUAL_REVIEW_USER_MESSAGE,
   VERIFICATION_DAILY_SUBMIT_LIMIT,
+  VERIFICATION_SUBMIT_INTERRUPT_USER_MESSAGE,
+  VERIFICATION_SUBMIT_TIMEOUT_USER_MESSAGE,
+  VERIFY_ID_FETCH_TIMEOUT_MS,
 } from '@/lib/verificationAiUtils'
 import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import { PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, type Company, type DocType, type IncomeTier, type VerificationStatus } from '@/lib/types'
@@ -60,6 +64,16 @@ const STEPS_MALE   = ['生活照上傳', '職業驗證文件', '收入認證（�
 /** AI 自動審核最長等待（秒）＋緩衝；逾時或已轉人工則改靜態等待頁 */
 const EMPLOYMENT_AI_WAIT_MAX_MS = (AI_AUTO_REVIEW_UI_SECONDS + 15) * 1000
 const EMPLOYMENT_PENDING_POLL_MS = 5_000
+/** 送審 overlay 期間切 App 超過此時間 → 視為中斷，關 overlay 請使用者重送 */
+const SUBMIT_BACKGROUND_INTERRUPT_MS = 2 * 60 * 1000
+/** 送審 overlay 最長停留（含 API timeout 緩衝） */
+const SUBMIT_OVERLAY_STALL_MS = VERIFY_ID_FETCH_TIMEOUT_MS + 30_000
+
+function assertSubmitNotAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException('Submit aborted', 'AbortError')
+  }
+}
 /** 女生 onboarding 僅生活照；收入／薪資認證改由站內「編輯個人資訊」處理 */
 const STEPS_FEMALE = ['生活照上傳']
 
@@ -176,6 +190,25 @@ export default function IdentityVerifyScreen({
   const [employmentWaitMessage, setEmploymentWaitMessage] = useState('職業驗證審核中')
   /** 人工審核中：靜態等待頁（慢速輪詢，避免無限高頻請求） */
   const [employmentReviewPendingHold, setEmploymentReviewPendingHold] = useState(false)
+  const submissionAbortRef = useRef<AbortController | null>(null)
+  const submissionInterruptReasonRef = useRef<'background' | 'timeout' | null>(null)
+
+  const abortActiveSubmission = () => {
+    submissionAbortRef.current?.abort()
+    submissionAbortRef.current = null
+  }
+
+  const beginSubmissionAbortScope = () => {
+    abortActiveSubmission()
+    const ac = new AbortController()
+    submissionAbortRef.current = ac
+    return ac
+  }
+
+  const resolveSubmitAbortUserMessage = () =>
+    submissionInterruptReasonRef.current === 'background'
+      ? VERIFICATION_SUBMIT_INTERRUPT_USER_MESSAGE
+      : VERIFICATION_SUBMIT_TIMEOUT_USER_MESSAGE
 
   /** 職業文件已在步驟 2 送審；最後一步勿重複上傳 */
   const employmentSubmittedRef = useRef(false)
@@ -358,6 +391,60 @@ export default function IdentityVerifyScreen({
     }
   }, [employmentReviewPendingHold, userId, gender])
 
+  useEffect(() => () => abortActiveSubmission(), [])
+
+  /** 送審 overlay（非「已送審等結果」）：背景過久回前景 → 中斷並請重送 */
+  useEffect(() => {
+    const isEmploymentSubmitting =
+      employmentManualWait && !employmentWaitMessage.startsWith('等待職業驗證')
+    if (!isEmploymentSubmitting && !incomeApprovalWait) return
+
+    let hiddenAt: number | null = null
+
+    const interruptSubmit = () => {
+      submissionInterruptReasonRef.current = 'background'
+      abortActiveSubmission()
+      setEmploymentManualWait(false)
+      setIncomeApprovalWait(false)
+      setAiStatus('fail')
+      setAiMessage(VERIFICATION_SUBMIT_INTERRUPT_USER_MESSAGE)
+      submissionInterruptReasonRef.current = null
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now()
+        return
+      }
+      if (hiddenAt == null) return
+      const elapsed = Date.now() - hiddenAt
+      hiddenAt = null
+      if (elapsed >= SUBMIT_BACKGROUND_INTERRUPT_MS) interruptSubmit()
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [employmentManualWait, employmentWaitMessage, incomeApprovalWait])
+
+  /** 送審 overlay：最長停留逾時（避免 iOS 背景 throttle 後無限卡住） */
+  useEffect(() => {
+    const isEmploymentSubmitting =
+      employmentManualWait && !employmentWaitMessage.startsWith('等待職業驗證')
+    if (!isEmploymentSubmitting && !incomeApprovalWait) return
+
+    const t = window.setTimeout(() => {
+      submissionInterruptReasonRef.current = 'timeout'
+      abortActiveSubmission()
+      setEmploymentManualWait(false)
+      setIncomeApprovalWait(false)
+      setAiStatus('fail')
+      setAiMessage(VERIFICATION_SUBMIT_TIMEOUT_USER_MESSAGE)
+      submissionInterruptReasonRef.current = null
+    }, SUBMIT_OVERLAY_STALL_MS)
+
+    return () => window.clearTimeout(t)
+  }, [employmentManualWait, employmentWaitMessage, incomeApprovalWait])
+
   const employmentAiOutcomeRef = useRef<{
     passed: boolean
     message: string
@@ -388,23 +475,23 @@ export default function IdentityVerifyScreen({
   const fetchEmploymentAiOutcome = async (
     file: File,
     docTypeOverride?: 'employee_id' | 'tax_return' | 'payslip',
+    signal?: AbortSignal,
   ): Promise<EmploymentAiOutcome | null> => {
     employmentAiOutcomeRef.current = null
     try {
+      assertSubmitNotAborted(signal)
       const imageBase64 = await fileToBase64(file)
+      assertSubmitNotAborted(signal)
       const docTypeHint: 'employee_id' | 'tax_return' | 'payslip' | 'other' =
         docTypeOverride
         ?? (file.type === 'application/pdf' ? 'tax_return' : 'employee_id')
-      const res = await fetch('/api/verify-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64,
-          verificationKind: 'employment',
-          claimedName: claimedName?.trim() || undefined,
-          docType: docTypeHint,
-        }),
-      })
+      const res = await postVerifyId({
+        imageBase64,
+        verificationKind: 'employment',
+        claimedName: claimedName?.trim() || undefined,
+        docType: docTypeHint,
+      }, { signal })
+      assertSubmitNotAborted(signal)
       const { data, failureReason } = await parseVerifyIdResponse(res)
       if (failureReason || !data) {
         const reason = failureReason ?? buildVerificationApiFailureReason(new Error('empty response'))
@@ -429,6 +516,9 @@ export default function IdentityVerifyScreen({
       }
       return employmentAiOutcomeRef.current
     } catch (err) {
+      if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        throw err
+      }
       console.error('[IdentityVerify] employment verify-id failed:', err)
       const reason = buildVerificationApiFailureReason(err)
       employmentAiOutcomeRef.current = {
@@ -442,21 +532,20 @@ export default function IdentityVerifyScreen({
     }
   }
 
-  const fetchIncomeAiOutcome = async (file: File, tier: IncomeTier) => {
+  const fetchIncomeAiOutcome = async (file: File, tier: IncomeTier, signal?: AbortSignal) => {
     incomeAiOutcomeRef.current = null
     try {
+      assertSubmitNotAborted(signal)
       const imageBase64 = await fileToBase64(file)
-      const res = await fetch('/api/verify-id', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64,
-          verificationKind: 'income',
-          claimedIncomeTier: tier,
-          claimedName: claimedName?.trim() || undefined,
-          docType: file.type === 'application/pdf' ? 'tax_return' : 'payslip',
-        }),
-      })
+      assertSubmitNotAborted(signal)
+      const res = await postVerifyId({
+        imageBase64,
+        verificationKind: 'income',
+        claimedIncomeTier: tier,
+        claimedName: claimedName?.trim() || undefined,
+        docType: file.type === 'application/pdf' ? 'tax_return' : 'payslip',
+      }, { signal })
+      assertSubmitNotAborted(signal)
       const { data, failureReason } = await parseVerifyIdResponse(res)
       if (failureReason || !data) {
         const reason = failureReason ?? buildVerificationApiFailureReason(new Error('empty response'))
@@ -487,6 +576,9 @@ export default function IdentityVerifyScreen({
         manualReason: data.ok ? '' : resolveManualReviewReason(aiResult.reason),
       }
     } catch (err) {
+      if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        throw err
+      }
       console.error('[IdentityVerify] income verify-id failed:', err)
       const reason = buildVerificationApiFailureReason(err)
       incomeAiOutcomeRef.current = {
@@ -628,10 +720,13 @@ export default function IdentityVerifyScreen({
   /** 上傳並送審職業文件；送審成功即可進入收入步驟，不等待審核結果 */
   const submitEmploymentProof = async (
     setPhase?: (msg: string) => void,
+    signal?: AbortSignal,
   ): Promise<{ ok: boolean; error?: string }> => {
     if (!userId) return { ok: false, error: '請先登入。' }
+    assertSubmitNotAborted(signal)
     if (employmentSubmittedRef.current) {
       const p = await getProfile(userId)
+      assertSubmitNotAborted(signal)
       if (p?.verification_status === 'approved') return { ok: true }
       if (p?.verification_status === 'rejected') {
         employmentSubmittedRef.current = false
@@ -646,6 +741,7 @@ export default function IdentityVerifyScreen({
     }
 
     const attemptBefore = await getTodayEmploymentVerificationSubmissionCount(userId)
+    assertSubmitNotAborted(signal)
     if (attemptBefore >= VERIFICATION_DAILY_SUBMIT_LIMIT) {
       return { ok: false, error: `今天職業認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，請明天再試。` }
     }
@@ -656,7 +752,8 @@ export default function IdentityVerifyScreen({
 
     if (proofFile.type.startsWith('image/')) {
       setPhase?.('AI 審核中…')
-      const o = await fetchEmploymentAiOutcome(proofFile, employmentDocType || undefined)
+      const o = await fetchEmploymentAiOutcome(proofFile, employmentDocType || undefined, signal)
+      assertSubmitNotAborted(signal)
       if (o) {
         aiForSubmit = {
           passed: o.passed,
@@ -668,11 +765,13 @@ export default function IdentityVerifyScreen({
     }
 
     const profile = await getProfile(userId)
+    assertSubmitNotAborted(signal)
     const companyForSubmit = resolveEmploymentCompany(aiForSubmit?.company ?? null, profile?.company)
     const aiPassed = aiForSubmit?.passed === true
 
     setPhase?.('正在上傳文件…')
     const proofResult = await uploadProofDoc(userId, proofFile)
+    assertSubmitNotAborted(signal)
     if (!proofResult.ok) {
       return { ok: false, error: proofResult.error ?? '文件上傳失敗，請再試一次。' }
     }
@@ -704,6 +803,7 @@ export default function IdentityVerifyScreen({
     }
 
     const reviewMode: 'ai_auto' | 'manual' = aiPassed ? 'ai_auto' : 'manual'
+    setPhase?.('正在寫入送審紀錄…')
     const submitResult = await submitVerificationDoc(
       userId,
       companyForSubmit,
@@ -728,21 +828,31 @@ export default function IdentityVerifyScreen({
   }
 
   const advanceFromEmploymentStep = async () => {
+    submissionInterruptReasonRef.current = null
+    const ac = beginSubmissionAbortScope()
     setEmploymentManualWait(true)
-    setEmploymentWaitMessage('正在處理…')
+    setEmploymentWaitMessage('正在送審…')
     try {
-      const result = await submitEmploymentProof((msg) => setEmploymentWaitMessage(msg))
+      const result = await submitEmploymentProof((msg) => setEmploymentWaitMessage(msg), ac.signal)
       if (result.ok) {
+        abortActiveSubmission()
         setEmploymentManualWait(false)
         setStep((s) => s + 1)
         return
       }
+      abortActiveSubmission()
       setEmploymentManualWait(false)
       setAiStatus('fail')
       setAiMessage(result.error ?? '送審失敗，請稍後再試。')
-    } catch {
+    } catch (err) {
+      abortActiveSubmission()
       setEmploymentManualWait(false)
       setAiStatus('fail')
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setAiMessage(resolveSubmitAbortUserMessage())
+        submissionInterruptReasonRef.current = null
+        return
+      }
       setAiMessage('送審失敗，請檢查網路後再試。')
     }
   }
@@ -776,8 +886,10 @@ export default function IdentityVerifyScreen({
           setAiStatus('fail')
           setAiMessage(`今天收入認證送審已達上限 ${VERIFICATION_DAILY_SUBMIT_LIMIT} 次，已略過，仍可進入探索。`)
         } else {
+          submissionInterruptReasonRef.current = null
+          const ac = beginSubmissionAbortScope()
           setIncomeApprovalWait(true)
-          setIncomeApprovalWaitMessage('收入證明處理中…')
+          setIncomeApprovalWaitMessage('正在送審收入證明…')
 
           let extraAi: AiResult | undefined
           let reviewMode: 'ai_auto' | 'manual' = 'manual'
@@ -786,7 +898,7 @@ export default function IdentityVerifyScreen({
           try {
             if (incomeDoc.file.type.startsWith('image/')) {
               setIncomeApprovalWaitMessage('AI 正在辨識收入文件…')
-              await fetchIncomeAiOutcome(incomeDoc.file, selectedTier)
+              await fetchIncomeAiOutcome(incomeDoc.file, selectedTier, ac.signal)
               const boxed = incomeAiOutcomeRef.current
               if (boxed) {
                 extraAi = boxed.aiResult
@@ -797,8 +909,10 @@ export default function IdentityVerifyScreen({
               }
             }
 
+            assertSubmitNotAborted(ac.signal)
             setIncomeApprovalWaitMessage('正在上傳並送審…')
             const r = await uploadProofDoc(userId, incomeDoc.file)
+            assertSubmitNotAborted(ac.signal)
             if (!r.ok) {
               setAiStatus('fail')
               setAiMessage(r.error ?? '收入文件上傳失敗，仍可進入探索。')
@@ -822,7 +936,17 @@ export default function IdentityVerifyScreen({
                 void getTodayIncomeVerificationSubmissionCount(userId).then(setIncomeDailyCount)
               }
             }
+          } catch (err) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+              setAiStatus('fail')
+              setAiMessage(resolveSubmitAbortUserMessage())
+              submissionInterruptReasonRef.current = null
+            } else {
+              setAiStatus('fail')
+              setAiMessage('收入認證送審失敗，仍可進入探索。')
+            }
           } finally {
+            abortActiveSubmission()
             setIncomeApprovalWait(false)
           }
         }
@@ -1470,8 +1594,8 @@ export default function IdentityVerifyScreen({
               <p className="text-lg font-bold text-slate-900 mb-2">{employmentWaitMessage}</p>
               <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
                 {employmentWaitMessage.startsWith('等待職業驗證')
-                  ? '通過後會自動進入探索；若需人工複核，可能需要超過 12 小時。'
-                  : '送審完成後會自動進入下一步；職業驗證通過後才可進入探索。'}
+                  ? '文件已收到，通過後會自動進入探索；若需人工複核，可能需要超過 12 小時。'
+                  : '請暫留此頁直到自動進入下一步。這是送審進行中，並非已收到文件的審核等待。'}
               </p>
             </div>
             <VerifyWaitActions
@@ -1497,7 +1621,7 @@ export default function IdentityVerifyScreen({
               </motion.div>
               <p className="text-lg font-bold text-slate-900 mb-2">{incomeApprovalWaitMessage}</p>
               <p className="text-sm text-slate-600 leading-relaxed max-w-[300px]">
-                處理完成後繼續；收入審核結果不影響進入探索。
+                請暫留此頁直到處理完成；收入審核結果不影響進入探索。
               </p>
             </div>
             <VerifyWaitActions
