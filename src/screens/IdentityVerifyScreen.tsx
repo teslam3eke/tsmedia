@@ -66,8 +66,8 @@ const EMPLOYMENT_AI_WAIT_MAX_MS = (AI_AUTO_REVIEW_UI_SECONDS + 15) * 1000
 const EMPLOYMENT_PENDING_POLL_MS = 5_000
 /** 送審 overlay 期間切 App 超過此時間 → 視為中斷，關 overlay 請使用者重送 */
 const SUBMIT_BACKGROUND_INTERRUPT_MS = 2 * 60 * 1000
-/** 送審 overlay 最長停留（含 API timeout 緩衝） */
-const SUBMIT_OVERLAY_STALL_MS = VERIFY_ID_FETCH_TIMEOUT_MS + 30_000
+/** 送審 overlay 前景最長停留（與 verify-id 同為 2 分鐘） */
+const SUBMIT_OVERLAY_STALL_MS = VERIFY_ID_FETCH_TIMEOUT_MS
 
 function assertSubmitNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {

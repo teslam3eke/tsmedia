@@ -17,8 +17,8 @@ export const VERIFICATION_AI_INCOME_USER_UNAVAILABLE = VERIFICATION_MANUAL_REVIE
 /** 職業／收入認證各自每日送審上限（onboarding 與站內一致） */
 export const VERIFICATION_DAILY_SUBMIT_LIMIT = 5
 
-/** 與站內 MainScreen 一致：`/api/verify-id` 最長等待 */
-export const VERIFY_ID_FETCH_TIMEOUT_MS = 5 * 60 * 1000
+/** onboarding 前景：`/api/verify-id` 最長等待（站內 MainScreen 仍為 5 分鐘） */
+export const VERIFY_ID_FETCH_TIMEOUT_MS = 2 * 60 * 1000
 
 /** onboarding 送審 overlay：API／整段逾時 */
 export const VERIFICATION_SUBMIT_TIMEOUT_USER_MESSAGE =
