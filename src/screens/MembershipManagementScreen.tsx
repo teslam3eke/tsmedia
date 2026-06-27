@@ -18,6 +18,7 @@ import {
   MEMBERSHIP_LIST_PRICE_NTD,
   type CreditPackKey,
 } from '@/lib/membershipProducts'
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/supportContact'
 import {
   fetchPublicPaymentPricing,
   formatDiscountTenthsZh,
@@ -635,10 +636,10 @@ export default function MembershipManagementScreen({
         <p className="mt-4 text-center text-[11px] font-semibold text-slate-500">
           客服信箱：{' '}
           <a
-            href="mailto:letmesaveyou@livemail.tw"
+            href={SUPPORT_MAILTO}
             className="text-amber-400/95 underline decoration-amber-400/50 underline-offset-2"
           >
-            letmesaveyou@livemail.tw
+            {SUPPORT_EMAIL}
           </a>
         </p>
       </div>
