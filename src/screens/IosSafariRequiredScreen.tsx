@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { AlertCircle, AlertTriangle } from 'lucide-react'
 import { readIosDeferredAuthCallbackUrl } from '@/lib/auth'
 import IosOpenInSafariActions from '@/components/IosOpenInSafariActions'
+import { sanitizeUrlForDisplay } from '@/lib/iosSafariOpen'
 
 interface Props {
   /** PKCE 換券失敗（連結可能已失效） */
@@ -17,7 +18,9 @@ export default function IosSafariRequiredScreen({ exchangeFailed }: Props) {
     () => readIosDeferredAuthCallbackUrl() ?? (typeof window !== 'undefined' ? window.location.href : ''),
     [],
   )
-  const isAuthCallback = Boolean(openUrl && /[?&]code=/.test(openUrl))
+  const isAuthCallback = Boolean(
+    openUrl && (/[?&]code=/.test(openUrl) || /#.*access_token=/.test(openUrl)),
+  )
 
   return (
     <div className="min-h-dvh bg-[#f8fafc] flex flex-col px-5 pt-safe pb-safe">
@@ -64,7 +67,9 @@ export default function IosSafariRequiredScreen({ exchangeFailed }: Props) {
           tryLabel={isAuthCallback ? '嘗試用 Safari 開啟確認連結' : '嘗試用 Safari 開啟 tsMedia'}
         />
 
-        <p className="mt-3 text-[11px] text-slate-400 break-all leading-relaxed">{openUrl}</p>
+        <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
+          {sanitizeUrlForDisplay(openUrl)}
+        </p>
 
         <p className="mt-auto pt-8 text-center text-[11px] text-slate-400 leading-relaxed">
           可在「設定 → App → 預設瀏覽器 App」改回 Safari，避免連結誤開 Chrome。

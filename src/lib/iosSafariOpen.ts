@@ -2,6 +2,29 @@ import { isIosNonSafariBrowser } from '@/lib/authBrowser'
 
 const SITE_FALLBACK = 'https://www.tsmedia.tw/'
 
+/** 畫面顯示用：隱藏 hash／查詢內的登入 token，避免 JWT 整段露出。 */
+export function sanitizeUrlForDisplay(href: string): string {
+  try {
+    const u = new URL(href)
+    const hasAuthHash =
+      u.hash.includes('access_token=')
+      || u.hash.includes('refresh_token=')
+      || u.hash.includes('error=')
+    const hasAuthQuery = u.searchParams.has('code') || u.searchParams.has('token_hash')
+    const base = `${u.origin}${u.pathname}`
+
+    if (hasAuthHash) {
+      return `${base}（含信箱確認資訊，請用上方按鈕複製完整連結到 Safari）`
+    }
+    if (hasAuthQuery) {
+      return `${base}（含確認連結，請用上方按鈕複製到 Safari）`
+    }
+    return `${base}${u.search}${u.hash}`
+  } catch {
+    return SITE_FALLBACK
+  }
+}
+
 /** 要交給 Safari 開啟的 https 網址（含確認信 ?code= 等）。 */
 export function resolveTsMediaOpenUrl(preferred?: string): string {
   const raw = preferred?.trim()
