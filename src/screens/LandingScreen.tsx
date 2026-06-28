@@ -207,9 +207,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
             <div className="border-t border-slate-200/80 pt-6">
               <p className="text-[13px] font-bold tracking-wide text-slate-900">女性</p>
               <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
-                營運初期無職業限制。
-                <br />
-                未來將依市場實際回饋，評估是否增設職業限制或相關資格審查。
+                營運初期採開放加入，未來將依平台發展及市場需求，適度調整會員審核機制。
               </p>
             </div>
           </div>
