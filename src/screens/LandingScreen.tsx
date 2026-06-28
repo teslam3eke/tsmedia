@@ -190,7 +190,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
             為了維持健康的男女比例，
           </p>
 
-          <div className="mt-5">
+          <div className="mt-5 space-y-6">
             <div>
               <p className="text-[13px] font-bold tracking-wide text-slate-900">男性</p>
               <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
@@ -202,6 +202,15 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
                 <li>晶圓製造龍頭</li>
                 <li>IC 設計龍頭</li>
               </ol>
+            </div>
+
+            <div className="border-t border-slate-200/80 pt-6">
+              <p className="text-[13px] font-bold tracking-wide text-slate-900">女性</p>
+              <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
+                營運初期無職業限制。
+                <br />
+                未來將依市場實際回饋，評估是否增設職業限制或相關資格審查。
+              </p>
             </div>
           </div>
         </motion.div>
