@@ -10,7 +10,8 @@ insert into public.app_feature_flags (key, enabled)
 values ('test_daily_ten_credits', false)
 on conflict (key) do nothing;
 
-insert into public.app_feature_flags (key, enabled)values ('site_maintenance', true)
+insert into public.app_feature_flags (key, enabled)
+values ('site_maintenance', true)
 on conflict (key) do update set enabled = excluded.enabled;
 
 create or replace function public.get_site_public_status()
