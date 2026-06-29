@@ -13,8 +13,10 @@ import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
 import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
+import MaintenanceScreen from '@/screens/MaintenanceScreen'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
+import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
 
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -163,8 +165,17 @@ export default function App() {
   const [paymentReturnRecoveryExhausted, setPaymentReturnRecoveryExhausted] = useState(false)
   const routeSignedInUserFlightRef = useRef<Promise<void> | null>(null)
 
+  const siteMaintenance = useSiteMaintenance()
+
   /** 登入後心跳：認證通過推播略過前景 PWA（見 migration 117） */
-  useAppPresenceHeartbeat(user?.id)
+  useAppPresenceHeartbeat(siteMaintenance.maintenance ? undefined : user?.id)
+
+  /** 全站維護：清 session，避免舊登入狀態繞過閘門 */
+  useEffect(() => {
+    if (!siteMaintenance.maintenance) return
+    void signOut()
+    setUser(null)
+  }, [siteMaintenance.maintenance])
 
   const getActiveUser = async () => {
     if (user) return user
@@ -959,6 +970,18 @@ export default function App() {
     !paymentReturnRecoveryExhausted &&
     !user?.id &&
     screen !== 'main'
+
+  if (siteMaintenance.loading) {
+    return (
+      <div className="min-h-dvh bg-white flex flex-col items-center justify-center px-6 text-slate-900">
+        <p className="text-sm font-semibold text-slate-500">載入中…</p>
+      </div>
+    )
+  }
+
+  if (siteMaintenance.maintenance) {
+    return <MaintenanceScreen />
+  }
 
   if (!authReady || paymentReturnRecovering) {
     return (
