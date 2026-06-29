@@ -1,7 +1,16 @@
 -- 119：全站維護模式（app_feature_flags + 公開 RPC，恢復時 UPDATE enabled = false）
+-- 正式庫若未跑過 017，先建 app_feature_flags（017 其餘測試表／RPC 仍略過）。
+
+create table if not exists public.app_feature_flags (
+  key text primary key,
+  enabled boolean not null default false
+);
 
 insert into public.app_feature_flags (key, enabled)
-values ('site_maintenance', true)
+values ('test_daily_ten_credits', false)
+on conflict (key) do nothing;
+
+insert into public.app_feature_flags (key, enabled)values ('site_maintenance', true)
 on conflict (key) do update set enabled = excluded.enabled;
 
 create or replace function public.get_site_public_status()
