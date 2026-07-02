@@ -14,6 +14,8 @@ import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
 import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
 import MaintenanceScreen from '@/screens/MaintenanceScreen'
+import StagingEnvBanner from '@/components/StagingEnvBanner'
+import { isStagingAppEnv } from '@/lib/appEnv'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
@@ -965,6 +967,8 @@ export default function App() {
       </div>
     ) : null
 
+  const stagingBanner = isStagingAppEnv() ? <StagingEnvBanner /> : null
+
   const paymentReturnRecovering =
     hasPendingPaymentReturn() &&
     !paymentReturnRecoveryExhausted &&
@@ -973,9 +977,12 @@ export default function App() {
 
   if (siteMaintenance.loading) {
     return (
-      <div className="min-h-dvh bg-white flex flex-col items-center justify-center px-6 text-slate-900">
-        <p className="text-sm font-semibold text-slate-500">載入中…</p>
-      </div>
+      <>
+        {stagingBanner}
+        <div className="min-h-dvh bg-white flex flex-col items-center justify-center px-6 text-slate-900">
+          <p className="text-sm font-semibold text-slate-500">載入中…</p>
+        </div>
+      </>
     )
   }
 
@@ -985,7 +992,9 @@ export default function App() {
 
   if (!authReady || paymentReturnRecovering) {
     return (
-      <SplashScreen
+      <>
+        {stagingBanner}
+        <SplashScreen
         subtitle={
           paymentReturnRecovering
             ? '付款完成，正在恢復登入…'
@@ -994,23 +1003,32 @@ export default function App() {
               : undefined
         }
       />
+      </>
     )
   }
 
   if (needsIosSafariBrowserGate()) {
-    return <IosSafariRequiredScreen exchangeFailed={authSafariExchangeFailed} />
+    return (
+      <>
+        {stagingBanner}
+        <IosSafariRequiredScreen exchangeFailed={authSafariExchangeFailed} />
+      </>
+    )
   }
 
   /** splash 無對應 AnimatePresence 分支；authReady 後勿留空白頁 */
   if (screen === 'splash') {
     return (
-      <SplashScreen
+      <>
+        {stagingBanner}
+        <SplashScreen
         subtitle={
           hasPendingPaymentReturn()
             ? '付款完成，正在進入…'
             : '載入中…'
         }
       />
+      </>
     )
   }
 
@@ -1021,6 +1039,7 @@ export default function App() {
   if (screen === 'main') {
     return (
       <>
+        {stagingBanner}
         {connectivityToast}
         <div
           className="app-container flex flex-col bg-white overflow-hidden"
@@ -1039,6 +1058,7 @@ export default function App() {
 
   return (
     <>
+      {stagingBanner}
       {connectivityToast}
       <AnimatePresence mode="wait">
       <motion.div

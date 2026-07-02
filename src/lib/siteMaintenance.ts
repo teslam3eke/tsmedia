@@ -1,10 +1,14 @@
 import { supabase } from '@/lib/supabase'
+import { shouldIgnoreSiteMaintenance } from '@/lib/appEnv'
 
 export type SitePublicStatus = {
   maintenance: boolean
 }
 
 export async function fetchSitePublicStatus(): Promise<SitePublicStatus> {
+  if (shouldIgnoreSiteMaintenance()) {
+    return { maintenance: false }
+  }
   if (import.meta.env.VITE_SITE_MAINTENANCE === '1') {
     return { maintenance: true }
   }
