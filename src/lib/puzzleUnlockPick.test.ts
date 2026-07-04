@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   computeChatUnlockedGlobalTiles,
   getRecentMatchBoostState,
+  mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
   pickOnePuzzleTileLocal,
   pickPuzzleTilesLocalBatch,
@@ -34,7 +35,6 @@ describe('computeChatUnlockedGlobalTiles', () => {
       round: 4,
       mult: 1,
       slots: 1,
-      manualUnlockedTiles: [],
       puzzleSeedKey: 'test-match',
       matchedAt: 1_700_000_000_000,
     })
@@ -49,7 +49,6 @@ describe('computeChatUnlockedGlobalTiles', () => {
       round: 1,
       mult: 2,
       slots: 1,
-      manualUnlockedTiles: [],
       puzzleSeedKey: 'boost-test',
       matchedAt: 1_700_000_000_000,
     })
@@ -57,6 +56,42 @@ describe('computeChatUnlockedGlobalTiles', () => {
     const a = chatTiles[0]! % 16
     const b = chatTiles[1]! % 16
     expect(puzzleTilesAdjacent(a, b)).toBe(false)
+  })
+
+  it('聊天解鎖序列不受道具格影響（避免道具解鎖後舊格消失）', () => {
+    const base = computeChatUnlockedGlobalTiles({
+      round: 3,
+      mult: 1,
+      slots: 1,
+      puzzleSeedKey: 'stable-chat',
+      matchedAt: 1_700_000_000_000,
+    })
+    expect(base).toHaveLength(3)
+    expect(base).toEqual(
+      computeChatUnlockedGlobalTiles({
+        round: 3,
+        mult: 1,
+        slots: 1,
+        puzzleSeedKey: 'stable-chat',
+        matchedAt: 1_700_000_000_000,
+      }),
+    )
+  })
+
+  it('連續聊天輪次不相鄰（有非相鄰候選時）', () => {
+    const chatTiles = computeChatUnlockedGlobalTiles({
+      round: 3,
+      mult: 1,
+      slots: 1,
+      puzzleSeedKey: 'three-rounds',
+      matchedAt: 1_700_000_000_000,
+    })
+    expect(chatTiles).toHaveLength(3)
+    for (let i = 1; i < chatTiles.length; i += 1) {
+      expect(
+        puzzleTilesAdjacent(chatTiles[i - 1]! % 16, chatTiles[i]! % 16),
+      ).toBe(false)
+    }
   })
 
   it('相鄰候選用盡時仍可解鎖（不卡住）', () => {
@@ -84,6 +119,12 @@ describe('getRecentMatchBoostState', () => {
   })
 })
 
+describe('mergePuzzleManualTilesOrdered', () => {
+  it('保留順序且 append 新格', () => {
+    expect(mergePuzzleManualTilesOrdered([8, 2], [2, 5, 8])).toEqual([8, 2, 5])
+  })
+})
+
 describe('pickBlurUnlockGlobalTiles', () => {
   it('boost 期間一次解 2 片且第二片不與第一片相鄰', () => {
     const tiles = pickBlurUnlockGlobalTiles({
@@ -96,6 +137,27 @@ describe('pickBlurUnlockGlobalTiles', () => {
     })
     expect(tiles).toHaveLength(2)
     expect(puzzleTilesAdjacent(tiles[0]! % 16, tiles[1]! % 16)).toBe(false)
+  })
+
+  it('道具解鎖避開同 slot 最後一格（含聊天已解鎖）', () => {
+    const chatTiles = computeChatUnlockedGlobalTiles({
+      round: 2,
+      mult: 1,
+      slots: 1,
+      puzzleSeedKey: 'blur-after-chat',
+      matchedAt: 1_700_000_000_000,
+    })
+    const lastChatLocal = chatTiles[chatTiles.length - 1]! % 16
+    const picked = pickBlurUnlockGlobalTiles({
+      chatTilesOrdered: chatTiles,
+      manualUnlockedTiles: [],
+      activePhotoIndex: 0,
+      puzzleSeedKey: 'blur-after-chat',
+      matchedAt: 1_700_000_000_000,
+      boostActive: false,
+    })
+    expect(picked).toHaveLength(1)
+    expect(puzzleTilesAdjacent(picked[0]! % 16, lastChatLocal)).toBe(false)
   })
 
   it('非 boost 期間只解 1 片', () => {

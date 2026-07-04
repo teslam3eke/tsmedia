@@ -119,18 +119,17 @@ export function puzzleCountPerSlot(globalSet: ReadonlySet<number>, slot: number)
   return n
 }
 
-/** 依聊天輪次順序回放解鎖格（含 boost 第二格）；與 DB 無關，由訊息推導。 */
+/** 依聊天輪次順序回放解鎖格（含 boost 第二格）；僅由訊息推導，不受道具格影響（避免道具解鎖後聊天格重算消失）。 */
 export function computeChatUnlockedGlobalTiles(params: {
   round: number
   mult: number
   slots: number
-  manualUnlockedTiles: number[]
   puzzleSeedKey: string
   matchedAt?: number
 }): number[] {
-  const { round, mult, slots, manualUnlockedTiles, puzzleSeedKey, matchedAt } = params
+  const { round, mult, slots, puzzleSeedKey, matchedAt } = params
   const rng = puzzleMulberry32(puzzleHashSeed(`${puzzleSeedKey}|puzzle|${matchedAt ?? 0}`))
-  const occupied = new Set<number>(manualUnlockedTiles)
+  const occupied = new Set<number>()
   const chatTiles: number[] = []
 
   const addChatUnlock = (slot: number, avoidAdjacentToLocal: number | null): number | null => {
@@ -145,9 +144,7 @@ export function computeChatUnlockedGlobalTiles(params: {
     const slot = Math.floor((r - 1) / 16)
     if (slot >= slots) break
 
-    const prevGlobal = chatTiles.length > 0 ? chatTiles[chatTiles.length - 1]! : null
-    const avoidPrev =
-      prevGlobal !== null && Math.floor(prevGlobal / 16) === slot ? prevGlobal % 16 : null
+    const avoidPrev = getLastUnlockedLocalInSlot(chatTiles, [], slot)
 
     const firstLocal = addChatUnlock(slot, avoidPrev)
     if (mult === 2 && firstLocal !== null) {
@@ -158,7 +155,19 @@ export function computeChatUnlockedGlobalTiles(params: {
   return chatTiles
 }
 
-/** 連續解鎖序列中，指定 slot 最後一格的 local index（聊天先、道具後）。 */
+/** 合併道具解鎖格：保留先前順序，新格 append（勿 sort，供「避開上一格相鄰」用）。 */
+export function mergePuzzleManualTilesOrdered(prev: number[], incoming: number[]): number[] {
+  const seen = new Set(prev)
+  const next = [...prev]
+  for (const t of incoming) {
+    if (t < 0 || t > 47 || seen.has(t)) continue
+    seen.add(t)
+    next.push(t)
+  }
+  return next
+}
+
+/** 連續解鎖序列中，指定 slot 最後一格的 local index（聊天先、道具後；manual 須為解鎖順序）。 */
 export function getLastUnlockedLocalInSlot(
   chatTilesOrdered: number[],
   manualTilesOrdered: number[],

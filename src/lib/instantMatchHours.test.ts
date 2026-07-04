@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { isInstantMatchOpenNow, msUntilInstantMatchOpens } from '@/lib/instantMatchHours'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  instantMatchAlwaysOpenForTesting,
+  isInstantMatchOpenNow,
+  msUntilInstantMatchOpens,
+} from '@/lib/instantMatchHours'
 
 /** 以 UTC 偏移建構「台北牆上時間」對應的 Date（僅供測試）。 */
 function taipeiWallAsUtcDate(hour: number, minute = 0): Date {
@@ -11,6 +15,13 @@ function taipeiWallAsUtcDate(hour: number, minute = 0): Date {
 }
 
 describe('isInstantMatchOpenNow', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_INSTANT_MATCH_ALWAYS_OPEN', '')
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('22:00–23:59 台北為開放', () => {
     expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(22, 0))).toBe(true)
     expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(23, 30))).toBe(true)
@@ -27,7 +38,26 @@ describe('isInstantMatchOpenNow', () => {
   })
 })
 
+describe('instantMatchAlwaysOpenForTesting', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('VITE_INSTANT_MATCH_ALWAYS_OPEN=1 時任何時間為開放', () => {
+    vi.stubEnv('VITE_INSTANT_MATCH_ALWAYS_OPEN', '1')
+    expect(instantMatchAlwaysOpenForTesting()).toBe(true)
+    expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(12, 0))).toBe(true)
+  })
+})
+
 describe('msUntilInstantMatchOpens', () => {
+  beforeEach(() => {
+    vi.stubEnv('VITE_INSTANT_MATCH_ALWAYS_OPEN', '')
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('開放中回傳 0', () => {
     expect(msUntilInstantMatchOpens(taipeiWallAsUtcDate(22, 10))).toBe(0)
   })

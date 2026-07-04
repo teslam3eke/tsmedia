@@ -34,6 +34,10 @@ interface ImportMetaEnv {
   readonly VITE_APP_ENV?: string
   /** 設為 1 時略過 DB 維護旗標（測試站共用正式 Supabase 時必設） */
   readonly VITE_IGNORE_SITE_MAINTENANCE?: string
+  /** 設為 1 時即時配對任何時間可排隊（本機測試；須 DB instant_match_always_open 旗標） */
+  readonly VITE_INSTANT_MATCH_ALWAYS_OPEN?: string
+  /** 設為 1 時不彈「開啟通知」引導（本機 dev 預設已略過） */
+  readonly VITE_SKIP_NOTIF_NUDGE?: string
 }
 
 interface ImportMeta {

@@ -7,3 +7,14 @@ export function isStagingAppEnv(): boolean {
 export function shouldIgnoreSiteMaintenance(): boolean {
   return import.meta.env.VITE_IGNORE_SITE_MAINTENANCE === '1'
 }
+
+/**
+ * 本機 dev 或 LAN HTTP（非 secure context）無法可靠取得通知權限；
+ * 略過反覆彈出的「開啟通知」引導。
+ */
+export function shouldSkipNotificationNudge(): boolean {
+  if (import.meta.env.DEV) return true
+  if (import.meta.env.VITE_SKIP_NOTIF_NUDGE === '1') return true
+  if (typeof window !== 'undefined' && !window.isSecureContext) return true
+  return false
+}

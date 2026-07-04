@@ -8,6 +8,7 @@ import PWAInstallGuide from '@/components/PWAInstallGuide'
 import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import { shouldSkipNotificationNudge } from '@/lib/appEnv'
 
 interface Check {
   id: string
@@ -173,11 +174,14 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
     isStandaloneMode &&
     notifSupported &&
     !notifGranted &&
-    !notifDismissed
+    !notifDismissed &&
+    !shouldSkipNotificationNudge()
 
   const canContinue =
     allDone &&
-    (isStandaloneMode ? notifGranted || notifDismissed || !notifSupported : pwaSkipped)
+    (isStandaloneMode
+      ? notifGranted || notifDismissed || !notifSupported || shouldSkipNotificationNudge()
+      : pwaSkipped)
 
   const requestNotifications = async () => {
     if (!notifSupported) {

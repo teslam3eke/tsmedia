@@ -112,7 +112,6 @@ export function getPuzzleProgress(
       round,
       mult,
       slots,
-      manualUnlockedTiles,
       puzzleSeedKey,
       matchedAt,
     })

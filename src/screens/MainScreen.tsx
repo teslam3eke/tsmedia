@@ -104,6 +104,7 @@ import {
 } from '@/lib/discoverDemoPhotoUrls'
 import {
   computeChatUnlockedGlobalTiles,
+  mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
 } from '@/lib/puzzleUnlockPick'
 import {
@@ -119,6 +120,7 @@ import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePho
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
+import { shouldSkipNotificationNudge } from '@/lib/appEnv'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
 import {
   armChatPresenceIfForeground,
@@ -3666,7 +3668,6 @@ function ChatRoomView({
       round,
       mult,
       slots: photoSlots,
-      manualUnlockedTiles,
       puzzleSeedKey,
       matchedAt: matchedAtForPuzzle,
     })
@@ -3696,7 +3697,7 @@ function ChatRoomView({
         const carryId = conversation.instantCarrySessionId?.trim()
         const carryTiles = carryId ? await getInstantSessionPuzzleUnlockedTiles(carryId) : []
         const unlockedFromServer = mergePuzzleTileIds(carryTiles, matchManual)
-        setManualUnlockedTiles(unlockedFromServer)
+        setManualUnlockedTiles((prev) => mergePuzzleManualTilesOrdered(prev, unlockedFromServer))
         if (unlockedFromServer.length > prevLen) {
           onBlurUnlockSpent?.()
         }
@@ -6448,6 +6449,10 @@ export default function MainScreen({
   /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒（Safari 分頁改由安全檢測頁引導）。 */
   useEffect(() => {
     if (!user?.id) return
+    if (shouldSkipNotificationNudge()) {
+      setShowNotifPermissionNudge(false)
+      return
+    }
     if (needsPwaEncapsulationGate()) return
     if (typeof window === 'undefined' || !('Notification' in window)) return
     if (Notification.permission === 'granted') {
@@ -7860,6 +7865,7 @@ export default function MainScreen({
 
       <AnimatePresence>
         {showNotifPermissionNudge &&
+          !shouldSkipNotificationNudge() &&
           typeof window !== 'undefined' &&
           'Notification' in window &&
           Notification.permission !== 'granted' && (

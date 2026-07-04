@@ -47,6 +47,7 @@ import {
 import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import {
   computeChatUnlockedGlobalTiles,
+  mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
 } from '@/lib/puzzleUnlockPick'
 import {
@@ -864,10 +865,10 @@ export default function InstantMatchTab({
     }
     let cancelled = false
     void getInstantSessionPuzzleUnlockedTiles(sessionId).then((tiles) => {
-      if (!cancelled) setManualUnlockedTiles(tiles)
+      if (!cancelled) setManualUnlockedTiles((prev) => mergePuzzleManualTilesOrdered(prev, tiles))
     })
     const unsub = subscribeToInstantSessionPuzzleUnlock(sessionId, userId, (tiles) => {
-      setManualUnlockedTiles(tiles)
+      setManualUnlockedTiles((prev) => mergePuzzleManualTilesOrdered(prev, tiles))
     })
     return () => {
       cancelled = true
@@ -1123,7 +1124,6 @@ export default function InstantMatchTab({
       round,
       mult: 1,
       slots: photoSlots,
-      manualUnlockedTiles,
       puzzleSeedKey,
       matchedAt: matchedAtForPuzzle,
     })
@@ -1145,7 +1145,7 @@ export default function InstantMatchTab({
       await onRefreshCredits?.()
       if (res.ok) {
         const unlockedFromServer = res.unlockedTiles ?? [...manualUnlockedTiles, firstGlobal]
-        setManualUnlockedTiles(unlockedFromServer)
+        setManualUnlockedTiles((prev) => mergePuzzleManualTilesOrdered(prev, unlockedFromServer))
         if (unlockedFromServer.length > prevLen) {
           onBlurUnlockSpent?.()
         }

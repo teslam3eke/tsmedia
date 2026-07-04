@@ -18,7 +18,12 @@ function taipeiHourMinute(date: Date): { hour: number; minute: number } {
 }
 
 /** 與 DB `instant_match_open_now()` 對齊：hour >= 22 或 hour < 1。 */
+export function instantMatchAlwaysOpenForTesting(): boolean {
+  return import.meta.env.VITE_INSTANT_MATCH_ALWAYS_OPEN === '1'
+}
+
 export function isInstantMatchOpenNow(date = new Date()): boolean {
+  if (instantMatchAlwaysOpenForTesting()) return true
   const { hour } = taipeiHourMinute(date)
   return hour >= 22 || hour < 1
 }
