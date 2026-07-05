@@ -21,7 +21,19 @@ const FATE_RING_R = 28
 /** 天選緣分共鳴 UI 下限（golden_score 9→90%、10→100%） */
 const HEAVEN_MIN_RESONANCE_PERCENT = 90
 
-const FATED_PAIR_COPY = {
+type FatedPairCopyBlock = {
+  introEyebrow: string
+  introTitle: string
+  introLead: string
+  ribbonTitle: string
+  ribbonSub: string
+  statusTag: string
+  meterLabel: string
+  detailHeading: string
+  detailBlurb: string
+}
+
+const FATED_PAIR_COPY: Record<FatedPairKind, FatedPairCopyBlock> = {
   heaven: {
     introEyebrow: 'Friday Edit · 週五限定',
     introTitle: '天選之人',
@@ -46,7 +58,7 @@ const FATED_PAIR_COPY = {
     detailBlurb:
       '天選之人的相對，你們擁有截然不同的特質。在傳統定義上為不合，但在現今社會中有可能成為互補。',
   },
-} as const
+}
 
 function aiMatchPercent(kind: FatedPairKind, slot: FatedPairSlotState): number {
   if (kind === 'heaven') {
@@ -202,7 +214,7 @@ function FateResonanceCard({
   displayStars,
   starLabel,
 }: {
-  copy: (typeof FATED_PAIR_COPY)['heaven']
+  copy: FatedPairCopyBlock
   matchPercent: number
   ringId: string
   displayStars: number
