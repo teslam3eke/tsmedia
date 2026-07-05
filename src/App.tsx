@@ -7,6 +7,7 @@ import AuthScreen from '@/screens/AuthScreen'
 import SecurityCheckScreen from '@/screens/SecurityCheckScreen'
 import ProfileSetupScreen, { type ProfileSetupData } from '@/screens/ProfileSetupScreen'
 import QuestionnaireScreen from '@/screens/QuestionnaireScreen'
+import MbtiQuizScreen from '@/screens/MbtiQuizScreen'
 import IdentityVerifyScreen from '@/screens/IdentityVerifyScreen'
 import MainScreen, { type MainScreenTab } from '@/screens/MainScreen'
 import TermsConsentScreen from '@/screens/TermsConsentScreen'
@@ -51,7 +52,8 @@ import {
 } from '@/lib/ecpayCheckout'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
-import { isOnboardingFlowScreen, setOnboardingResumeProtect } from '@/lib/onboardingDraft'
+import { isOnboardingFlowScreen, setOnboardingResumeProtect, clearOnboardingJsonDraft } from '@/lib/onboardingDraft'
+import { profileHasMbti, type MbtiType } from '@/lib/mbti'
 import type { QuestionnaireEntry } from '@/lib/types'
 import type { Question } from '@/utils/questions'
 // profileSetupData is collected but used for future profile enrichment
@@ -67,6 +69,7 @@ type Screen =
   | 'terms-consent'
   | 'profile-setup'
   | 'questionnaire'
+  | 'mbti-quiz'
   | 'identity-verify'
   | 'main'
 
@@ -80,6 +83,7 @@ const SCREEN_ORDER: Screen[] = [
   'terms-consent',
   'profile-setup',
   'questionnaire',
+  'mbti-quiz',
   'identity-verify',
   'main',
 ]
@@ -153,6 +157,8 @@ export default function App() {
   const [mainInitialTab, setMainInitialTab] = useState<MainScreenTab>('discover')
   /** 職業 submitted 等待時從驗證頁返回編輯資料／問卷 */
   const [verifyWaitRevisit, setVerifyWaitRevisit] = useState(false)
+  /** MBTI 測驗完成後導向：入門流程 vs 探索分頁門檻 */
+  const [mbtiQuizReturnTo, setMbtiQuizReturnTo] = useState<'onboarding' | 'main-discover'>('onboarding')
   /** iOS 非 Safari 開啟 PKCE 確認連結，或換券失敗 */
   const [authSafariExchangeFailed, setAuthSafariExchangeFailed] = useState(false)
   /** 信箱連結換券失敗時顯示於 landing */
@@ -254,6 +260,13 @@ export default function App() {
     go('main')
   }
 
+  /** 問卷／MBTI 完成後：僅在仍缺生活照或（男性）職業驗證時才進 identity-verify */
+  const routeAfterOnboardingMilestone = (profile: import('@/lib/types').ProfileRow | null) => {
+    if (femaleNeedsLifePhotoOnboarding(profile)) return go('identity-verify')
+    if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
+    launchMainFromProfile(profile)
+  }
+
   // After security check, decide where to go based on profile completeness.
   const routeAfterSecurityCheck = (
     profile: import('@/lib/types').ProfileRow | null,
@@ -277,9 +290,11 @@ export default function App() {
     setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
-    if (femaleNeedsLifePhotoOnboarding(profile)) return go('identity-verify')
-    if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
-    launchMainFromProfile(profile)
+    if (!profileHasMbti(profile)) {
+      setMbtiQuizReturnTo('onboarding')
+      return go('mbti-quiz')
+    }
+    routeAfterOnboardingMilestone(profile)
   }
 
   // 首次登入仍走安全頁；iOS Safari 分頁每次皆須封裝引導；其餘裝置看過一次後略過。
@@ -303,9 +318,11 @@ export default function App() {
     setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
-    if (femaleNeedsLifePhotoOnboarding(profile)) return go('identity-verify')
-    if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
-    launchMainFromProfile(profile)
+    if (!profileHasMbti(profile)) {
+      setMbtiQuizReturnTo('onboarding')
+      return go('mbti-quiz')
+    }
+    routeAfterOnboardingMilestone(profile)
   }
 
   useEffect(() => {
@@ -913,6 +930,11 @@ export default function App() {
     go('questionnaire')
   }
 
+  const openMbtiQuizFromDiscoverGate = () => {
+    setMbtiQuizReturnTo('main-discover')
+    go('mbti-quiz')
+  }
+
   // ── Questionnaire complete → save answers ─────────────────────
   const handleQuestionnaireComplete = async (
     answers: Record<number, string>,
@@ -929,8 +951,23 @@ export default function App() {
     if (activeUser) {
       await saveQuestionnaire(activeUser.id, entries)
     }
-    // 女生：僅生活照（無 onboarding 收入頁）；男生：職業驗證等（皆走 Identity 流程）
-    go('identity-verify')
+    setMbtiQuizReturnTo('onboarding')
+    go('mbti-quiz')
+  }
+
+  const handleMbtiComplete = async (mbtiType: MbtiType) => {
+    const activeUser = await getActiveUser()
+    if (activeUser) {
+      await upsertProfile({ userId: activeUser.id, mbtiType })
+      clearOnboardingJsonDraft(activeUser.id, 'mbti-quiz')
+    }
+    if (mbtiQuizReturnTo === 'main-discover') {
+      setMainInitialTab('discover')
+      go('main')
+      return
+    }
+    const profile = activeUser ? await getProfile(activeUser.id) : null
+    routeAfterOnboardingMilestone(profile)
   }
 
   const handleTermsAccept = async () => {
@@ -1050,6 +1087,7 @@ export default function App() {
             initialDiscoverGender={userGender}
             initialTab={mainInitialTab}
             onSignOut={() => go('landing')}
+            onRequireMbtiQuiz={openMbtiQuizFromDiscoverGate}
           />
         </div>
       </>
@@ -1157,6 +1195,19 @@ export default function App() {
             gender={userGender}
             userId={user?.id}
             onBack={() => go('profile-setup')}
+            onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
+          />
+        )}
+
+        {screen === 'mbti-quiz' && (
+          <MbtiQuizScreen
+            userId={user?.id}
+            onComplete={handleMbtiComplete}
+            onBack={
+              mbtiQuizReturnTo === 'main-discover'
+                ? () => go('main')
+                : () => go('questionnaire')
+            }
             onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
           />
         )}

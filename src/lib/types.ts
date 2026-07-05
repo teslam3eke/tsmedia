@@ -56,6 +56,8 @@ export interface ProfileRow {
   bio: string | null
   interests: string[] | null
   questionnaire: QuestionnaireEntry[] | null  // 10 questions + answers (jsonb)
+  /** MBTI 四字母人格類型（探索卡顯示） */
+  mbti_type?: string | null
   photo_urls: string[] | null                  // 生活照 Storage 路徑，1–3 張
   work_region: Region | null                   // 工作地點
   home_region: Region | null                   // 戶籍地

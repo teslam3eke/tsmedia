@@ -242,6 +242,36 @@ export function pickBlurUnlockGlobalTiles(params: {
   return [first, second]
 }
 
+/** 輔助問答完成：在同一 slot 連解 numTiles 格（不消耗道具）。 */
+export function pickChatAssistPuzzleTiles(params: {
+  chatTilesOrdered: number[]
+  manualUnlockedTiles: number[]
+  activePhotoIndex: number
+  puzzleSeedKey: string
+  matchedAt?: number
+  sessionId: string
+  numTiles?: number
+}): number[] {
+  const numTiles = params.numTiles ?? 3
+  const out: number[] = []
+  let manual = [...params.manualUnlockedTiles]
+  for (let i = 0; i < numTiles; i += 1) {
+    const tile = pickNextBlurUnlockGlobalTile({
+      chatTilesOrdered: params.chatTilesOrdered,
+      manualUnlockedTiles: manual,
+      activePhotoIndex: params.activePhotoIndex,
+      puzzleSeedKey: params.puzzleSeedKey,
+      matchedAt: params.matchedAt,
+      spendIndex: manual.length + i,
+      extraOccupiedGlobal: new Set(out),
+    })
+    if (tile == null) break
+    out.push(tile)
+    manual = mergePuzzleManualTilesOrdered(manual, [tile])
+  }
+  return out
+}
+
 /** 探索示意：依序解鎖 need 格（同一 slot）。 */
 export function pickPuzzleTilesLocalBatch(
   prev: ReadonlySet<number>,

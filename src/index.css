@@ -104,6 +104,11 @@
     padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
   }
 
+  /* 入門／表單頁底欄：home indicator + 最小 3rem，避免按鈕貼底被切 */
+  .pb-safe {
+    padding-bottom: max(3rem, calc(env(safe-area-inset-bottom, 0px) + 1.25rem));
+  }
+
   /* iOS-safe scrollable container — use on any h-full overflow-y-auto div */
   .scroll-ios {
     height: 100dvh;

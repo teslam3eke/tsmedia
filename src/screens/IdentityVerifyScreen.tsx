@@ -310,6 +310,23 @@ export default function IdentityVerifyScreen({
         }
       }
 
+      // 草稿 step 可能把使用者拉回「生活照」；若 DB 已有足夠照片則略過該步
+      if (gender === 'female' && storedPaths.length >= PROFILE_PHOTO_MIN) {
+        if (!cancelled) {
+          setDraftHydrated(true)
+          queueMicrotask(() => onCompleteRef.current())
+        }
+        return
+      }
+      if (gender === 'male' && storedPaths.length >= PROFILE_PHOTO_MIN) {
+        const st = p.verification_status ?? 'pending'
+        if (st === 'approved' || st === 'submitted') {
+          setStep(2)
+        } else {
+          setStep((s) => (s === 0 ? 1 : s))
+        }
+      }
+
       if (!cancelled) setDraftHydrated(true)
     })()
     return () => { cancelled = true }

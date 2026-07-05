@@ -64,6 +64,12 @@ import {
   instantSessionAbandon,
   instantSessionAbandonKeepalive,
   subscribeToMyAppNotifications,
+  matchChatPeerVisibleInMatch,
+  matchChatAssistPoll,
+  matchChatAssistTryStart,
+  matchChatAssistSubmit,
+  grantChatAssistPuzzleTiles,
+  type ChatAssistSessionRow,
 } from '@/lib/db'
 import { readInstantEnqueueIntent, clearInstantEnqueueIntent } from '@/lib/instantMatchEnqueueIntent'
 import { getAppDayKey, msUntilNextAppDayKeyChange, msUntilNextTaipei2200, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
@@ -86,6 +92,7 @@ import {
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
+import { MBTI_TYPES, isValidMbtiType, normalizeMbtiTypeForDisplay, profileHasMbti } from '@/lib/mbti'
 import { ensureQuestionnaireHasFixedSixth } from '@/utils/questions'
 import { IncomeBorder, IncomeCrownBadge } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
@@ -98,6 +105,8 @@ import { CreditRewardFlash, type CreditRewardVariant } from '@/components/Credit
 import MatchSuccessSplash from '@/components/MatchSuccessSplash'
 import InstantMatchTab, { type InstantNavGuardSnapshot } from '@/screens/InstantMatchTab'
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
+import ChatAssistModal from '@/components/ChatAssistModal'
+import ChatAssistRevealCard from '@/components/ChatAssistRevealCard'
 import {
   DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
   DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
@@ -106,7 +115,21 @@ import {
   computeChatUnlockedGlobalTiles,
   mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
+  pickChatAssistPuzzleTiles,
 } from '@/lib/puzzleUnlockPick'
+import {
+  CHAT_ASSIST_CHECK_INTERVAL_MS,
+  CHAT_ASSIST_POLL_MS,
+  CHAT_ASSIST_PUZZLE_TILES,
+  shouldTryStartChatAssist,
+  buildChatTimelineWithAssists,
+  getChatAssistLastRevealAtMs,
+} from '@/lib/chatAssistLogic'
+import { pickChatAssistPromptId } from '@/utils/chatAssistPrompts'
+import {
+  isChatAssistModalHandled,
+  markChatAssistModalHandled,
+} from '@/lib/chatAssistUiState'
 import {
   PuzzlePhotoUnlock,
   collectConversationPhotoUrls,
@@ -209,6 +232,8 @@ interface Profile {
   name: string
   nickname?: string
   age: number
+  /** MBTI 四字母（探索卡顯示於年齡旁） */
+  mbtiType?: string
   company: string
   role: string
   department: string
@@ -378,6 +403,18 @@ function getPublicName(profile: Pick<Profile, 'nickname' | 'name' | 'id'>): stri
   return profile.nickname?.trim() || `會員 ${profile.id}`
 }
 
+function DiscoverAgeMbtiLine({ profile }: { profile: Pick<Profile, 'age' | 'mbtiType'> }) {
+  const mbti = normalizeMbtiTypeForDisplay(profile.mbtiType)
+  return (
+    <>
+      <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
+      {mbti ? (
+        <span className="text-[0.95rem] font-bold tracking-wide text-violet-600">{mbti}</span>
+      ) : null}
+    </>
+  )
+}
+
 /** 探索／詳情標頭：並列顯示工作地、戶籍地方便對照 DB 與期望區域篩選 */
 function DiscoverRegionChips({
   profile,
@@ -456,6 +493,7 @@ function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Profile {
     name: nm || displayNickname,
     nickname: displayNickname,
     age: row.age ?? 28,
+    mbtiType: normalizeMbtiTypeForDisplay(row.mbti_type),
     company,
     role: row.job_title?.trim() || '會員',
     department: row.department?.trim() || '',
@@ -567,6 +605,7 @@ async function profileRowToMatchProfile(row: ProfileRow, idSlot: number): Promis
     name: nm || displayNickname,
     nickname: displayNickname,
     age: row.age ?? 28,
+    mbtiType: normalizeMbtiTypeForDisplay(row.mbti_type),
     company,
     role: row.job_title?.trim() || '會員',
     department: row.department?.trim() || '',
@@ -2267,7 +2306,7 @@ function DiscoverTab({
                               對你超級喜歡
                             </span>
                           )}
-                          <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
+                          <DiscoverAgeMbtiLine profile={profile} />
                           <span className="flex flex-wrap items-center gap-1.5">
                             <DiscoverRegionChips profile={profile} />
                           </span>
@@ -3023,7 +3062,7 @@ function PersonDetailView({
               <div className="pb-1">
                 <div className="flex items-baseline flex-wrap gap-x-2 gap-y-1.5">
                   <span className="text-[2rem] font-semibold tracking-[-0.03em] text-slate-900">{getPublicName(profile)}</span>
-                  <span className="text-[1.2rem] font-medium text-slate-500">{profile.age}</span>
+                  <DiscoverAgeMbtiLine profile={profile} />
                   <span className="flex flex-wrap items-center gap-1.5">
                     <DiscoverRegionChips profile={profile} />
                   </span>
@@ -3354,6 +3393,8 @@ function ChatRoomView({
   /** Pushes composer + scroll area above the on-screen keyboard — chat shell only. */
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
+  const shouldStickToBottomRef = useRef(true)
   const inputRef  = useRef<HTMLInputElement>(null)
   const sendInFlightRef = useRef(false)
   const messagesRef = useRef(messages)
@@ -3361,6 +3402,47 @@ function ChatRoomView({
   /** 避免因 sub-pixel vv 數值無限 setState → 捲動 → visualViewport 抖動／地震 */
   const lastInsetCommitRef = useRef<number | null>(null)
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
+  const chatEnteredAtRef = useRef(Date.now())
+  const chatAssistSessionRef = useRef<ChatAssistSessionRow | null>(null)
+  const chatAssistCanStartNewRef = useRef(true)
+  const chatAssistSessionsTodayCountRef = useRef(0)
+  const chatAssistLastRevealAtRef = useRef(0)
+  const chatAssistTryInFlightRef = useRef(false)
+  const chatAssistClaimInFlightRef = useRef(false)
+  const chatAssistDismissedRef = useRef(false)
+  const peerInChatRef = useRef(false)
+  const sendingRef = useRef(false)
+  const lastAssistPollSessionIdRef = useRef<string | null>(null)
+  const [chatAssistSession, setChatAssistSession] = useState<ChatAssistSessionRow | null>(null)
+  const [chatAssistRevealedSessions, setChatAssistRevealedSessions] = useState<ChatAssistSessionRow[]>([])
+  const [chatAssistModalOpen, setChatAssistModalOpen] = useState(false)
+  const [chatAssistSubmitting, setChatAssistSubmitting] = useState(false)
+  const [chatAssistSubmitError, setChatAssistSubmitError] = useState<string | null>(null)
+  sendingRef.current = sending
+  chatAssistSessionRef.current = chatAssistSession
+
+  useEffect(() => {
+    chatEnteredAtRef.current = Date.now()
+    setChatAssistSession(null)
+    setChatAssistRevealedSessions([])
+    setChatAssistModalOpen(false)
+    setChatAssistSubmitError(null)
+    chatAssistLastRevealAtRef.current = 0
+    chatAssistDismissedRef.current = false
+    lastAssistPollSessionIdRef.current = null
+    peerInChatRef.current = false
+  }, [conversation.matchId])
+
+  const syncChatAssistRevealAtFromPoll = useCallback((
+    session: ChatAssistSessionRow | null,
+    revealed: ChatAssistSessionRow[],
+  ) => {
+    const sessions = [...revealed, ...(session ? [session] : [])]
+    chatAssistLastRevealAtRef.current = getChatAssistLastRevealAtMs(
+      sessions,
+      chatAssistLastRevealAtRef.current,
+    )
+  }, [])
 
   /** 前景開 chat + 伺服器 presence（Webhook 主抑制）+ SW 備援 */
   useLayoutEffect(() => {
@@ -3486,9 +3568,220 @@ function ChatRoomView({
     }
   }, [isLive, conversation.matchId, conversation.instantCarrySessionId])
 
+  const claimChatAssistPuzzle = useCallback(async (sess: ChatAssistSessionRow) => {
+    if (!isLive || !conversation.matchId || chatAssistClaimInFlightRef.current) return
+    if (sess.status !== 'revealed' || sess.my_claimed || !sess.my_submitted) return
+
+    chatAssistClaimInFlightRef.current = true
+    try {
+      const photoSlots = Math.min(
+        PUZZLE_MAX_PHOTO_SLOTS,
+        Math.max(1, collectConversationPhotoUrls(conversation).length),
+      )
+      const puzzleSeedKey = conversation.instantCarrySessionId
+        ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
+        : String(conversation.id)
+      const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
+      const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
+      const progress = getPuzzleProgress(
+        messagesRef.current,
+        manualUnlockedTiles,
+        matchedAtForPuzzle,
+        Date.now(),
+        puzzleSeedKey,
+        photoSlots,
+        false,
+        recentMatchBoostEnabled,
+      )
+      const meCount = messagesRef.current.filter((m) => m.from === 'me').length
+      const themCount = messagesRef.current.filter((m) => m.from === 'them').length
+      const round = Math.floor(Math.min(meCount, themCount) / 3)
+      const mult = progress.boostActive ? 2 : 1
+      const chatTiles = computeChatUnlockedGlobalTiles({
+        round,
+        mult,
+        slots: photoSlots,
+        puzzleSeedKey,
+        matchedAt: matchedAtForPuzzle,
+      })
+      const picked = pickChatAssistPuzzleTiles({
+        chatTilesOrdered: chatTiles,
+        manualUnlockedTiles,
+        activePhotoIndex: progress.activePhotoIndex,
+        puzzleSeedKey,
+        matchedAt: matchedAtForPuzzle,
+        sessionId: sess.id,
+        numTiles: CHAT_ASSIST_PUZZLE_TILES,
+      })
+      if (picked.length === 0) return
+
+      const res = await grantChatAssistPuzzleTiles(conversation.matchId, sess.id, picked)
+      if (!res.ok) return
+
+      const matchManual = Array.isArray(res.state?.unlocked_tiles) ? res.state!.unlocked_tiles : []
+      const carryId = conversation.instantCarrySessionId?.trim()
+      const carryTiles = carryId ? await getInstantSessionPuzzleUnlockedTiles(carryId) : []
+      const unlockedFromServer = mergePuzzleTileIds(carryTiles, matchManual)
+      setManualUnlockedTiles((prev) => mergePuzzleManualTilesOrdered(prev, unlockedFromServer))
+      setSendWarning('聊天小助手完成，已解鎖 3 格拼圖。')
+
+      const poll = await matchChatAssistPoll(conversation.matchId)
+      if (poll.ok) setChatAssistSession(poll.session)
+    } finally {
+      chatAssistClaimInFlightRef.current = false
+    }
+  }, [
+    isLive,
+    conversation,
+    manualUnlockedTiles,
+  ])
+
+  const runChatAssistTryStart = useCallback(async () => {
+    if (!isLive || !conversation.matchId) return
+    if (chatAssistTryInFlightRef.current) return
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    if (!chatAssistCanStartNewRef.current) return
+
+    const inputFocused = document.activeElement === inputRef.current
+    const should = shouldTryStartChatAssist({
+      messages: messagesRef.current.map((m) => ({
+        from: m.from,
+        text: m.text,
+        createdAt: m.createdAt,
+      })),
+      enteredAtMs: chatEnteredAtRef.current,
+      inputFocused,
+      sending: sendingRef.current,
+      documentVisible: document.visibilityState === 'visible',
+      peerInChat: peerInChatRef.current,
+      canStartNew: chatAssistCanStartNewRef.current,
+      lastAssistRevealAtMs: chatAssistLastRevealAtRef.current || null,
+    })
+    if (!should) return
+
+    chatAssistTryInFlightRef.current = true
+    try {
+      const promptId = pickChatAssistPromptId(
+        `${conversation.matchId}:${getAppDayKey()}:${chatAssistSessionsTodayCountRef.current}`,
+      )
+      const res = await matchChatAssistTryStart(conversation.matchId!, promptId)
+      if (res.ok && res.session) {
+        setChatAssistSession(res.session)
+        setChatAssistRevealedSessions(res.revealed_sessions)
+        syncChatAssistRevealAtFromPoll(res.session, res.revealed_sessions)
+        chatAssistCanStartNewRef.current = res.can_start_new
+        chatAssistSessionsTodayCountRef.current = res.sessions_today_count
+        lastAssistPollSessionIdRef.current = res.session.id
+        if (!isChatAssistModalHandled(res.session.id) && res.session.status === 'open') {
+          chatAssistDismissedRef.current = false
+          setChatAssistModalOpen(true)
+        }
+      }
+    } finally {
+      chatAssistTryInFlightRef.current = false
+    }
+  }, [
+    isLive,
+    conversation.matchId,
+    syncChatAssistRevealAtFromPoll,
+  ])
+
   useEffect(() => {
+    if (!isLive || !conversation.matchId) return
+    let cancelled = false
+
+    const tick = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+      const matchId = conversation.matchId!
+      const [peerRes, pollRes] = await Promise.all([
+        matchChatPeerVisibleInMatch(matchId),
+        matchChatAssistPoll(matchId),
+      ])
+      if (cancelled) return
+      peerInChatRef.current = peerRes.peerInChat
+      chatAssistCanStartNewRef.current = pollRes.can_start_new
+      chatAssistSessionsTodayCountRef.current = pollRes.sessions_today_count
+      setChatAssistRevealedSessions(pollRes.revealed_sessions)
+      syncChatAssistRevealAtFromPoll(pollRes.session, pollRes.revealed_sessions)
+
+      setChatAssistSession(pollRes.session)
+
+      const sess = pollRes.session
+      if (sess) {
+        const isNewSession = sess.id !== lastAssistPollSessionIdRef.current
+        lastAssistPollSessionIdRef.current = sess.id
+
+        const handled = isChatAssistModalHandled(sess.id)
+        if (handled) {
+          chatAssistDismissedRef.current = true
+          setChatAssistModalOpen(false)
+        } else if (sess.status === 'revealed') {
+          markChatAssistModalHandled(sess.id)
+          chatAssistDismissedRef.current = true
+          setChatAssistModalOpen(false)
+        } else if (!sess.my_submitted) {
+          if (isNewSession) chatAssistDismissedRef.current = false
+          if (!chatAssistDismissedRef.current) setChatAssistModalOpen(true)
+        } else if (sess.my_submitted) {
+          markChatAssistModalHandled(sess.id)
+          setChatAssistModalOpen(false)
+        }
+
+        for (const rev of pollRes.revealed_sessions) {
+          if (rev.status === 'revealed' && rev.my_submitted && !rev.my_claimed) {
+            void claimChatAssistPuzzle(rev)
+          }
+        }
+      }
+
+      if (!cancelled) void runChatAssistTryStart()
+    }
+
+    void tick()
+    const interval = window.setInterval(() => void tick(), CHAT_ASSIST_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [isLive, conversation.matchId, claimChatAssistPuzzle, foregroundReloadNonce, runChatAssistTryStart])
+
+  useEffect(() => {
+    if (!isLive || !conversation.matchId) return
+    void runChatAssistTryStart()
+    const interval = window.setInterval(() => void runChatAssistTryStart(), CHAT_ASSIST_CHECK_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [isLive, conversation.matchId, runChatAssistTryStart])
+
+  const handleChatAssistSubmit = async (text: string) => {
+    if (!conversation.matchId) return
+    setChatAssistSubmitting(true)
+    setChatAssistSubmitError(null)
+    try {
+      const res = await matchChatAssistSubmit(conversation.matchId, text)
+      if (!res.ok || !res.session) {
+        setChatAssistSubmitError(res.error ?? '無法送出回答')
+        return
+      }
+      setChatAssistSession(res.session)
+      setChatAssistRevealedSessions(res.revealed_sessions)
+      syncChatAssistRevealAtFromPoll(res.session, res.revealed_sessions)
+      chatAssistCanStartNewRef.current = res.can_start_new
+      chatAssistSessionsTodayCountRef.current = res.sessions_today_count
+      markChatAssistModalHandled(res.session.id)
+      chatAssistDismissedRef.current = true
+      setChatAssistModalOpen(false)
+      if (res.session.status === 'revealed' && !res.session.my_claimed) {
+        void claimChatAssistPuzzle(res.session)
+      }
+    } finally {
+      setChatAssistSubmitting(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!shouldStickToBottomRef.current) return
     bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-  }, [messages])
+  }, [messages, chatAssistRevealedSessions, keyboardInsetBottom])
 
   // When the keyboard opens/closes the viewport resizes — make sure the
   // latest message stays in view rather than getting hidden behind the composer.
@@ -3497,7 +3790,10 @@ function ChatRoomView({
     let raf = 0
     const scrollBottomOnceSoon = () => {
       bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-      window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 200)
+      window.setTimeout(
+        () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+        200,
+      )
     }
     const updateKeyboardState = () => {
       if (raf) cancelAnimationFrame(raf)
@@ -3567,6 +3863,7 @@ function ChatRoomView({
     setSending(true)
     setInput('')
     setSendWarning('')
+    shouldStickToBottomRef.current = true
 
     try {
       if (isLive && conversation.matchId && currentUserId) {
@@ -3751,28 +4048,7 @@ function ChatRoomView({
     )
   }
 
-  // Group consecutive messages from the same sender to suppress repeated avatars
-  type Group = { from: 'me' | 'them'; date: string; items: ChatMessage[] }
-  const groups: Group[] = []
-  for (const m of [...messages].sort(compareChatMessageTime)) {
-    const last = groups[groups.length - 1]
-    if (last && last.from === m.from && last.date === m.date) {
-      last.items.push(m)
-    } else {
-      groups.push({ from: m.from, date: m.date, items: [m] })
-    }
-  }
-
-  // Date separators — detect when date changes across groups
-  const renderBlocks: Array<{ type: 'date'; date: string } | { type: 'group'; group: Group }> = []
-  let lastDate = ''
-  for (const g of groups) {
-    if (g.date !== lastDate) {
-      renderBlocks.push({ type: 'date', date: g.date })
-      lastDate = g.date
-    }
-    renderBlocks.push({ type: 'group', group: g })
-  }
+  const timelineBlocks = buildChatTimelineWithAssists(messages, chatAssistRevealedSessions)
 
   return (
     <div
@@ -3837,8 +4113,15 @@ function ChatRoomView({
 
       {/* Messages */}
       <div
+        ref={messagesScrollRef}
         className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1 bg-slate-50/70"
         style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
+        onScroll={() => {
+          const el = messagesScrollRef.current
+          if (!el) return
+          const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+          shouldStickToBottomRef.current = dist < 120
+        }}
       >
         <div className="mb-2 flex justify-center">
           {!isLive && (
@@ -3850,8 +4133,39 @@ function ChatRoomView({
               測試：讓對方傳一則訊息
             </button>
           )}
+          {isLive &&
+            chatAssistSession &&
+            !chatAssistModalOpen &&
+            !chatAssistSession.my_submitted &&
+            chatAssistSession.status !== 'revealed' &&
+            !isChatAssistModalHandled(chatAssistSession.id) && (
+            <button
+              type="button"
+              onClick={() => {
+                chatAssistDismissedRef.current = false
+                setChatAssistModalOpen(true)
+              }}
+              className="rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-black text-violet-700 ring-1 ring-violet-100"
+            >
+              聊天小助手進行中
+            </button>
+          )}
         </div>
-        {renderBlocks.map((block, bi) => {
+        {timelineBlocks.map((block, bi) => {
+          if (block.type === 'assist') {
+            const rev = block.session
+            if (!rev.my_answer || !rev.peer_answer) return null
+            return (
+              <ChatAssistRevealCard
+                key={`assist-${rev.id}`}
+                promptId={rev.prompt_id}
+                myAnswer={rev.my_answer}
+                peerAnswer={rev.peer_answer}
+                peerName={conversation.name}
+              />
+            )
+          }
+
           if (block.type === 'date') {
             return (
               <div key={`date-${bi}`} className="flex justify-center py-2">
@@ -3862,7 +4176,7 @@ function ChatRoomView({
             )
           }
 
-          const g = block.group
+          const g = block.group!
           const isMe = g.from === 'me'
           return (
             <div key={`grp-${bi}`} className={cn('flex items-end gap-2', isMe ? 'justify-end' : 'justify-start')}>
@@ -3949,7 +4263,10 @@ function ChatRoomView({
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void send() } }}
             onFocus={() => {
               /** 交由 focusin + visualViewport resize 統一推算；此處只做鍵盤動畫後一次補捲避免與 vv 對打 */
-              window.setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }), 280)
+              window.setTimeout(
+                () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+                280,
+              )
               onChatInputFocus?.()
             }}
             onBlur={() => {
@@ -4012,6 +4329,25 @@ function ChatRoomView({
           />
         )}
       </AnimatePresence>
+      {chatAssistSession && (
+        <ChatAssistModal
+          open={chatAssistModalOpen}
+          session={chatAssistSession}
+          peerName={conversation.name}
+          submitting={chatAssistSubmitting}
+          submitError={chatAssistSubmitError}
+          onClose={() => {
+            if (chatAssistSession.my_submitted || chatAssistSession.status === 'revealed') {
+              markChatAssistModalHandled(chatAssistSession.id)
+              chatAssistDismissedRef.current = true
+            } else {
+              chatAssistDismissedRef.current = true
+            }
+            setChatAssistModalOpen(false)
+          }}
+          onSubmit={handleChatAssistSubmit}
+        />
+      )}
     </div>
   )
 }
@@ -4077,6 +4413,9 @@ function EditProfileScreen({
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
+  const [mbtiType, setMbtiType] = useState<string>(() =>
+    isValidMbtiType(profile.mbti_type) ? profile.mbti_type : '',
+  )
 
   const [showIncomeBorder, setShowIncomeBorder] = useState<boolean>(() => {
     if (!canEnableCrownEffect(profile)) return false
@@ -4442,6 +4781,13 @@ function EditProfileScreen({
       }
       return false
     }
+    if (!isValidMbtiType(mbtiType)) {
+      if (!opts?.silent) {
+        setSaveMsg('請選擇人格類型（MBTI）')
+        setTimeout(() => setSaveMsg(''), 3200)
+      }
+      return false
+    }
     setSaving(true)
     if (!opts?.silent) setSaveMsg('')
 
@@ -4462,6 +4808,7 @@ function EditProfileScreen({
       homeRegion:      homeRegion      === '' ? null : homeRegion,
       preferredRegion: preferredRegion === '' ? null : preferredRegion,
       showIncomeBorder: borderToSave,
+      mbtiType,
     })
 
     setSaving(false)
@@ -4489,6 +4836,7 @@ function EditProfileScreen({
       home_region:      homeRegion      === '' ? null : homeRegion,
       preferred_region: preferredRegion === '' ? null : preferredRegion,
       show_income_border: borderToSave,
+      mbti_type: mbtiType,
     }
     onSaved(updated)
     return true
@@ -4569,6 +4917,23 @@ function EditProfileScreen({
                 placeholder="對方看到的顯示名稱"
                 className="field-input"
               />
+            </div>
+
+            <div>
+              <label className="field-label">人格類型（MBTI） <span className="text-red-400">*</span></label>
+              <select
+                value={mbtiType}
+                onChange={(e) => setMbtiType(e.target.value)}
+                className="field-input"
+              >
+                <option value="">請選擇</option>
+                {MBTI_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                探索頁會顯示在年齡旁；可直接修改，無需重跑測驗。
+              </p>
             </div>
 
             <div>
@@ -6201,6 +6566,7 @@ export default function MainScreen({
   onSignOut,
   initialDiscoverGender = 'male',
   initialTab = 'discover',
+  onRequireMbtiQuiz,
 }: {
   user?: import('@supabase/supabase-js').User | null
   /** 與 App 問卷／個資同步，避免探索分頁預設 male 在 getProfile 前誤濾掉異性名單 */
@@ -6208,6 +6574,8 @@ export default function MainScreen({
   /** 登入後預設分頁；生活照未達標時由 App 設為 profile */
   initialTab?: MainScreenTab
   onSignOut?: () => void
+  /** 未完成 MBTI 時由 App 開啟測驗全頁 */
+  onRequireMbtiQuiz?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const prevTab = useRef<Tab>('discover')
@@ -6432,10 +6800,13 @@ export default function MainScreen({
   const [matchSplash, setMatchSplash] = useState<{ matchId: string; peerUserId: string } | null>(null)
   /** 已登入者是否已有規定張數生活照（探索門檻） */
   const [selfPhotoOk, setSelfPhotoOk] = useState(true)
+  /** 已登入者是否已完成 MBTI（探索門檻） */
+  const [selfMbtiOk, setSelfMbtiOk] = useState(true)
   const [showDiscoverPuzzleIntro, setShowDiscoverPuzzleIntro] = useState(false)
   const [notifSettingsModalOpen, setNotifSettingsModalOpen] = useState(false)
   const [showNotifPermissionNudge, setShowNotifPermissionNudge] = useState(false)
   const [photoGateToast, setPhotoGateToast] = useState(false)
+  const [mbtiGateToast, setMbtiGateToast] = useState(false)
   /** 每次從背景回到前景（JWT 可能需刷新）後遞增；用於重抓個資／探索快取失效 */
   const [foregroundReloadNonce, setForegroundReloadNonce] = useState(0)
   const [incomingSuperLikeDeckBump, setIncomingSuperLikeDeckBump] = useState(0)
@@ -7388,6 +7759,7 @@ export default function MainScreen({
   useEffect(() => {
     if (!user?.id) {
       setSelfPhotoOk(true)
+      setSelfMbtiOk(true)
       return
     }
     let cancelled = false
@@ -7400,6 +7772,7 @@ export default function MainScreen({
       setCurrentUserPreferredRegion((profile.preferred_region as import('@/lib/types').Region | null) ?? null)
       const n = (profile.photo_urls ?? []).filter(Boolean).length
       setSelfPhotoOk(n >= PROFILE_PHOTO_MIN)
+      setSelfMbtiOk(profileHasMbti(profile))
     })
     return () => {
       cancelled = true
@@ -7413,16 +7786,27 @@ export default function MainScreen({
 
   // 首次進入探索：聊天拼圖解鎖說明（每帳號一次）
   useEffect(() => {
-    if (!user?.id || activeTab !== 'discover' || !selfPhotoOk) return
+    if (!user?.id || activeTab !== 'discover' || !selfPhotoOk || !selfMbtiOk) return
     if (hasSeenDiscoverChatPuzzleIntro(user.id)) return
     setShowDiscoverPuzzleIntro(true)
-  }, [user?.id, activeTab, selfPhotoOk])
+  }, [user?.id, activeTab, selfPhotoOk, selfMbtiOk])
 
   useEffect(() => {
     if (!photoGateToast) return
     const t = window.setTimeout(() => setPhotoGateToast(false), 4500)
     return () => window.clearTimeout(t)
   }, [photoGateToast])
+
+  useEffect(() => {
+    if (!mbtiGateToast) return
+    const t = window.setTimeout(() => setMbtiGateToast(false), 4500)
+    return () => window.clearTimeout(t)
+  }, [mbtiGateToast])
+
+  useEffect(() => {
+    if (!user?.id || selfMbtiOk || activeTab !== 'discover') return
+    onRequireMbtiQuiz?.()
+  }, [user?.id, selfMbtiOk, activeTab, onRequireMbtiQuiz])
 
   const handleSignOut = async () => {
     if (user?.id) clearLiveConvSessionCache(user.id)
@@ -7635,6 +8019,12 @@ export default function MainScreen({
         </div>
       )}
 
+      {mbtiGateToast && user?.id && (
+        <div className="flex-none px-4 py-2.5 bg-violet-50 border-b border-violet-100 text-center text-xs font-semibold text-violet-950">
+          請先完成人格測驗（MBTI），再使用探索。
+        </div>
+      )}
+
       {/* Scrollable content — flex-1 */}
       <main
         ref={contentScrollRef}
@@ -7674,14 +8064,27 @@ export default function MainScreen({
                   const targetTab = tab
                   if (blockInstantNavIfBusy(targetTab)) return
                   if (user?.id && targetTab === 'discover') {
+                    if (!selfMbtiOk) {
+                      setMbtiGateToast(true)
+                      onRequireMbtiQuiz?.()
+                      return
+                    }
                     // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
                     void getProfile(user.id).then((profile) => {
                       if (!profile) return
-                      const ok = (profile.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
-                      setSelfPhotoOk(ok)
-                      if (!ok) {
+                      const photoOk = (profile.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
+                      const mbtiOk = profileHasMbti(profile)
+                      setSelfPhotoOk(photoOk)
+                      setSelfMbtiOk(mbtiOk)
+                      if (!photoOk) {
                         setPhotoGateToast(true)
                         setActiveTab((current) => (current === 'discover' ? 'profile' : current))
+                        return
+                      }
+                      if (!mbtiOk) {
+                        setMbtiGateToast(true)
+                        onRequireMbtiQuiz?.()
+                        setActiveTab((current) => (current === 'discover' ? prevTab.current : current))
                       }
                     })
                   }

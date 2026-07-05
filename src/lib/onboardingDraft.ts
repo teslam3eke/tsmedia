@@ -8,6 +8,7 @@ export const ONBOARDING_FLOW_SCREENS = [
   'terms-consent',
   'profile-setup',
   'questionnaire',
+  'mbti-quiz',
   'identity-verify',
 ] as const
 

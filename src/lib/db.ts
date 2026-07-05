@@ -132,6 +132,7 @@ export interface UpsertProfilePayload {
   homeRegion?: Region | null
   preferredRegion?: Region | null
   showIncomeBorder?: boolean
+  mbtiType?: string | null
 }
 
 export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok: boolean; error?: string }> {
@@ -155,6 +156,7 @@ export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok
   if (homeRegion         !== undefined) patch.home_region      = homeRegion
   if (preferredRegion    !== undefined) patch.preferred_region = preferredRegion
   if (showIncomeBorder   !== undefined) patch.show_income_border = showIncomeBorder
+  if (rest.mbtiType      !== undefined) patch.mbti_type         = rest.mbtiType
 
   // Only id key = nothing to save
   if (Object.keys(patch).length <= 1) return { ok: true }
@@ -784,6 +786,8 @@ export type DailyDiscoverRpcRow = {
   name: string | null
   gender: 'male' | 'female' | null
   age: number | null
+  /** 舊版 RPC 或未填時可能缺欄；探索卡僅在有效四字母時顯示 */
+  mbti_type?: string | null
   company: string | null
   job_title: string | null
   department: string | null
@@ -1829,6 +1833,174 @@ export async function spendBlurUnlockTile(
 
   if (error) {
     console.error('[db] spendBlurUnlockTile error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true, state: data as PhotoUnlockStateRow }
+}
+
+// ─── 配對聊天輔助問答 ─────────────────────────────────────────────────────────
+
+export type ChatAssistSessionRow = {
+  id: string
+  prompt_id: string
+  status: 'open' | 'revealed'
+  my_submitted: boolean
+  peer_submitted: boolean
+  my_answer: string | null
+  peer_answer: string | null
+  my_claimed: boolean
+  created_at?: string | null
+  revealed_at?: string | null
+  my_submitted_at?: string | null
+}
+
+export type ChatAssistPollResult = {
+  ok: boolean
+  has_session_today: boolean
+  sessions_today_count: number
+  daily_limit: number
+  has_open_session: boolean
+  can_start_new: boolean
+  session: ChatAssistSessionRow | null
+  revealed_sessions: ChatAssistSessionRow[]
+  error?: string
+}
+
+function parseChatAssistSessionRow(raw: unknown): ChatAssistSessionRow | null {
+  if (!raw || typeof raw !== 'object') return null
+  const s = raw as Record<string, unknown>
+  const id = String(s.id ?? '')
+  if (!id) return null
+  return {
+    id,
+    prompt_id: String(s.prompt_id ?? ''),
+    status: s.status === 'revealed' ? 'revealed' : 'open',
+    my_submitted: s.my_submitted === true,
+    peer_submitted: s.peer_submitted === true,
+    my_answer: typeof s.my_answer === 'string' ? s.my_answer : null,
+    peer_answer: typeof s.peer_answer === 'string' ? s.peer_answer : null,
+    my_claimed: s.my_claimed === true,
+    created_at: typeof s.created_at === 'string' ? s.created_at : null,
+    revealed_at: typeof s.revealed_at === 'string' ? s.revealed_at : null,
+    my_submitted_at: typeof s.my_submitted_at === 'string' ? s.my_submitted_at : null,
+  }
+}
+
+const EMPTY_CHAT_ASSIST_POLL: Omit<ChatAssistPollResult, 'ok' | 'error'> = {
+  has_session_today: false,
+  sessions_today_count: 0,
+  daily_limit: 3,
+  has_open_session: false,
+  can_start_new: true,
+  session: null,
+  revealed_sessions: [],
+}
+
+function parseChatAssistPoll(data: unknown): ChatAssistPollResult {
+  if (!data || typeof data !== 'object') {
+    return { ok: false, ...EMPTY_CHAT_ASSIST_POLL, error: 'Invalid response' }
+  }
+  const row = data as Record<string, unknown>
+  if (row.ok !== true) {
+    return { ok: false, ...EMPTY_CHAT_ASSIST_POLL, error: 'Request failed' }
+  }
+  const revealedRaw = Array.isArray(row.revealed_sessions) ? row.revealed_sessions : []
+  const revealed_sessions = revealedRaw
+    .map(parseChatAssistSessionRow)
+    .filter((s): s is ChatAssistSessionRow => s != null)
+  return {
+    ok: true,
+    has_session_today: row.has_session_today === true,
+    sessions_today_count:
+      typeof row.sessions_today_count === 'number'
+        ? row.sessions_today_count
+        : row.has_session_today === true
+          ? 1
+          : 0,
+    daily_limit: typeof row.daily_limit === 'number' ? row.daily_limit : 1,
+    has_open_session:
+      row.has_open_session === true || parseChatAssistSessionRow(row.session)?.status === 'open',
+    can_start_new:
+      typeof row.can_start_new === 'boolean'
+        ? row.can_start_new
+        : row.has_session_today !== true,
+    session: parseChatAssistSessionRow(row.session),
+    revealed_sessions,
+  }
+}
+
+export async function matchChatPeerVisibleInMatch(
+  matchId: string,
+): Promise<{ ok: boolean; peerInChat: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('match_chat_peer_visible_in_match', {
+    p_match_id: matchId,
+  })
+  if (error) {
+    console.error('[db] matchChatPeerVisibleInMatch error:', error.message)
+    return { ok: false, peerInChat: false, error: error.message }
+  }
+  const row = data as { ok?: boolean; peer_in_chat?: boolean } | null
+  return { ok: row?.ok === true, peerInChat: row?.peer_in_chat === true }
+}
+
+export async function matchChatAssistPoll(matchId: string): Promise<ChatAssistPollResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('match_chat_assist_poll', {
+    p_match_id: matchId,
+  })
+  if (error) {
+    console.error('[db] matchChatAssistPoll error:', error.message)
+    return { ok: false, ...EMPTY_CHAT_ASSIST_POLL, error: error.message }
+  }
+  return parseChatAssistPoll(data)
+}
+
+export async function matchChatAssistTryStart(
+  matchId: string,
+  promptId: string,
+): Promise<ChatAssistPollResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('match_chat_assist_try_start', {
+    p_match_id: matchId,
+    p_prompt_id: promptId,
+  })
+  if (error) {
+    console.error('[db] matchChatAssistTryStart error:', error.message)
+    return { ok: false, ...EMPTY_CHAT_ASSIST_POLL, error: error.message }
+  }
+  return parseChatAssistPoll(data)
+}
+
+export async function matchChatAssistSubmit(
+  matchId: string,
+  answerText: string,
+): Promise<ChatAssistPollResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('match_chat_assist_submit', {
+    p_match_id: matchId,
+    p_answer_text: answerText,
+  })
+  if (error) {
+    console.error('[db] matchChatAssistSubmit error:', error.message)
+    return { ok: false, ...EMPTY_CHAT_ASSIST_POLL, error: error.message }
+  }
+  return parseChatAssistPoll(data)
+}
+
+export async function grantChatAssistPuzzleTiles(
+  matchId: string,
+  sessionId: string,
+  tiles: number[],
+): Promise<{ ok: boolean; state?: PhotoUnlockStateRow; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('grant_chat_assist_puzzle_tiles', {
+    p_match_id: matchId,
+    p_session_id: sessionId,
+    p_tiles: tiles,
+  })
+  if (error) {
+    console.error('[db] grantChatAssistPuzzleTiles error:', error.message)
     return { ok: false, error: error.message }
   }
   return { ok: true, state: data as PhotoUnlockStateRow }
