@@ -2020,6 +2020,164 @@ export async function simulatePartnerMatchMessage(matchId: string, body?: string
   return { ok: true, message: data as MessageRow }
 }
 
+// ─── 天選／地選（週五 fated pair）────────────────────────────────────────────
+
+export type FatedPairKind = 'heaven' | 'earth'
+
+export type FatedPairPartnerProfile = {
+  id: string
+  nickname?: string | null
+  name?: string | null
+  gender?: string | null
+  age?: number | null
+  mbti_type?: string | null
+  company?: string | null
+  job_title?: string | null
+  department?: string | null
+  bio?: string | null
+  interests?: string[]
+  photo_urls?: string[]
+  work_region?: string | null
+  home_region?: string | null
+}
+
+export type FatedPairSlotState = {
+  partner_user_id: string
+  golden_score?: number | null
+  challenge_score?: number | null
+  interest_overlap?: number | null
+  dismissed_today?: boolean
+  accepted?: boolean
+  partner: FatedPairPartnerProfile
+}
+
+export type FatedPairPollResult = {
+  ok: boolean
+  active: boolean
+  app_day_key?: string
+  show_heaven?: boolean
+  show_earth?: boolean
+  heaven_dismissed_forever?: boolean
+  heaven?: FatedPairSlotState | null
+  earth?: FatedPairSlotState | null
+  error?: string
+}
+
+function parseFatedPairPartner(raw: unknown): FatedPairPartnerProfile | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (typeof o.id !== 'string') return null
+  return {
+    id: o.id,
+    nickname: typeof o.nickname === 'string' ? o.nickname : null,
+    name: typeof o.name === 'string' ? o.name : null,
+    gender: typeof o.gender === 'string' ? o.gender : null,
+    age: typeof o.age === 'number' ? o.age : null,
+    mbti_type: typeof o.mbti_type === 'string' ? o.mbti_type : null,
+    company: typeof o.company === 'string' ? o.company : null,
+    job_title: typeof o.job_title === 'string' ? o.job_title : null,
+    department: typeof o.department === 'string' ? o.department : null,
+    bio: typeof o.bio === 'string' ? o.bio : null,
+    interests: Array.isArray(o.interests) ? o.interests.map(String) : [],
+    photo_urls: Array.isArray(o.photo_urls) ? o.photo_urls.map(String) : [],
+    work_region: typeof o.work_region === 'string' ? o.work_region : null,
+    home_region: typeof o.home_region === 'string' ? o.home_region : null,
+  }
+}
+
+function parseFatedPairSlot(raw: unknown): FatedPairSlotState | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const partner = parseFatedPairPartner(o.partner)
+  if (!partner || typeof o.partner_user_id !== 'string') return null
+  return {
+    partner_user_id: o.partner_user_id,
+    golden_score: typeof o.golden_score === 'number' ? o.golden_score : null,
+    challenge_score: typeof o.challenge_score === 'number' ? o.challenge_score : null,
+    interest_overlap: typeof o.interest_overlap === 'number' ? o.interest_overlap : null,
+    dismissed_today: o.dismissed_today === true,
+    accepted: o.accepted === true,
+    partner,
+  }
+}
+
+export function parseFatedPairPoll(data: unknown): FatedPairPollResult {
+  if (!data || typeof data !== 'object') {
+    return { ok: false, active: false, error: 'empty' }
+  }
+  const o = data as Record<string, unknown>
+  return {
+    ok: true,
+    active: o.active === true,
+    app_day_key: typeof o.app_day_key === 'string' ? o.app_day_key : undefined,
+    show_heaven: o.show_heaven === true,
+    show_earth: o.show_earth === true,
+    heaven_dismissed_forever: o.heaven_dismissed_forever === true,
+    heaven: o.heaven == null ? null : parseFatedPairSlot(o.heaven),
+    earth: o.earth == null ? null : parseFatedPairSlot(o.earth),
+  }
+}
+
+export async function fatedPairPoll(): Promise<FatedPairPollResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('fated_pair_poll')
+  if (error) {
+    console.error('[db] fatedPairPoll error:', error.message)
+    return { ok: false, active: false, error: error.message }
+  }
+  return parseFatedPairPoll(data)
+}
+
+export async function fatedPairDismissHeaven(forever = false): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('fated_pair_dismiss_heaven', { p_forever: forever })
+  if (error) {
+    console.error('[db] fatedPairDismissHeaven error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: (data as { ok?: boolean } | null)?.ok === true }
+}
+
+export async function fatedPairDismissEarth(): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('fated_pair_dismiss_earth')
+  if (error) {
+    console.error('[db] fatedPairDismissEarth error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: (data as { ok?: boolean } | null)?.ok === true }
+}
+
+export async function fatedPairAccept(
+  kind: FatedPairKind,
+): Promise<{
+  ok: boolean
+  matched?: boolean
+  matchId?: string
+  heartBalance?: number
+  error?: string
+}> {
+  const rpc = kind === 'heaven' ? 'fated_pair_accept_heaven' : 'fated_pair_accept_earth'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc(rpc)
+  if (error) {
+    console.error(`[db] ${rpc} error:`, error.message)
+    return { ok: false, error: error.message }
+  }
+  const row = data as {
+    ok?: boolean
+    matched?: boolean
+    match_id?: string
+    heart_balance?: number
+  } | null
+  return {
+    ok: row?.ok === true,
+    matched: Boolean(row?.matched),
+    matchId: typeof row?.match_id === 'string' ? row.match_id : undefined,
+    heartBalance: typeof row?.heart_balance === 'number' ? row.heart_balance : undefined,
+  }
+}
+
 // ─── 即時配對（7 分鐘房） ─────────────────────────────────────────────────────
 
 export type InstantMatchPollResult =

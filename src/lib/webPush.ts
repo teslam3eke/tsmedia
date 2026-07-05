@@ -155,7 +155,8 @@ export async function requestRemotePushSelfTest(): Promise<{
 
 export async function unsubscribeWebPushOnSignOut(): Promise<void> {
   try {
-    const reg = await navigator.serviceWorker.ready
+    const reg = await serviceWorkerReadyWithTimeout(2500)
+    if (!reg) return
     const sub = await reg.pushManager.getSubscription()
     if (sub) {
       const ep = sub.endpoint

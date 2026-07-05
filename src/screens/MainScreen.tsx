@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -70,6 +70,12 @@ import {
   matchChatAssistSubmit,
   grantChatAssistPuzzleTiles,
   type ChatAssistSessionRow,
+  fatedPairPoll,
+  fatedPairDismissHeaven,
+  fatedPairDismissEarth,
+  fatedPairAccept,
+  type FatedPairKind,
+  type FatedPairSlotState,
 } from '@/lib/db'
 import { readInstantEnqueueIntent, clearInstantEnqueueIntent } from '@/lib/instantMatchEnqueueIntent'
 import { getAppDayKey, msUntilNextAppDayKeyChange, msUntilNextTaipei2200, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
@@ -107,6 +113,7 @@ import InstantMatchTab, { type InstantNavGuardSnapshot } from '@/screens/Instant
 import DiscoverPuzzleIntroModal from '@/components/DiscoverPuzzleIntroModal'
 import ChatAssistModal from '@/components/ChatAssistModal'
 import ChatAssistRevealCard from '@/components/ChatAssistRevealCard'
+import FatedPairModal from '@/components/FatedPairModal'
 import {
   DISCOVER_DEMO_PEER_FEMALE_PHOTO_URL,
   DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
@@ -6803,6 +6810,10 @@ export default function MainScreen({
   /** 已登入者是否已完成 MBTI（探索門檻） */
   const [selfMbtiOk, setSelfMbtiOk] = useState(true)
   const [showDiscoverPuzzleIntro, setShowDiscoverPuzzleIntro] = useState(false)
+  const [fatedPairKind, setFatedPairKind] = useState<FatedPairKind | null>(null)
+  const [fatedPairSlot, setFatedPairSlot] = useState<FatedPairSlotState | null>(null)
+  const [fatedPairAccepting, setFatedPairAccepting] = useState(false)
+  const [fatedPairAcceptError, setFatedPairAcceptError] = useState<string | null>(null)
   const [notifSettingsModalOpen, setNotifSettingsModalOpen] = useState(false)
   const [showNotifPermissionNudge, setShowNotifPermissionNudge] = useState(false)
   const [photoGateToast, setPhotoGateToast] = useState(false)
@@ -7191,6 +7202,94 @@ export default function MainScreen({
     if (!user?.id) return
     setCreditBalance(await getCreditBalance(user.id))
   }, [user?.id])
+
+  const syncFatedPairPoll = useCallback(async () => {
+    if (!user?.id) return
+    const poll = await fatedPairPoll()
+    if (!poll.ok || !poll.active) {
+      setFatedPairKind(null)
+      setFatedPairSlot(null)
+      return
+    }
+    if (poll.show_heaven && poll.heaven) {
+      setFatedPairKind('heaven')
+      setFatedPairSlot(poll.heaven)
+      setFatedPairAcceptError(null)
+      return
+    }
+    if (poll.show_earth && poll.earth) {
+      setFatedPairKind('earth')
+      setFatedPairSlot(poll.earth)
+      setFatedPairAcceptError(null)
+      return
+    }
+    setFatedPairKind(null)
+    setFatedPairSlot(null)
+  }, [user?.id])
+
+  useEffect(() => {
+    void syncFatedPairPoll()
+  }, [syncFatedPairPoll, foregroundReloadNonce, discoverDeckDayKey])
+
+  /** 重登／回前景：未按「今日略過」前應持續補彈 */
+  useEffect(() => {
+    if (!user?.id) return
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void syncFatedPairPoll()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [user?.id, syncFatedPairPoll])
+
+  /** 首次進主殼 auth 穩定後再 poll 一次（避免 session 尚未就緒） */
+  useEffect(() => {
+    if (!user?.id) return
+    const t = window.setTimeout(() => void syncFatedPairPoll(), 800)
+    return () => window.clearTimeout(t)
+  }, [user?.id, syncFatedPairPoll])
+
+  const handleFatedPairDismissToday = useCallback(async () => {
+    if (!fatedPairKind) return
+    if (fatedPairKind === 'heaven') {
+      await fatedPairDismissHeaven(false)
+    } else {
+      await fatedPairDismissEarth()
+    }
+    setFatedPairKind(null)
+    setFatedPairSlot(null)
+    void syncFatedPairPoll()
+  }, [fatedPairKind, syncFatedPairPoll])
+
+  const handleFatedPairAccept = useCallback(async () => {
+    if (!fatedPairKind || !fatedPairSlot) return
+    const cost = fatedPairKind === 'heaven' ? 3 : 1
+    if (creditBalance.heart < cost) {
+      setShowSubscription(true)
+      return
+    }
+    setFatedPairAccepting(true)
+    setFatedPairAcceptError(null)
+    const result = await fatedPairAccept(fatedPairKind)
+    await refreshCredits()
+    setFatedPairAccepting(false)
+    if (!result.ok) {
+      if (result.error?.includes('INSUFFICIENT_HEART')) {
+        setShowSubscription(true)
+        return
+      }
+      setFatedPairAcceptError(result.error ?? '送出失敗，請稍後再試')
+      return
+    }
+    if (typeof result.heartBalance === 'number') {
+      setCreditBalance((prev) => ({ ...prev, heart: result.heartBalance! }))
+    }
+    setFatedPairKind(null)
+    setFatedPairSlot(null)
+    if (result.matched && result.matchId) {
+      setMatchSplash({ matchId: result.matchId, peerUserId: fatedPairSlot.partner_user_id })
+    }
+    void syncFatedPairPoll()
+  }, [fatedPairKind, fatedPairSlot, creditBalance.heart, refreshCredits, syncFatedPairPoll])
 
   const refreshInstantFriendQuota = useCallback(async () => {
     if (!user?.id) return
@@ -7809,10 +7908,20 @@ export default function MainScreen({
   }, [user?.id, selfMbtiOk, activeTab, onRequireMbtiQuiz])
 
   const handleSignOut = async () => {
-    if (user?.id) clearLiveConvSessionCache(user.id)
-    await clearAppIconBadge()
-    await signOut()
-    onSignOut?.()
+    try {
+      if (user?.id) clearLiveConvSessionCache(user.id)
+      await clearAppIconBadge()
+      await signOut()
+    } catch (e) {
+      console.error('[MainScreen] handleSignOut:', e)
+      try {
+        await signOut()
+      } catch {
+        /* 仍導向 landing */
+      }
+    } finally {
+      onSignOut?.()
+    }
   }
 
   const notifyInstantMutualFriendMatch = useCallback(
@@ -8309,6 +8418,19 @@ export default function MainScreen({
             setShowDiscoverPuzzleIntro(false)
             markDiscoverChatPuzzleIntroSeen(user.id)
           }}
+        />
+      )}
+
+      {user?.id && fatedPairKind && fatedPairSlot && (
+        <FatedPairModal
+          open
+          kind={fatedPairKind}
+          slot={fatedPairSlot}
+          heartBalance={creditBalance.heart}
+          accepting={fatedPairAccepting}
+          acceptError={fatedPairAcceptError}
+          onCloseToday={() => void handleFatedPairDismissToday()}
+          onAccept={() => void handleFatedPairAccept()}
         />
       )}
     </div>

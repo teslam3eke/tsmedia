@@ -15,7 +15,11 @@ async function postBadgeSyncToServiceWorker(n: number): Promise<void> {
     return
   }
   try {
-    const reg = await navigator.serviceWorker.ready
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 2500)),
+    ])
+    if (!reg) return
     reg.active?.postMessage(msg)
   } catch {
     /* ignore */
