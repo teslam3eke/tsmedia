@@ -104,7 +104,7 @@ import { IncomeBorder, IncomeCrownBadge } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
 import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 import { uuidToGradients } from '@/lib/profileGradients'
-import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
 import { AI_AUTO_REVIEW_UI_SECONDS, INCOME_WAIT_OVERLAY_MAX_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
@@ -4191,12 +4191,10 @@ function ChatRoomView({
               {!isMe && (
                 conversation.photoUrl ? (
                   <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80">
-                    <img
+                    <ProfilePhotoPrivacyImage
                       src={conversation.photoUrl}
                       alt=""
-                      style={{ filter: profilePhotoPrivacyBlurFilter() }}
                       className="h-full w-full scale-110 object-cover"
-                      draggable={false}
                     />
                   </div>
                 ) : (

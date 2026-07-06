@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, Sparkles } from 'lucide-react'
 import { getProfile, resolvePhotoUrls } from '@/lib/db'
-import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
 
 const PREVIEW_PHOTO_SLOTS = 3
 
@@ -120,10 +120,9 @@ export default function MatchSuccessSplash({
             >
               <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-full bg-slate-900 ring-2 ring-white/20">
                 {photoUrl ? (
-                  <img
+                  <ProfilePhotoPrivacyImage
                     src={photoUrl}
                     alt=""
-                    style={{ filter: profilePhotoPrivacyBlurFilter() }}
                     className="h-full w-full scale-110 object-cover"
                   />
                 ) : (

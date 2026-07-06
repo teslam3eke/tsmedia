@@ -65,7 +65,7 @@ export type InstantNavGuardSnapshot = {
   sessionPhase: 'chat' | 'decide' | null
 }
 import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
-import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
 import InstantMatchIntroSplash from '@/components/InstantMatchIntroSplash'
 import {
   formatMsUntilInstantMatchOpens,
@@ -1461,12 +1461,10 @@ export default function InstantMatchTab({
               {!m.fromMe &&
                 (peerBlurPhotoUrl ? (
                   <div className="h-7 w-7 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80">
-                    <img
+                    <ProfilePhotoPrivacyImage
                       src={peerBlurPhotoUrl}
                       alt=""
-                      style={{ filter: profilePhotoPrivacyBlurFilter() }}
                       className="h-full w-full scale-110 object-cover"
-                      draggable={false}
                     />
                   </div>
                 ) : (

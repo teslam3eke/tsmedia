@@ -9,6 +9,11 @@ import {
 } from '@/lib/discoverDemoPhotoUrls'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  ProfilePhotoPrivacyTouchShield,
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 import { pickPuzzleTilesLocalBatch } from '@/lib/puzzleUnlockPick'
 
 /** 對話／解鎖腳本總長（前半段）；完成後另停頓 {@link POST_COMPLETE_PAUSE_MS} 再接確認鈕 */
@@ -298,7 +303,11 @@ export default function DiscoverPuzzleIntroModal({
                   </div>
 
                   <motion.div
-                    className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]"
+                    className={cn(
+                      'relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]',
+                      profilePhotoPrivacyGuardClass,
+                    )}
+                    onContextMenu={preventProfilePhotoContextMenu}
                     initial={false}
                     animate={
                       puzzleComplete
@@ -315,7 +324,12 @@ export default function DiscoverPuzzleIntroModal({
                   >
                     <>
                       {!puzzleComplete ? (
-                        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
+                        <svg
+                          className="pointer-events-none absolute inset-0 h-full w-full"
+                          viewBox="0 0 400 600"
+                          preserveAspectRatio="none"
+                          aria-hidden
+                        >
                           <defs>
                             <filter id={`${svgId}-blur`}>
                               <feGaussianBlur stdDeviation={PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD} />
@@ -372,6 +386,7 @@ export default function DiscoverPuzzleIntroModal({
                           transition={{ duration: 1.22, ease: 'easeOut' }}
                         />
                       )}
+                      {!puzzleComplete && <ProfilePhotoPrivacyTouchShield />}
                       <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/20" />
                       <AnimatePresence>
                         {puzzleComplete && !showProceedCta && (

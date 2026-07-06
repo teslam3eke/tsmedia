@@ -13,7 +13,7 @@ import { goldenStars } from '@/lib/mbtiCompat'
 import { normalizeMbtiTypeForDisplay } from '@/lib/mbti'
 import { resolvePhotoUrls } from '@/lib/db'
 import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
-import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import { ProfilePhotoPrivacyImage, preventProfilePhotoContextMenu } from '@/components/ProfilePhotoPrivacyImage'
 import type { FatedPairKind, FatedPairPartnerProfile, FatedPairSlotState } from '@/lib/db'
 
 const INTRO_AUTO_MS = 2800
@@ -169,18 +169,27 @@ function FatedPairPhoto({
         'relative w-full shrink-0 overflow-hidden aspect-[4/5] sm:max-h-[20.5rem]',
         className,
       )}
+      onContextMenu={privacyBlurred ? preventProfilePhotoContextMenu : undefined}
     >
       {photoUrl ? (
-        <img
-          src={photoUrl}
-          alt=""
-          className={cn(
-            'absolute inset-0 h-full w-full object-cover object-[center_22%]',
-            privacyBlurred && 'scale-[1.02]',
-          )}
-          style={{ filter: profilePhotoPrivacyBlurFilter() }}
-          decoding="async"
-        />
+        privacyBlurred ? (
+          <ProfilePhotoPrivacyImage
+            src={photoUrl}
+            alt=""
+            className={cn(
+              'absolute inset-0 h-full w-full scale-[1.02]',
+            )}
+            style={{ backgroundPosition: 'center 22%' }}
+          />
+        ) : (
+          <img
+            src={photoUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover object-[center_22%]"
+            decoding="async"
+            draggable={false}
+          />
+        )
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[#241047]">
           {photoLoading ? (
@@ -413,10 +422,9 @@ export default function FatedPairModal({
               ))}
               <div className="relative flex h-36 w-36 items-center justify-center overflow-hidden rounded-full bg-[#1a0b2e] ring-2 ring-white/15">
                 {photoUrl ? (
-                  <img
+                  <ProfilePhotoPrivacyImage
                     src={photoUrl}
                     alt=""
-                    style={{ filter: profilePhotoPrivacyBlurFilter() }}
                     className="h-full w-full scale-110 object-cover"
                   />
                 ) : photoLoading ? (

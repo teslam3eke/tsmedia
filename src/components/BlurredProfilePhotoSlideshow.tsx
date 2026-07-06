@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Flag, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
-import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  ProfilePhotoPrivacyImage,
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 import { profilePhotoCoverClassName } from '@/lib/profilePhotoDisplay'
 
 export function BlurredProfilePhotoSlideshow({
@@ -104,9 +108,10 @@ export function BlurredProfilePhotoSlideshow({
       style={{ paddingBottom: '150%' }}
     >
       <div
-        className="absolute inset-0 overflow-hidden rounded-[0.8rem]"
+        className={cn('absolute inset-0 overflow-hidden rounded-[0.8rem]', profilePhotoPrivacyGuardClass)}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
+        onContextMenu={preventProfilePhotoContextMenu}
       >
         {!showPhotoLoading ? (
           <div
@@ -124,7 +129,7 @@ export function BlurredProfilePhotoSlideshow({
             const loaded = photoLoadState[i] === 'loaded'
             const visibleIndex = isPreview ? 0 : index
             return (
-              <img
+              <ProfilePhotoPrivacyImage
                 key={`${profileKey}-ph-${i}`}
                 ref={(el) => bindPhotoRef(el, i, trimmed)}
                 src={trimmed}
@@ -137,11 +142,10 @@ export function BlurredProfilePhotoSlideshow({
                 className={cn(
                   profilePhotoCoverClassName(!clearSet.has(i)),
                   'transition-opacity duration-200',
-                  i === visibleIndex ? 'z-[1]' : 'z-0 pointer-events-none',
+                  i === visibleIndex ? 'z-[1]' : 'z-0',
                   loaded && i === visibleIndex ? 'opacity-100' : 'opacity-0',
                 )}
-                style={clearSet.has(i) ? undefined : { filter: profilePhotoPrivacyBlurFilter() }}
-                draggable={false}
+                privacyCleared={clearSet.has(i)}
                 onLoad={() => markPhotoLoaded(i)}
                 onError={() => markPhotoError(i)}
               />

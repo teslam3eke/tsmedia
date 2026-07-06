@@ -6,6 +6,11 @@ import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { getPuzzleTilePath } from '@/lib/puzzleGeometry'
 import { PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD } from '@/lib/profilePhotoPrivacyBlur'
 import {
+  ProfilePhotoPrivacyTouchShield,
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
+import {
   clampPuzzlePhotoSlots,
   computeChatUnlockedGlobalTiles,
   getRecentMatchBoostState,
@@ -523,16 +528,26 @@ export function PuzzlePhotoUnlock({
             隨機解 1 片
           </button>
         </div>
-        <div className="relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]">
+        <div
+          className={cn(
+            'relative h-[238px] w-[150px] shrink-0 overflow-hidden rounded-3xl bg-slate-900 shadow-lg shadow-slate-900/10 ring-1 ring-slate-900/10 sm:w-[158px]',
+            profilePhotoPrivacyGuardClass,
+          )}
+          onContextMenu={preventProfilePhotoContextMenu}
+        >
           <>
             {photoUrl ? (
               <>
-                <img
-                  src={photoUrl}
-                  alt={conversation.name}
-                  className="absolute inset-0 h-full w-full object-contain object-center blur-2xl opacity-45"
+                <div
+                  className="pointer-events-none absolute inset-0 scale-110 blur-2xl opacity-45"
+                  style={{
+                    backgroundImage: `url("${photoUrl.replace(/"/g, '\\"')}")`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                  }}
+                  aria-hidden
                 />
-                <div className="absolute inset-0 bg-slate-950/20" />
+                <div className="pointer-events-none absolute inset-0 bg-slate-950/20" />
               </>
             ) : (
               <div className="absolute inset-0 bg-gradient-to-br from-slate-600 to-slate-950" aria-hidden />
@@ -548,7 +563,12 @@ export function PuzzlePhotoUnlock({
                 transition={{ duration: 0.55, ease: 'easeOut' }}
               />
             ) : (
-              <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 600" preserveAspectRatio="none" aria-hidden>
+              <svg
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                viewBox="0 0 400 600"
+                preserveAspectRatio="none"
+                aria-hidden
+              >
                 <defs>
                   <filter id={`${puzzleSvgId}-blur`}>
                     <feGaussianBlur stdDeviation={PROFILE_PHOTO_PRIVACY_SVG_BLUR_STD} />
@@ -592,6 +612,7 @@ export function PuzzlePhotoUnlock({
                 })}
               </svg>
             )}
+            {!isPuzzleComplete && <ProfilePhotoPrivacyTouchShield />}
             <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-inset ring-white/20" />
             <AnimatePresence>
               {unlockBurstCount > 0 && (
