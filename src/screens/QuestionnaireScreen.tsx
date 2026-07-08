@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronRight, ChevronLeft, MessageSquare, Cpu } from 'lucide-react'
+import { ChevronRight, ChevronLeft, MessageSquare } from 'lucide-react'
+import { BrandMark } from '@/components/BrandMark'
 import { getQuestionnaireQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
 import { getProfile } from '@/lib/db'
 import { cn } from '@/lib/utils'
@@ -146,9 +147,11 @@ export default function QuestionnaireScreen({
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-2 mb-5"
         >
-          <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
-            <Cpu className="w-3.5 h-3.5 text-white" />
-          </div>
+          <BrandMark
+            framed
+            className="w-7 h-7"
+            frameClassName="rounded-lg bg-slate-900 p-1"
+          />
           <span className="text-slate-400 text-xs tracking-widest uppercase font-medium">
             價值觀評估
           </span>

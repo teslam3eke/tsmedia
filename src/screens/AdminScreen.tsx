@@ -3,20 +3,23 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShieldCheck, Clock, CheckCircle2, XCircle, ChevronLeft,
-  Cpu, Eye, RefreshCw, AlertCircle, Building2, Gem, Flag, Ban, MessageSquare,
+  Eye, RefreshCw, AlertCircle, Flag, Ban, MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { adminVerificationCompanyLabel, sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
 import { userFeedbackCategoryLabel } from '@/lib/userFeedback'
 import {
-  getAllVerifications, approveVerificationDoc,
-  rejectVerificationDoc, getDocSignedUrl, getAdminProfileReports,
+  getAllVerificationApplications, approveVerificationApplication,
+  rejectVerificationApplication, getDocSignedUrl, resolvePhotoUrls, getAdminProfileReports,
   getAdminMessageReports, updateProfileReportStatus, updateMessageReportStatus,
   getAdminUserFeedback, updateUserFeedbackStatus,
   blockProfile,
 } from '@/lib/db'
 import AdminPricingTab from '@/screens/AdminPricingTab'
-import type { MessageReportRow, ProfileReportRow, UserFeedbackWithProfile, VerificationDocWithProfile } from '@/lib/types'
+import type {
+  MessageReportRow, ProfileReportRow, UserFeedbackWithProfile,
+  VerificationApplicationWithProfile, VerificationDocRow,
+} from '@/lib/types'
+import { INCOME_TIER_META, VERIFICATION_MANUAL_SLA_HOURS } from '@/lib/types'
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all'
 type AdminTab = 'verifications' | 'reports' | 'feedback' | 'pricing'
@@ -25,36 +28,54 @@ interface Props {
   onBack: () => void
 }
 
-const CONFIDENCE_LABEL: Record<string, string> = {
-  high: '高信心度', medium: '中信心度', low: '低信心度',
+const DOC_TYPE_LABEL: Record<string, string> = {
+  national_id: '身分證',
+  passport: '護照',
+  driver_license: '駕照',
+  employee_id: '員工證／識別證',
+  tax_return: '扣繳憑單',
+  payslip: '薪資單',
+  bank_statement: '銀行對帳',
+  other: '其他',
 }
 const KIND_LABEL: Record<string, string> = {
-  employment: '職業驗證', income: '收入認證',
-}
-const TIER_LABEL: Record<string, string> = {
-  silver: '銀級', gold: '金級', diamond: '鑽石級',
+  identity: '身分認證',
+  bonus: '任職加分',
+  income: '收入皇冠',
+  employment: '職業驗證（舊）',
 }
 
 export default function AdminScreen({ onBack }: Props) {
   const [tab, setTab]           = useState<AdminTab>('verifications')
   const [filter, setFilter]     = useState<Filter>('pending')
-  const [docs, setDocs]         = useState<VerificationDocWithProfile[]>([])
+  const [applications, setApplications] = useState<VerificationApplicationWithProfile[]>([])
+  const [photoPreviewMap, setPhotoPreviewMap] = useState<Record<string, string[]>>({})
   const [profileReports, setProfileReports] = useState<ProfileReportRow[]>([])
   const [messageReports, setMessageReports] = useState<MessageReportRow[]>([])
   const [feedbackItems, setFeedbackItems] = useState<UserFeedbackWithProfile[]>([])
   const [loading, setLoading]   = useState(true)
-  const [acting, setActing]     = useState<string | null>(null)   // doc id being acted on
+  const [acting, setActing]     = useState<string | null>(null)
   const [viewUrl, setViewUrl]   = useState<string | null>(null)
-  /** PDF 無法用 img 顯示，需 iframe */
   const [viewKind, setViewKind] = useState<'image' | 'pdf' | null>(null)
   const [rejectNote, setRejectNote] = useState('')
-  const [rejectTarget, setRejectTarget] = useState<VerificationDocWithProfile | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<VerificationApplicationWithProfile | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     if (tab === 'verifications') {
-      const data = await getAllVerifications(filter === 'all' ? undefined : filter)
-      setDocs(data)
+      const data = await getAllVerificationApplications(filter === 'all' ? 'all' : filter)
+      setApplications(data)
+      const userIds = [...new Set(data.map((a) => a.user_id))]
+      const entries = await Promise.all(
+        userIds.map(async (uid) => {
+          const app = data.find((a) => a.user_id === uid)
+          const paths = app?.profiles?.photo_urls?.filter(Boolean) ?? []
+          if (paths.length === 0) return [uid, []] as const
+          const urls = await resolvePhotoUrls(paths)
+          return [uid, urls.filter(Boolean)] as const
+        }),
+      )
+      setPhotoPreviewMap(Object.fromEntries(entries))
     } else if (tab === 'reports') {
       const [profileData, messageData] = await Promise.all([
         getAdminProfileReports(),
@@ -71,9 +92,9 @@ export default function AdminScreen({ onBack }: Props) {
 
   useEffect(() => { load() }, [load])
 
-  const handleApprove = async (doc: VerificationDocWithProfile) => {
-    setActing(doc.id)
-    await approveVerificationDoc(doc.id, doc)
+  const handleApprove = async (app: VerificationApplicationWithProfile) => {
+    setActing(app.id)
+    await approveVerificationApplication(app.id, app)
     setActing(null)
     load()
   }
@@ -81,14 +102,14 @@ export default function AdminScreen({ onBack }: Props) {
   const handleReject = async () => {
     if (!rejectTarget) return
     setActing(rejectTarget.id)
-    await rejectVerificationDoc(rejectTarget.id, rejectTarget, rejectNote || undefined)
+    await rejectVerificationApplication(rejectTarget.id, rejectTarget, rejectNote || undefined)
     setActing(null)
     setRejectTarget(null)
     setRejectNote('')
     load()
   }
 
-  const handleViewDoc = async (doc: VerificationDocWithProfile) => {
+  const handleViewDoc = async (doc: VerificationDocRow) => {
     if (!doc.doc_url) return
     const lower = doc.doc_url.split('?')[0].toLowerCase()
     const isPdf = lower.endsWith('.pdf')
@@ -108,7 +129,7 @@ export default function AdminScreen({ onBack }: Props) {
     setViewKind(null)
   }
 
-  const pendingCount = docs.filter(d => filter === 'all' && d.status === 'pending').length
+  const pendingCount = applications.filter(a => filter === 'all' && a.status === 'pending').length
   const openReportCount = [...profileReports, ...messageReports].filter((r) => r.status === 'open' || r.status === 'reviewing').length
   const openFeedbackCount = feedbackItems.filter((r) => r.status === 'open' || r.status === 'reviewing').length
 
@@ -186,10 +207,10 @@ export default function AdminScreen({ onBack }: Props) {
         {loading && tab !== 'pricing' ? (
           <div className="flex items-center justify-center py-16">
             <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
-              <Cpu className="w-6 h-6 text-slate-400" />
+              <RefreshCw className={cn('w-6 h-6 text-slate-400', loading && 'animate-spin')} />
             </motion.div>
           </div>
-        ) : tab === 'verifications' && docs.length === 0 ? (
+        ) : tab === 'verifications' && applications.length === 0 ? (
           <div className="text-center py-16">
             <CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto mb-3" />
             <p className="text-sm text-slate-400">
@@ -204,14 +225,15 @@ export default function AdminScreen({ onBack }: Props) {
                 <p className="text-xs text-amber-700 font-medium">{pendingCount} 件待審核</p>
               </div>
             )}
-            {docs.map((doc) => (
-              <DocCard
-                key={doc.id}
-                doc={doc}
-                acting={acting === doc.id}
-                onApprove={() => handleApprove(doc)}
-                onReject={() => setRejectTarget(doc)}
-                onView={() => handleViewDoc(doc)}
+            {applications.map((app) => (
+              <ApplicationCard
+                key={app.id}
+                app={app}
+                photoUrls={photoPreviewMap[app.user_id] ?? []}
+                acting={acting === app.id}
+                onApprove={() => handleApprove(app)}
+                onReject={() => setRejectTarget(app)}
+                onViewDoc={(doc) => void handleViewDoc(doc)}
               />
             ))}
           </>
@@ -335,8 +357,7 @@ export default function AdminScreen({ onBack }: Props) {
                 <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-4">
                   <h2 className="text-base font-bold text-slate-900">拒絕申請</h2>
                   <p className="text-xs text-slate-500">
-                    {rejectTarget.profiles?.name ?? rejectTarget.user_id.slice(0, 8)} 的{' '}
-                    {KIND_LABEL[rejectTarget.verification_kind]}
+                    {rejectTarget.profiles?.name ?? rejectTarget.user_id.slice(0, 8)} 的會員審核申請
                   </p>
                   <textarea
                     value={rejectNote}
@@ -371,33 +392,34 @@ export default function AdminScreen({ onBack }: Props) {
   )
 }
 
-// ── Doc Card ─────────────────────────────────────────────────────────────────
+// ── Application Card（整包審核）──────────────────────────────────────────────
 
-interface DocCardProps {
-  doc: VerificationDocWithProfile
+function slaLabel(submittedAt: string): string {
+  const submitted = new Date(submittedAt).getTime()
+  const deadline = submitted + VERIFICATION_MANUAL_SLA_HOURS * 60 * 60 * 1000
+  const remainMs = deadline - Date.now()
+  if (remainMs <= 0) return '已逾 12 小時 SLA'
+  const hours = Math.floor(remainMs / (60 * 60 * 1000))
+  const mins = Math.floor((remainMs % (60 * 60 * 1000)) / (60 * 1000))
+  return `距 SLA 約 ${hours} 小時 ${mins} 分`
+}
+
+interface ApplicationCardProps {
+  app: VerificationApplicationWithProfile
+  photoUrls: string[]
   acting: boolean
   onApprove: () => void
   onReject: () => void
-  onView: () => void
+  onViewDoc: (doc: VerificationDocRow) => void
 }
 
-function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
-  const name        = doc.profiles?.name ?? '未知用戶'
-  const isPending   = doc.status === 'pending'
-  const isApproved  = doc.status === 'approved'
-  const isIncome    = doc.verification_kind === 'income'
-  const hasAi       = doc.ai_passed !== null
-  const needsManualReview = isPending && doc.review_mode === 'manual' && doc.ai_passed === false
-  const aiTone = doc.ai_passed ? 'pass' : needsManualReview ? 'review' : 'fail'
-  const aiReasonLines = [
-    doc.ai_reason && `AI 判斷：${sanitizeVerificationUserMessage(doc.ai_reason)}`,
-    doc.manual_review_reason
-      && doc.manual_review_reason !== doc.ai_reason
-      && `人工覆核原因：${sanitizeVerificationUserMessage(doc.manual_review_reason)}`,
-    doc.ai_confidence && `AI 信心度：${CONFIDENCE_LABEL[doc.ai_confidence]}`,
-    doc.doc_type && `文件類型：${doc.doc_type === 'employee_id' ? '員工證 / 識別證' : doc.doc_type === 'tax_return' ? '扣繳憑單' : doc.doc_type === 'payslip' ? '薪資單' : doc.doc_type}`,
-    needsManualReview && '處理方式：此案件不會自動通過，需要管理員人工確認後核准或拒絕。',
-  ].filter(Boolean) as string[]
+function ApplicationCard({ app, photoUrls, acting, onApprove, onReject, onViewDoc }: ApplicationCardProps) {
+  const p = app.profiles
+  const name = p?.name ?? '未知用戶'
+  const isPending = app.status === 'pending'
+  const isApproved = app.status === 'approved'
+  const genderLabel = p?.gender === 'female' ? '女' : p?.gender === 'male' ? '男' : '—'
+  const questionnaire = Array.isArray(p?.questionnaire) ? p!.questionnaire!.slice(0, 3) : []
 
   return (
     <motion.div
@@ -405,136 +427,116 @@ function DocCard({ doc, acting, onApprove, onReject, onView }: DocCardProps) {
       animate={{ opacity: 1, y: 0 }}
       className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3"
     >
-      {/* Top row */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-bold text-slate-900">{name}</span>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{genderLabel}</span>
             <span className={cn(
               'text-[10px] font-semibold px-2 py-0.5 rounded-full',
-              isPending  ? 'bg-amber-100 text-amber-700'   :
-              isApproved ? 'bg-emerald-100 text-emerald-700' :
-                           'bg-red-100 text-red-700',
+              isPending ? 'bg-amber-100 text-amber-700' : isApproved ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700',
             )}>
               {isPending ? '待審核' : isApproved ? '已通過' : '已拒絕'}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {isIncome ? (
-              <><Gem className="w-3 h-3 text-slate-400" />
-                <span className="text-xs text-slate-500">{KIND_LABEL[doc.verification_kind]}・{TIER_LABEL[doc.claimed_income_tier ?? ''] ?? ''}</span>
-              </>
-            ) : (
-              <><Building2 className="w-3 h-3 text-slate-400" />
-                <span className="text-xs text-slate-500">{KIND_LABEL[doc.verification_kind]}・{adminVerificationCompanyLabel(doc.company)}</span>
-              </>
-            )}
-          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {p?.company?.trim() || '—'}{p?.job_title?.trim() ? ` · ${p.job_title.trim()}` : ''}
+          </p>
           <p className="text-[10px] text-slate-400 mt-1">
-            {new Date(doc.submitted_at).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            送出 {new Date(app.submitted_at).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            {isPending ? ` · ${slaLabel(app.submitted_at)}` : ''}
           </p>
         </div>
-
-        {/* View doc button */}
-        {doc.doc_url && (
-          <button
-            onClick={onView}
-            className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0"
-          >
-            <Eye className="w-4 h-4 text-slate-500" />
-          </button>
-        )}
       </div>
 
-      {/* AI result */}
-      {hasAi && (
-        <div className={cn(
-          'rounded-xl px-3 py-2.5 flex items-start gap-2',
-          aiTone === 'pass' ? 'bg-emerald-50' : aiTone === 'review' ? 'bg-amber-50' : 'bg-red-50',
-        )}>
-          <Cpu className={cn(
-            'w-3.5 h-3.5 flex-shrink-0 mt-0.5',
-            aiTone === 'pass' ? 'text-emerald-500' : aiTone === 'review' ? 'text-amber-500' : 'text-red-400',
-          )} />
-          <div className="flex-1 min-w-0 space-y-0.5">
-            <p className={cn(
-              'text-xs font-semibold',
-              aiTone === 'pass' ? 'text-emerald-700' : aiTone === 'review' ? 'text-amber-700' : 'text-red-600',
-            )}>
-              AI 初審：{doc.ai_passed ? `✓ 通過` : needsManualReview ? '需人工覆核' : '✗ 未通過'}
-              {doc.ai_company && ` · ${adminVerificationCompanyLabel(doc.ai_company)}`}
-              {doc.ai_confidence && ` · ${CONFIDENCE_LABEL[doc.ai_confidence]}`}
+      {photoUrls.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {photoUrls.map((url) => (
+            <img key={url} src={url} alt="生活照" className="w-16 h-16 rounded-xl object-cover flex-shrink-0 bg-slate-100" />
+          ))}
+        </div>
+      )}
+
+      {p?.bio?.trim() && (
+        <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <p className="text-[10px] font-semibold text-slate-400 mb-1">自傳</p>
+          <p className="text-xs text-slate-600 leading-relaxed line-clamp-4">{p.bio.trim()}</p>
+        </div>
+      )}
+
+      {questionnaire.length > 0 && (
+        <div className="rounded-xl bg-slate-50 px-3 py-2 space-y-1.5">
+          <p className="text-[10px] font-semibold text-slate-400">問卷摘要</p>
+          {questionnaire.map((q) => (
+            <p key={q.id} className="text-[10px] text-slate-500 leading-relaxed">
+              <span className="font-semibold text-slate-600">{q.category}：</span>
+              {(q.answer ?? '').slice(0, 80)}{(q.answer?.length ?? 0) > 80 ? '…' : ''}
             </p>
-            {aiReasonLines.length > 0 && (
-              <div className="space-y-1 pt-0.5">
-                {aiReasonLines.map((line) => (
-                  <p key={line} className="text-[10px] text-slate-500 leading-relaxed">
-                    {line}
-                  </p>
-                ))}
-              </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {app.docs.map((doc) => (
+          <div key={doc.id} className="flex items-center justify-between gap-2 rounded-xl ring-1 ring-slate-100 px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-800">
+                {KIND_LABEL[doc.verification_kind] ?? doc.verification_kind}
+                {doc.doc_type ? ` · ${DOC_TYPE_LABEL[doc.doc_type] ?? doc.doc_type}` : ''}
+              </p>
+              {doc.verification_kind === 'income' && doc.claimed_income_tier && (
+                <p className="text-[10px] text-slate-400">
+                  {INCOME_TIER_META[doc.claimed_income_tier]?.label ?? doc.claimed_income_tier}
+                </p>
+              )}
+            </div>
+            {doc.doc_url ? (
+              <button
+                type="button"
+                onClick={() => onViewDoc(doc)}
+                className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0"
+              >
+                <Eye className="w-4 h-4 text-slate-500" />
+              </button>
+            ) : (
+              <span className="text-[10px] text-slate-300">已刪除</span>
             )}
           </div>
-        </div>
-      )}
+        ))}
+      </div>
 
-      {!hasAi && doc.verification_kind === 'employment' && (
-        <div className="rounded-xl px-3 py-2 bg-slate-50 flex items-center gap-2">
-          <AlertCircle className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-          <p className="text-[10px] text-slate-400">未經 AI 初審（PDF 文件或舊申請）</p>
-        </div>
-      )}
-
-      {/* Reviewer note */}
-      {doc.reviewer_note && (
+      {app.reviewer_note && (
         <div className="rounded-xl px-3 py-2 bg-slate-50">
-          <p className="text-[10px] text-slate-400">審核備註：{doc.reviewer_note}</p>
+          <p className="text-[10px] text-slate-400">審核備註：{app.reviewer_note}</p>
         </div>
       )}
 
-      {/* Action buttons */}
       {isPending && (
         <div className="relative z-[1] grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
           <button
+            type="button"
             onClick={onReject}
             disabled={acting}
-            className="py-2.5 rounded-xl bg-red-50 text-red-500 text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-60"
+            className="py-2.5 rounded-xl bg-red-50 text-red-500 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
           >
             <XCircle className="w-3.5 h-3.5" />
-            拒絕
+            整包拒絕
           </button>
           <button
+            type="button"
             onClick={onApprove}
             disabled={acting}
-            className="py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-60"
+            className="py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
           >
             {acting ? (
               <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}>
-                <Cpu className="w-3.5 h-3.5" />
+                <RefreshCw className="w-3.5 h-3.5" />
               </motion.div>
             ) : (
               <ShieldCheck className="w-3.5 h-3.5" />
             )}
-            核准通過
+            整包通過
           </button>
-        </div>
-      )}
-
-      {isApproved && (
-        <div className="flex items-center gap-2 pt-1">
-          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-          <p className="text-xs text-emerald-600 font-medium">
-            已核准・{doc.reviewed_at ? new Date(doc.reviewed_at).toLocaleDateString('zh-TW') : ''}
-          </p>
-        </div>
-      )}
-
-      {!isPending && !isApproved && (
-        <div className="flex items-center gap-2 pt-1">
-          <XCircle className="w-4 h-4 text-red-400" />
-          <p className="text-xs text-red-500 font-medium">
-            已拒絕・{doc.reviewed_at ? new Date(doc.reviewed_at).toLocaleDateString('zh-TW') : ''}
-          </p>
         </div>
       )}
     </motion.div>

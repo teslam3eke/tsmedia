@@ -5,10 +5,12 @@ import { AI_AUTO_REVIEW_UI_SECONDS } from '@/lib/aiReviewConstants'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
-  AiConfidence, VerificationDocWithProfile, AppNotificationKind, AppNotificationRow,
+  AiConfidence, VerificationDocWithProfile, VerificationDocRow,
+  VerificationApplicationWithProfile, VerificationApplicationStatus,
+  AppNotificationKind, AppNotificationRow,
   ProfileInteractionAction, MatchRow, MessageRow, ReportReason, ProfileReportRow,
   MessageReportReason, MessageReportRow, CreditBalance, CreditTransactionRow,
-  PhotoUnlockStateRow, UserFeedbackRow, UserFeedbackWithProfile,
+  PhotoUnlockStateRow, UserFeedbackRow, UserFeedbackWithProfile, LegacyVerifiedCompany,
 } from './types'
 import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
@@ -388,7 +390,7 @@ export async function uploadProofDoc(
 
 export interface AiResult {
   passed: boolean
-  company: Company | null
+  company: LegacyVerifiedCompany | null
   confidence: AiConfidence | null
   reason: string | null
 }
@@ -712,6 +714,341 @@ export async function rejectVerificationDoc(
       body: reviewerNote ? `原因：${reviewerNote}` : '你的收入認證未通過，請重新上傳清楚的文件。',
     })
   }
+
+  return { ok: true }
+}
+
+// ─── Verification applications（整包人工審核）────────────────────────────────
+
+export type VerificationApplicationDocInput = {
+  kind: 'identity' | 'bonus' | 'income'
+  docType: DocType
+  path: string
+  claimedIncomeTier?: IncomeTier
+}
+
+export async function deleteProofDocsFromStorage(paths: string[]): Promise<boolean> {
+  const normalized = paths.map(normalizeProofStoragePath).filter(Boolean)
+  if (normalized.length === 0) return true
+  const { error } = await supabase.storage.from('proofs').remove(normalized)
+  if (error) {
+    console.error('[db] deleteProofDocsFromStorage error:', error.message)
+    return false
+  }
+  return true
+}
+
+export async function getTodayVerificationApplicationCount(userId: string): Promise<number> {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const { count, error } = await supabase
+    .from('verification_applications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('submitted_at', start.toISOString())
+
+  if (error) {
+    console.error('[db] getTodayVerificationApplicationCount error:', error.message)
+    return 0
+  }
+  return count ?? 0
+}
+
+export async function getLatestVerificationApplication(
+  userId: string,
+): Promise<VerificationApplicationWithProfile | null> {
+  const { data: apps, error } = await supabase
+    .from('verification_applications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('submitted_at', { ascending: false })
+    .limit(1)
+
+  if (error || !apps?.length) {
+    if (error) console.error('[db] getLatestVerificationApplication error:', error.message)
+    return null
+  }
+
+  const app = apps[0] as VerificationApplicationWithProfile
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('name, gender, photo_urls, bio, company, job_title, questionnaire')
+    .eq('id', userId)
+    .maybeSingle()
+
+  const { data: docs, error: docsError } = await supabase
+    .from('verification_docs')
+    .select('*')
+    .eq('application_id', app.id)
+    .order('submitted_at', { ascending: true })
+
+  if (docsError) {
+    console.error('[db] getLatestVerificationApplication docs error:', docsError.message)
+    return { ...app, profiles: profile ?? null, docs: [] }
+  }
+
+  return {
+    ...app,
+    profiles: profile ?? null,
+    docs: (docs ?? []) as VerificationDocRow[],
+  }
+}
+
+export async function submitVerificationApplication(
+  userId: string,
+  declaredCompany: string,
+  docs: VerificationApplicationDocInput[],
+): Promise<{ ok: boolean; error?: string }> {
+  const company = declaredCompany.trim()
+  if (!company) return { ok: false, error: '請先在個人資料填寫任職公司。' }
+  if (docs.length === 0) return { ok: false, error: '請上傳至少一項驗證文件。' }
+
+  const { data: pending } = await supabase
+    .from('verification_applications')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+    .limit(1)
+
+  if (pending?.length) {
+    return { ok: false, error: '你已有待審核的申請，請等待結果。' }
+  }
+
+  const { data: application, error: appError } = await supabase
+    .from('verification_applications')
+    .insert({ user_id: userId, status: 'pending' })
+    .select('id')
+    .single()
+
+  if (appError || !application) {
+    console.error('[db] submitVerificationApplication app error:', appError?.message)
+    return { ok: false, error: appError?.message ?? '送審失敗，請稍後再試。' }
+  }
+
+  const rows = docs.map((d) => ({
+    user_id: userId,
+    application_id: application.id,
+    company,
+    doc_type: d.docType,
+    doc_url: d.path,
+    status: 'pending' as const,
+    verification_kind: d.kind,
+    review_mode: 'manual' as const,
+    claimed_income_tier: d.kind === 'income' ? (d.claimedIncomeTier ?? null) : null,
+  }))
+
+  const { error: docsError } = await supabase.from('verification_docs').insert(rows)
+  if (docsError) {
+    console.error('[db] submitVerificationApplication docs error:', docsError.message)
+    await deleteProofDocsFromStorage(docs.map((d) => d.path))
+    await supabase.from('verification_applications').delete().eq('id', application.id)
+    return { ok: false, error: docsError.message }
+  }
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({ verification_status: 'submitted', company })
+    .eq('id', userId)
+
+  if (profileError) {
+    console.error('[db] submitVerificationApplication profile error:', profileError.message)
+    await supabase.from('verification_docs').delete().eq('application_id', application.id)
+    await supabase.from('verification_applications').delete().eq('id', application.id)
+    await deleteProofDocsFromStorage(docs.map((d) => d.path))
+    return { ok: false, error: profileError.message }
+  }
+
+  return { ok: true }
+}
+
+async function attachProfilesToApplications(
+  apps: VerificationApplicationWithProfile[],
+): Promise<VerificationApplicationWithProfile[]> {
+  const userIds = [...new Set(apps.map((a) => a.user_id).filter(Boolean))]
+  if (userIds.length === 0) return apps
+
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, name, gender, photo_urls, bio, company, job_title, questionnaire')
+    .in('id', userIds)
+
+  if (profileError) {
+    console.error('[db] attachProfilesToApplications profiles error:', profileError.message)
+    return apps.map((a) => ({ ...a, profiles: null, docs: a.docs ?? [] }))
+  }
+
+  const profileMap = new Map(
+    (profiles ?? []).map((p) => [p.id, p as VerificationApplicationWithProfile['profiles']]),
+  )
+
+  const appIds = apps.map((a) => a.id)
+  const { data: docs, error: docsError } = await supabase
+    .from('verification_docs')
+    .select('*')
+    .in('application_id', appIds)
+    .order('submitted_at', { ascending: true })
+
+  if (docsError) {
+    console.error('[db] attachProfilesToApplications docs error:', docsError.message)
+  }
+
+  const docsByApp = new Map<string, VerificationDocRow[]>()
+  for (const doc of (docs ?? []) as VerificationDocRow[]) {
+    if (!doc.application_id) continue
+    const list = docsByApp.get(doc.application_id) ?? []
+    list.push(doc)
+    docsByApp.set(doc.application_id, list)
+  }
+
+  return apps.map((app) => ({
+    ...app,
+    profiles: profileMap.get(app.user_id) ?? null,
+    docs: docsByApp.get(app.id) ?? [],
+  }))
+}
+
+export async function getAllVerificationApplications(
+  statusFilter?: VerificationApplicationStatus | 'all',
+): Promise<VerificationApplicationWithProfile[]> {
+  let query = supabase
+    .from('verification_applications')
+    .select('*')
+    .order('submitted_at', { ascending: statusFilter === 'pending' })
+
+  if (statusFilter && statusFilter !== 'all') {
+    query = query.eq('status', statusFilter)
+  }
+
+  const { data, error } = await query
+  if (error) {
+    console.error('[db] getAllVerificationApplications error:', error.message)
+    return []
+  }
+
+  return attachProfilesToApplications((data ?? []) as VerificationApplicationWithProfile[])
+}
+
+export async function approveVerificationApplication(
+  applicationId: string,
+  application: VerificationApplicationWithProfile,
+  reviewerNote?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const reviewedAt = new Date().toISOString()
+  const incomeDoc = application.docs.find(
+    (d) => d.verification_kind === 'income' && d.claimed_income_tier,
+  )
+
+  const { error: appError } = await supabase
+    .from('verification_applications')
+    .update({
+      status: 'approved',
+      reviewed_at: reviewedAt,
+      reviewer_note: reviewerNote ?? null,
+    })
+    .eq('id', applicationId)
+
+  if (appError) {
+    console.error('[db] approveVerificationApplication app error:', appError.message)
+    return { ok: false, error: appError.message }
+  }
+
+  const { error: docsError } = await supabase
+    .from('verification_docs')
+    .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote ?? null })
+    .eq('application_id', applicationId)
+
+  if (docsError) {
+    console.error('[db] approveVerificationApplication docs error:', docsError.message)
+    return { ok: false, error: docsError.message }
+  }
+
+  const profilePatch: Record<string, unknown> = {
+    is_verified: true,
+    verification_status: 'approved',
+  }
+  if (incomeDoc?.claimed_income_tier) {
+    profilePatch.income_tier = incomeDoc.claimed_income_tier
+  }
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update(profilePatch)
+    .eq('id', application.user_id)
+
+  if (profileError) {
+    console.error('[db] approveVerificationApplication profile error:', profileError.message)
+    return { ok: false, error: profileError.message }
+  }
+
+  const paths = application.docs.map((d) => d.doc_url).filter(Boolean) as string[]
+  const deleted = await deleteProofDocsFromStorage(paths)
+
+  if (paths.length > 0 && deleted) {
+    await supabase
+      .from('verification_docs')
+      .update({ doc_url: null })
+      .eq('application_id', applicationId)
+  }
+
+  const bodyParts = ['你的身分與任職認證已通過。']
+  if (incomeDoc?.claimed_income_tier) {
+    bodyParts.push('收入皇冠認證已一併通過，可到編輯個人資訊開啟皇冠顯示。')
+  }
+
+  await createAppNotification({
+    userId: application.user_id,
+    kind: 'verification_approved',
+    title: '會員審核已通過',
+    body: bodyParts.join(''),
+  })
+
+  return { ok: true }
+}
+
+export async function rejectVerificationApplication(
+  applicationId: string,
+  application: VerificationApplicationWithProfile,
+  reviewerNote?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const reviewedAt = new Date().toISOString()
+
+  const { error: appError } = await supabase
+    .from('verification_applications')
+    .update({
+      status: 'rejected',
+      reviewed_at: reviewedAt,
+      reviewer_note: reviewerNote ?? null,
+    })
+    .eq('id', applicationId)
+
+  if (appError) {
+    console.error('[db] rejectVerificationApplication app error:', appError.message)
+    return { ok: false, error: appError.message }
+  }
+
+  const { error: docsError } = await supabase
+    .from('verification_docs')
+    .update({ status: 'rejected', reviewed_at: reviewedAt, reviewer_note: reviewerNote ?? null })
+    .eq('application_id', applicationId)
+
+  if (docsError) {
+    console.error('[db] rejectVerificationApplication docs error:', docsError.message)
+    return { ok: false, error: docsError.message }
+  }
+
+  await supabase
+    .from('profiles')
+    .update({ is_verified: false, verification_status: 'rejected' })
+    .eq('id', application.user_id)
+
+  await createAppNotification({
+    userId: application.user_id,
+    kind: 'verification_rejected',
+    title: '會員審核未通過',
+    body: reviewerNote
+      ? `原因：${reviewerNote}。你的個人資料與生活照已保留，請修正後重新送審。`
+      : '審核未通過。你的個人資料與生活照已保留，請修正證件後重新送審。',
+  })
 
   return { ok: true }
 }

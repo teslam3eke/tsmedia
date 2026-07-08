@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ChevronRight, ChevronLeft, Cpu } from 'lucide-react'
+import { ChevronRight, ChevronLeft } from 'lucide-react'
+import { BrandMark } from '@/components/BrandMark'
 import { cn } from '@/lib/utils'
 import { getProfile } from '@/lib/db'
 import { REGION_LABELS, type Region } from '@/lib/types'
@@ -25,6 +26,8 @@ export interface ProfileSetupData {
   gender: 'male' | 'female'
   birthYear: string
   birthMonth: string
+  company: string
+  jobTitle: string
   interests: string[]
   bio: string
   workRegion: Region | ''
@@ -55,6 +58,8 @@ export default function ProfileSetupScreen({
     gender: 'male',
     birthYear: '',
     birthMonth: '',
+    company: '',
+    jobTitle: '',
     interests: [],
     bio: '',
     workRegion: '',
@@ -81,6 +86,8 @@ export default function ProfileSetupScreen({
             gender: p.gender === 'female' ? 'female' : 'male',
             birthYear: p.age != null && p.age > 0 ? String(new Date().getFullYear() - p.age) : '',
             birthMonth: '',
+            company: p.company?.trim() ?? '',
+            jobTitle: p.job_title?.trim() ?? '',
             interests: p.interests ?? [],
             bio: p.bio?.trim() ?? '',
             workRegion: p.work_region ?? '',
@@ -117,6 +124,7 @@ export default function ProfileSetupScreen({
     form.name.trim().length >= 2 &&
     form.nickname.trim().length >= 1 &&
     form.birthYear !== '' &&
+    form.company.trim().length >= 2 &&
     form.interests.length >= 3 &&
     form.workRegion !== '' &&
     form.homeRegion !== '' &&
@@ -186,9 +194,11 @@ export default function ProfileSetupScreen({
           </div>
         )}
         <div className="flex items-center gap-2 mb-1">
-          <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
-            <Cpu className="w-3.5 h-3.5 text-white" />
-          </div>
+          <BrandMark
+            framed
+            className="w-7 h-7"
+            frameClassName="rounded-lg bg-slate-900 p-1"
+          />
           <span className="text-xs text-slate-400 tracking-widest uppercase font-medium">基本資料</span>
         </div>
         <h1 className="text-2xl font-extrabold text-slate-900" style={{ letterSpacing: '-0.03em' }}>
@@ -281,6 +291,32 @@ export default function ProfileSetupScreen({
               {MONTHS.map((m) => <option key={m} value={m}>{m} 月</option>)}
             </select>
           </div>
+        </motion.div>
+
+        {/* Company */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}>
+          <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+            任職公司 <span className="text-red-400">*</span>
+          </label>
+          <input
+            value={form.company}
+            onChange={(e) => set('company', e.target.value)}
+            placeholder="例如：○○科技股份有限公司"
+            className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none transition-all"
+          />
+        </motion.div>
+
+        {/* Job title — optional */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.145 }}>
+          <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
+            職稱 <span className="text-slate-300 font-normal normal-case">（選填）</span>
+          </label>
+          <input
+            value={form.jobTitle}
+            onChange={(e) => set('jobTitle', e.target.value)}
+            placeholder="例如：軟體工程師"
+            className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none transition-all"
+          />
         </motion.div>
 
         {/* Work Region */}

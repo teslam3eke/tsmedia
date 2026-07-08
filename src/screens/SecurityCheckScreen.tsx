@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Shield, Lock, Wifi, Eye, AlertTriangle, CheckCircle2,
-  ChevronRight, Cpu, BellRing,
+  ChevronRight, BellRing,
 } from 'lucide-react'
 import PWAInstallGuide from '@/components/PWAInstallGuide'
+import { BrandMark } from '@/components/BrandMark'
 import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
@@ -216,9 +217,11 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
           transition={{ duration: 0.4 }}
           className="flex items-center gap-2 mb-6"
         >
-          <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
-            <Cpu className="w-3.5 h-3.5 text-white" />
-          </div>
+          <BrandMark
+            framed
+            className="w-7 h-7"
+            frameClassName="rounded-lg bg-white/10 p-1"
+          />
           <span className="text-white/60 text-xs tracking-widest font-medium">
             tsMedia
           </span>

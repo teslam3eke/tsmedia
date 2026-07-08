@@ -16,6 +16,7 @@ import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
 import MaintenanceScreen from '@/screens/MaintenanceScreen'
 import StagingEnvBanner from '@/components/StagingEnvBanner'
+import { BrandMark } from '@/components/BrandMark'
 import { isStagingAppEnv } from '@/lib/appEnv'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
@@ -124,6 +125,7 @@ function hasMainShellSessionHint(): boolean {
 function SplashScreen({ subtitle }: { subtitle?: string }) {
   return (
     <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-[#0f172a] px-6 text-center">
+      <BrandMark className="h-14 w-14" />
       <motion.div
         animate={{ opacity: [0.3, 1, 0.3] }}
         transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
@@ -191,19 +193,15 @@ export default function App() {
     return data.user ?? null
   }
 
-  /** 男性須生活照齊全且職業驗證 approved 才可進探索；submitted／rejected／pending 皆須留 onboarding。 */
-  const maleNeedsIdentityVerify = (profile: import('@/lib/types').ProfileRow | null) =>
+  /** 男女皆須生活照齊全且會員審核 approved 才可進探索 */
+  const needsIdentityVerify = (profile: import('@/lib/types').ProfileRow | null) =>
     Boolean(
-      profile?.gender === 'male'
+      profile
       && (!profileHasMinPhotos(profile) || profile.verification_status !== 'approved'),
     )
 
   const profileHasMinPhotos = (profile: import('@/lib/types').ProfileRow | null) =>
     (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
-
-  /** 女生須先完成生活照（使用 Identity 流程中的「生活照上傳」步驟） */
-  const femaleNeedsLifePhotoOnboarding = (profile: import('@/lib/types').ProfileRow | null) =>
-    Boolean(profile?.gender === 'female' && !profileHasMinPhotos(profile))
 
   const securityOkStorageKey = (userId: string) => `tm_security_ok_v1_${userId}`
   const readSecurityOnboardingDone = (userId: string) => {
@@ -227,12 +225,11 @@ export default function App() {
   ) => {
     if (
       profile &&
-      maleNeedsIdentityVerify(profile) &&
+      needsIdentityVerify(profile) &&
       !(import.meta.env.DEV && opts?.devBypassMaleVerify)
     ) {
       return false
     }
-    if (profile && femaleNeedsLifePhotoOnboarding(profile)) return false
     return true
   }
 
@@ -260,10 +257,9 @@ export default function App() {
     go('main')
   }
 
-  /** 問卷／MBTI 完成後：僅在仍缺生活照或（男性）職業驗證時才進 identity-verify */
+  /** 問卷／MBTI 完成後：仍缺生活照或會員審核時進 identity-verify */
   const routeAfterOnboardingMilestone = (profile: import('@/lib/types').ProfileRow | null) => {
-    if (femaleNeedsLifePhotoOnboarding(profile)) return go('identity-verify')
-    if (maleNeedsIdentityVerify(profile)) return go('identity-verify')
+    if (needsIdentityVerify(profile)) return go('identity-verify')
     launchMainFromProfile(profile)
   }
 
@@ -920,8 +916,11 @@ export default function App() {
         name: data.name,
         nickname: data.nickname,
         gender: data.gender,
+        company: data.company.trim(),
+        jobTitle: data.jobTitle.trim() || undefined,
         interests: data.interests,
         bio: data.bio,
+        age: data.birthYear ? new Date().getFullYear() - Number(data.birthYear) : undefined,
         workRegion: data.workRegion || null,
         homeRegion: data.homeRegion || null,
         preferredRegion: data.preferredRegion || null,

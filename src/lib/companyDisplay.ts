@@ -1,36 +1,42 @@
-import type { Company } from '@/lib/types'
+import type { LegacyVerifiedCompany } from '@/lib/types'
 
-/** DB／AI 內部值是否為已支援的認證企業 */
-export function parseCompany(value: string | null | undefined): Company | null {
+/** DB／AI 內部值是否為舊版 TSMC／MediaTek 認證企業 */
+export function parseCompany(value: string | null | undefined): LegacyVerifiedCompany | null {
   return value === 'TSMC' || value === 'MediaTek' ? value : null
 }
 
+/** 是否為舊版頂尖企業代碼（新流程改以 profile.is_verified 為準） */
 export function isVerifiedCompany(value: string | null | undefined): boolean {
   return parseCompany(value) !== null
 }
 
-/** 前端顯示：不露出 TSMC／MediaTek 等內部代碼 */
+/** 前端顯示：已通過身分／任職審核 */
 export function companyBadgeLabel(_company: string | null | undefined): string {
   return '已認證'
 }
 
-/** 個人／聊天副標：隱藏公司代碼，僅顯示已認證 + 職稱 */
+/** 個人／聊天副標：顯示任職公司與職稱 */
 export function formatProfileWorkLine(
   company: string | null | undefined,
   jobTitle: string | null | undefined,
+  opts?: { isVerified?: boolean },
 ): string {
   const role = jobTitle?.trim()
-  if (isVerifiedCompany(company)) {
+  const org = company?.trim()
+  if (opts?.isVerified && org) {
+    return role ? `${org} · ${role}` : org
+  }
+  if (opts?.isVerified) {
     return role ? `已認證 · ${role}` : '已認證'
   }
-  return role || '會員'
+  return role || org || '會員'
 }
 
-/** 送審用：優先 AI 判定，其次 profile 既有值 */
+/** 送審用：優先 AI 判定，其次 profile 既有值（legacy） */
 export function resolveEmploymentCompany(
-  aiCompany: Company | null | undefined,
+  aiCompany: LegacyVerifiedCompany | null | undefined,
   profileCompany: string | null | undefined,
-): Company | null {
+): LegacyVerifiedCompany | null {
   return parseCompany(aiCompany) ?? parseCompany(profileCompany)
 }
 

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, ChevronRight, Cpu, Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import { BrandMark } from '@/components/BrandMark'
 import { requestPasswordReset, signIn, signUp } from '@/lib/auth'
 import { iosEmailAuthSafariHint } from '@/lib/authBrowser'
 import { trackMetaCompleteRegistration } from '@/lib/metaPixel'
@@ -107,9 +108,11 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
           transition={{ delay: 0.05 }}
           className="flex items-center gap-2.5 mb-5"
         >
-          <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20">
-            <Cpu className="w-5 h-5 text-white" />
-          </div>
+          <BrandMark
+            framed
+            className="w-10 h-10"
+            frameClassName="rounded-2xl bg-white/10 backdrop-blur-sm ring-1 ring-white/20 p-2"
+          />
           <div>
             <h1 className="text-white font-bold text-lg leading-none">tsMedia</h1>
             <p className="text-white/40 text-[10px] tracking-widest uppercase mt-0.5">Silicon Hearts</p>

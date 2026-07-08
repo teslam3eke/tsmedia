@@ -1,13 +1,21 @@
 // ─── Supabase Database Types ────────────────────────────────────────────────
 
-export type Company = 'TSMC' | 'MediaTek'
+/** 任職公司（使用者自述）；舊資料可能仍為 TSMC/MediaTek */
+export type Company = string
+export type LegacyVerifiedCompany = 'TSMC' | 'MediaTek'
 export type VerificationStatus = 'pending' | 'submitted' | 'approved' | 'rejected'
-export type DocType = 'employee_id' | 'tax_return' | 'payslip' | 'bank_statement' | 'other'
+export type DocType =
+  | 'national_id' | 'passport' | 'driver_license'
+  | 'employee_id' | 'tax_return' | 'payslip' | 'bank_statement' | 'other'
 export type DocStatus = 'pending' | 'approved' | 'rejected'
 export type AiConfidence = 'high' | 'medium' | 'low'
 
 export type IncomeTier = 'silver' | 'gold' | 'diamond'
-export type VerificationKind = 'employment' | 'income'
+export type VerificationKind = 'identity' | 'bonus' | 'income' | 'employment'
+export type VerificationApplicationStatus = 'pending' | 'approved' | 'rejected'
+
+/** 人工審核 SLA（小時）— 對使用者文案與後台排序用 */
+export const VERIFICATION_MANUAL_SLA_HOURS = 12
 export type AppNotificationKind = 'verification_approved' | 'verification_rejected' | 'super_like_received' | 'match_created' | 'message_received' | 'instant_match_paired'
 export type ReviewMode = 'manual' | 'ai_auto'
 export type ProfileInteractionAction = 'pass' | 'like' | 'super_like'
@@ -89,6 +97,7 @@ export interface ProfileRow {
 export interface VerificationDocRow {
   id: string
   user_id: string
+  application_id: string | null
   company: Company | null
   doc_type: DocType | null
   doc_url: string | null              // Supabase Storage path
@@ -98,9 +107,9 @@ export interface VerificationDocRow {
   submitted_at: string
   reviewed_at: string | null
   reviewer_note: string | null
-  // AI 初審結果
+  // AI 初審結果（legacy employment／income；新流程 identity/bonus 不用）
   ai_passed: boolean | null
-  ai_company: Company | null
+  ai_company: LegacyVerifiedCompany | null
   ai_confidence: AiConfidence | null
   ai_reason: string | null
   review_mode: ReviewMode | null
@@ -108,7 +117,31 @@ export interface VerificationDocRow {
   manual_review_reason: string | null
 }
 
-// Admin 查詢時 join profiles 的結構
+export interface VerificationApplicationRow {
+  id: string
+  user_id: string
+  status: VerificationApplicationStatus
+  submitted_at: string
+  reviewed_at: string | null
+  reviewer_note: string | null
+}
+
+export interface VerificationApplicationProfile {
+  name: string | null
+  gender: 'male' | 'female' | null
+  photo_urls: string[] | null
+  bio: string | null
+  company: string | null
+  job_title: string | null
+  questionnaire: QuestionnaireEntry[] | null
+}
+
+export interface VerificationApplicationWithProfile extends VerificationApplicationRow {
+  profiles: VerificationApplicationProfile | null
+  docs: VerificationDocRow[]
+}
+
+// Admin 查詢時 join profiles 的結構（legacy 逐 doc 列表）
 export interface VerificationDocWithProfile extends VerificationDocRow {
   profiles: {
     name: string | null

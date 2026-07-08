@@ -22,7 +22,8 @@
     "list:founding": "tsx scripts/list-all-users.ts -- --founding-only",
     "approve:employment": "tsx scripts/approve-all-employment.ts",
     "refresh:founding-q6": "tsx scripts/refresh-founding-q6-answers.ts",
-    "admin:founding-likes-discover": "tsx scripts/admin-founding-likes-discover-pool.ts"
+    "admin:founding-likes-discover": "tsx scripts/admin-founding-likes-discover-pool.ts",
+    "generate:pwa-icons": "tsx scripts/generate-pwa-icons-from-brand.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",
@@ -68,6 +69,8 @@
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^3.2.4",
     "workbox-window": "^7.4.0",
-    "@playwright/test": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.34.5"
   }
 }

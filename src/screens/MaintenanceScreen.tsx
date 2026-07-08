@@ -1,4 +1,4 @@
-import { Cpu } from 'lucide-react'
+import { BrandMark } from '@/components/BrandMark'
 import SupportEmailFooter from '@/components/SupportEmailFooter'
 
 /** 全站維護：白底黑字公告，阻擋新舊使用者進入主流程 */
@@ -7,9 +7,11 @@ export default function MaintenanceScreen() {
     <div className="min-h-dvh bg-white flex flex-col px-6 pt-safe pb-safe text-slate-900">
       <div className="max-w-md mx-auto w-full flex-1 flex flex-col justify-center py-10">
         <div className="flex items-center gap-2.5 mb-8">
-          <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center ring-1 ring-slate-200">
-            <Cpu className="w-[18px] h-[18px] text-slate-700" />
-          </div>
+          <BrandMark
+            framed
+            className="w-9 h-9"
+            frameClassName="rounded-xl bg-slate-100 ring-1 ring-slate-200 p-1.5"
+          />
           <p className="font-bold text-[17px] tracking-tight">tsMedia</p>
         </div>
 

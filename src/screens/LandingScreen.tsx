@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
-import { ChevronRight, Cpu, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
+import { ChevronRight, ShieldCheck, Zap, Users, Lock } from 'lucide-react'
 import SupportEmailFooter from '@/components/SupportEmailFooter'
+import { BrandMark } from '@/components/BrandMark'
 
 interface Props {
   onStart: () => void
@@ -85,9 +86,11 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
             transition={{ duration: 0.4 }}
             className="flex items-center gap-2.5"
           >
-            <div className="w-9 h-9 rounded-xl bg-white/10 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20">
-              <Cpu className="w-4.5 h-4.5 text-white" style={{ width: 18, height: 18 }} />
-            </div>
+            <BrandMark
+              framed
+              className="w-9 h-9"
+              frameClassName="rounded-xl bg-white/10 backdrop-blur-sm ring-1 ring-white/20 p-1.5"
+            />
             <div>
               <p className="text-white font-bold text-[17px] leading-none tracking-tight">tsMedia</p>
               <p className="text-white/35 text-[9px] tracking-[0.18em] uppercase mt-0.5">Silicon Hearts</p>
@@ -165,7 +168,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           transition={{ delay: 0.45, duration: 0.4 }}
           className="relative z-10 mt-6 flex gap-2 flex-wrap"
         >
-          {['🔒 端對端加密', '✅ 職業認證', '🤖 AI 配對'].map((chip) => (
+          {['🔒 端對端加密', '✅ 身分認證', '🤖 AI 配對'].map((chip) => (
             <span
               key={chip}
               className="text-[11px] font-semibold text-white/60 bg-white/8 ring-1 ring-white/12 rounded-full px-3 py-1"
@@ -187,27 +190,24 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           className="rounded-2xl bg-slate-50 px-5 py-6 ring-1 ring-slate-100"
         >
           <p className="text-[15px] text-slate-600 leading-[1.75]">
-            為了維持健康的男女比例，
+            為維持社群品質，男女會員皆須通過人工審核後才能使用探索功能。
           </p>
 
           <div className="mt-5 space-y-6">
             <div>
-              <p className="text-[13px] font-bold tracking-wide text-slate-900">男性</p>
-              <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
-                採資格審核。
-                <br />
-                男性目前僅開放以下公司之員工。
-              </p>
-              <ol className="mt-3 space-y-1.5 pl-4 text-[14px] text-slate-700 leading-relaxed list-decimal marker:text-slate-400">
-                <li>晶圓製造龍頭</li>
-                <li>IC 設計龍頭</li>
-              </ol>
+              <p className="text-[13px] font-bold tracking-wide text-slate-900">審核內容</p>
+              <ul className="mt-2 space-y-1.5 pl-4 text-[14px] text-slate-600 leading-relaxed list-disc marker:text-slate-400">
+                <li>政府證件（身分認證）</li>
+                <li>男性另須任職加分文件（員工證或薪資單）</li>
+                <li>生活照須通過 AI 獨照審核</li>
+                <li>扣繳憑單可選填，通過後可開啟收入皇冠</li>
+              </ul>
             </div>
 
             <div className="border-t border-slate-200/80 pt-6">
-              <p className="text-[13px] font-bold tracking-wide text-slate-900">女性</p>
+              <p className="text-[13px] font-bold tracking-wide text-slate-900">審核時程</p>
               <p className="mt-2 text-[14px] text-slate-600 leading-[1.75]">
-                營運初期採開放加入，未來將依平台發展及市場需求，適度調整會員審核機制。
+                目前採全人工審核，最長等待約 12 小時。審核通過後證件檔案即刪除。
               </p>
             </div>
           </div>
@@ -252,7 +252,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           {[
             { value: '94%', label: '配對成功率' },
             { value: '4.9★', label: '用戶評分' },
-            { value: '1 分鐘', label: '審核（AI）' },
+            { value: '12 小時', label: '審核（人工）' },
           ].map(({ value, label }) => (
             <div key={label} className="flex-1 text-center py-3.5 bg-slate-50 rounded-2xl ring-1 ring-slate-100">
               <p className="text-[15px] font-black text-slate-900" style={{ letterSpacing: '-0.02em' }}>{value}</p>

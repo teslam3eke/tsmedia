@@ -100,6 +100,7 @@ import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import { MBTI_TYPES, isValidMbtiType, normalizeMbtiTypeForDisplay, profileHasMbti } from '@/lib/mbti'
 import { ensureQuestionnaireHasFixedSixth } from '@/utils/questions'
+import { BrandMark } from '@/components/BrandMark'
 import { IncomeBorder, IncomeCrownBadge } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
 import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
@@ -243,6 +244,7 @@ interface Profile {
   mbtiType?: string
   company: string
   role: string
+  isVerified?: boolean
   department: string
   location: string
   education: string
@@ -489,7 +491,7 @@ function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Profile {
   const displayNickname = nn || nm.split(/\s+/)[0] || '會員'
   const gender = row.gender === 'male' || row.gender === 'female' ? row.gender : 'female'
   const companyRaw = row.company?.trim()
-  const company = companyRaw === 'TSMC' || companyRaw === 'MediaTek' ? companyRaw : (companyRaw || '—')
+  const company = companyRaw || '—'
   const wr = row.work_region as Region | null
   const hr = row.home_region as Region | null
   return {
@@ -503,6 +505,8 @@ function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Profile {
     mbtiType: normalizeMbtiTypeForDisplay(row.mbti_type),
     company,
     role: row.job_title?.trim() || '會員',
+    // 探索名單成員皆已通過會員審核（未 approved 進不了主殼）
+    isVerified: true,
     department: row.department?.trim() || '',
     location: (wr && REGION_LABELS[wr]) || (hr && REGION_LABELS[hr]) || '台灣',
     education: '',
@@ -601,7 +605,7 @@ async function profileRowToMatchProfile(row: ProfileRow, idSlot: number): Promis
   const displayNickname = nn || nm.split(/\s+/)[0] || '會員'
   const gender = row.gender === 'male' || row.gender === 'female' ? row.gender : 'female'
   const companyRaw = row.company?.trim()
-  const company = companyRaw === 'TSMC' || companyRaw === 'MediaTek' ? companyRaw : (companyRaw || '—')
+  const company = companyRaw || '—'
   const wr = row.work_region
   const hr = row.home_region
   return {
@@ -615,6 +619,8 @@ async function profileRowToMatchProfile(row: ProfileRow, idSlot: number): Promis
     mbtiType: normalizeMbtiTypeForDisplay(row.mbti_type),
     company,
     role: row.job_title?.trim() || '會員',
+    // 真實會員皆已通過會員審核（未 approved 進不了主殼）
+    isVerified: true,
     department: row.department?.trim() || '',
     location: (wr && REGION_LABELS[wr]) || (hr && REGION_LABELS[hr]) || '台灣',
     education: '',
@@ -644,12 +650,12 @@ function formatMatchListTime(ts: number): string {
 
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
-function CompanyBadge({ company }: { company: string }) {
-  if (!isVerifiedCompany(company)) return null
+function CompanyBadge({ verified }: { verified?: boolean }) {
+  if (!verified) return null
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
       <Cpu className="w-2.5 h-2.5" />
-      {companyBadgeLabel(company)}
+      {companyBadgeLabel(null)}
     </span>
   )
 }
@@ -3150,7 +3156,8 @@ function PersonDetailView({
                 </div>
                 <h2 className="text-2xl font-extrabold text-white tracking-tight">{person.name}</h2>
                 <div className="mt-1.5">
-                  <CompanyBadge company={person.company} />
+                  {/* 真實會員（有 peerUserId）皆已通過審核；Demo 資料不顯示 */}
+                  <CompanyBadge verified={Boolean(person.peerUserId)} />
                 </div>
               </div>
             </div>
@@ -5670,7 +5677,7 @@ function CompanyVerifyScreen({
         >
           <ChevronLeft className="w-5 h-5 text-slate-600" />
         </motion.button>
-        <span className="font-bold text-slate-900 text-[15px]">公司認證</span>
+        <span className="font-bold text-slate-900 text-[15px]">會員審核</span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5">
@@ -5679,8 +5686,8 @@ function CompanyVerifyScreen({
           <div className="bg-emerald-50 rounded-2xl p-4 ring-1 ring-emerald-100 flex items-center gap-3">
             <ShieldCheck className="w-6 h-6 text-emerald-500 flex-shrink-0" />
             <div>
-              <p className="text-sm font-bold text-emerald-800">公司認證已通過</p>
-              <p className="text-xs text-emerald-600 mt-0.5">你的員工身份已驗證</p>
+              <p className="text-sm font-bold text-emerald-800">會員審核已通過</p>
+              <p className="text-xs text-emerald-600 mt-0.5">你的身分與任職資料已完成人工審核</p>
             </div>
           </div>
         ) : isSubmitted || submitted ? (
@@ -6331,7 +6338,7 @@ function ProfileTab({
           className="w-full flex items-center gap-3 px-4 py-3.5 text-sm text-slate-700 border-b border-slate-50"
         >
           <Cpu className="w-4 h-4 text-slate-400" />
-          <span>公司認證</span>
+          <span>會員審核</span>
           <ChevronRight className="w-4 h-4 text-slate-300 ml-auto" />
         </motion.button>
         <motion.button
@@ -7508,7 +7515,7 @@ export default function MainScreen({
         const p = await getProfile(peerId)
         if (liveMatchThreadsLoadGenRef.current !== gen) return
         const display = p?.nickname?.trim() || p?.name?.trim() || '配對對象'
-        const subtitle = formatProfileWorkLine(p?.company, p?.job_title)
+        const subtitle = formatProfileWorkLine(p?.company, p?.job_title, { isVerified: p?.is_verified === true })
         const initials = display.charAt(0) || '?'
         const rawUrls = (p?.photo_urls ?? []).filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)
         let photoUrl: string | undefined
@@ -8105,9 +8112,11 @@ export default function MainScreen({
       {!suppressTopChrome && (
         <div className="flex-none flex items-center px-4 pb-3 pt-safe-bar border-b border-gray-200 bg-white">
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
-              <Cpu className="w-[18px] h-[18px] text-white" />
-            </div>
+            <BrandMark
+              framed
+              className="w-8 h-8"
+              frameClassName="rounded-lg bg-slate-900 p-1.5"
+            />
             <span className="font-bold text-slate-900 tracking-tight text-lg leading-none shrink-0">tsMedia</span>
             <span className="text-[11px] text-slate-400 leading-none shrink-0">Silicon Hearts</span>
             <span
