@@ -40,7 +40,7 @@ const DOC_TYPE_LABEL: Record<string, string> = {
 }
 const KIND_LABEL: Record<string, string> = {
   identity: '身分認證',
-  bonus: '任職加分',
+  bonus: '任職加分或其他證明',
   income: '收入皇冠',
   employment: '職業驗證（舊）',
 }
@@ -482,7 +482,9 @@ function ApplicationCard({ app, photoUrls, acting, onApprove, onReject, onViewDo
             <div className="min-w-0">
               <p className="text-xs font-semibold text-slate-800">
                 {KIND_LABEL[doc.verification_kind] ?? doc.verification_kind}
-                {doc.doc_type ? ` · ${DOC_TYPE_LABEL[doc.doc_type] ?? doc.doc_type}` : ''}
+                {doc.doc_type && doc.doc_type !== 'other'
+                  ? ` · ${DOC_TYPE_LABEL[doc.doc_type] ?? doc.doc_type}`
+                  : ''}
               </p>
               {doc.verification_kind === 'income' && doc.claimed_income_tier && (
                 <p className="text-[10px] text-slate-400">

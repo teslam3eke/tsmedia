@@ -1,4 +1,4 @@
-/** `?eruda=1` 或 `?debug=1`：本工作階段啟用 Eruda • `?debug=1`／`?fetchlog=1`：`[tsmedia:supabase-fetch:*]`（Eruda Network 在 iOS 常不完整）• `?actionlog=1`／與上述相同旗標：見 `clientActionTrace.ts` 的 `[tsmedia:action:*]` • `localStorage`：`tm_eruda`／`tm_fetchlog`／`tm_actionlog`＝`1` • `?eruda=0`／`?debug=0`／`?fetchlog=0`／`?actionlog=0`：關閉對應旗標 */
+/** `?eruda=1` 或 `?debug=1`：啟用 Eruda • `?debug=1`／`?fetchlog=1`：`[tsmedia:supabase-fetch:*]` • `?actionlog=1`：見 `clientActionTrace.ts` • `localStorage`：`tm_eruda`／`tm_fetchlog`／`tm_actionlog`＝`1` • `?eruda=0`／`?debug=0`：關閉對應旗標。本機 DEV 預設不載入 Eruda（錄螢／展示用）；要除錯請加 `?eruda=1`。 */
 
 const STORAGE_KEY = 'tm_eruda'
 
@@ -77,7 +77,7 @@ export async function maybeInitEruda(): Promise<void> {
     /* ignore */
   }
 
-  const enabled = Boolean(import.meta.env.DEV || sessionOn || localOn)
+  const enabled = sessionOn || localOn
   if (!enabled) return
 
   const erudaModule = await import('eruda')

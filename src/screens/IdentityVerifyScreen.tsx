@@ -19,7 +19,6 @@ import {
   PROFILE_PHOTO_MIN,
   PROFILE_PHOTO_MAX,
   VERIFICATION_MANUAL_SLA_HOURS,
-  type DocType,
   type IncomeTier,
   type VerificationStatus,
 } from '@/lib/types'
@@ -64,17 +63,6 @@ function fileToDataUrl(file: File): Promise<string> {
 
 const STEPS = ['生活照上傳', '身分與任職認證']
 
-const IDENTITY_DOC_TYPES: { value: DocType; label: string }[] = [
-  { value: 'national_id', label: '身分證' },
-  { value: 'passport', label: '護照' },
-  { value: 'driver_license', label: '駕照' },
-]
-
-const BONUS_DOC_TYPES: { value: DocType; label: string }[] = [
-  { value: 'employee_id', label: '員工證／識別證' },
-  { value: 'payslip', label: '薪資單' },
-]
-
 const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
   { tier: 'silver', range: '200萬+', desc: '銀皇冠標章' },
   { tier: 'gold', range: '300萬+', desc: '金皇冠標章' },
@@ -83,8 +71,6 @@ const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
 
 type VerifyDraftSnapshot = {
   step: number
-  identityDocType: DocType | ''
-  bonusDocType: DocType | ''
   selectedTier: IncomeTier | null
   identityDoc?: { name: string; type: string; dataUrl: string }
   bonusDoc?: { name: string; type: string; dataUrl: string }
@@ -181,8 +167,6 @@ export default function IdentityVerifyScreen({
 }: Props) {
   const [step, setStep] = useState(0)
   const [photos, setPhotos] = useState<LifePhotoSlot[]>([])
-  const [identityDocType, setIdentityDocType] = useState<DocType | ''>('')
-  const [bonusDocType, setBonusDocType] = useState<DocType | ''>('')
   const [identityDoc, setIdentityDoc] = useState<ProofItem | null>(null)
   const [bonusDoc, setBonusDoc] = useState<ProofItem | null>(null)
   const [selectedTier, setSelectedTier] = useState<IncomeTier | null>(null)
@@ -259,8 +243,6 @@ export default function IdentityVerifyScreen({
     if (!userId || !draftHydrated) return
     const snapshot: VerifyDraftSnapshot = {
       step,
-      identityDocType,
-      bonusDocType,
       selectedTier,
       identityDoc: identityDoc
         ? { name: identityDoc.name, type: identityDoc.type, dataUrl: identityDoc.dataUrl }
@@ -273,7 +255,7 @@ export default function IdentityVerifyScreen({
         : undefined,
     }
     saveOnboardingJsonDraft(userId, 'identity-verify', snapshot)
-  }, [userId, draftHydrated, step, identityDocType, bonusDocType, selectedTier, identityDoc, bonusDoc, taxDoc])
+  }, [userId, draftHydrated, step, selectedTier, identityDoc, bonusDoc, taxDoc])
 
   useEffect(() => {
     if (!userId) {
@@ -286,8 +268,6 @@ export default function IdentityVerifyScreen({
       if (cancelled) return
       if (draft) {
         if (typeof draft.step === 'number') setStep(Math.min(draft.step, STEPS.length - 1))
-        if (draft.identityDocType) setIdentityDocType(draft.identityDocType)
-        if (draft.bonusDocType) setBonusDocType(draft.bonusDocType)
         if (draft.selectedTier) setSelectedTier(draft.selectedTier)
         const restore = async (raw: { name: string; type: string; dataUrl: string } | undefined) => {
           if (!raw?.dataUrl?.startsWith('data:')) return null
@@ -322,15 +302,8 @@ export default function IdentityVerifyScreen({
     files: FileList | null,
     setItem: (item: ProofItem | null) => void,
     clearPrev: ProofItem | null,
-    requireType?: boolean,
-    typeSelected?: boolean,
-    typeLabel?: string,
   ) => {
     if (!files?.length) return
-    if (requireType && !typeSelected) {
-      setSubmitError(`請先選擇${typeLabel ?? '文件'}類型。`)
-      return
-    }
     if (clearPrev) URL.revokeObjectURL(clearPrev.previewUrl)
     const f = files[0]
     setSubmitError('')
@@ -349,11 +322,8 @@ export default function IdentityVerifyScreen({
   const photosReady = photos.length >= PROFILE_PHOTO_MIN
     && photos.every((p) => Boolean(p.storagePath))
 
-  const identityReady = Boolean(identityDoc && identityDocType)
-  /** 男：必有加分文件＋類型；女：選填，但一旦有檔案就必須有類型（避免送出時被略過） */
-  const bonusReady = gender === 'male'
-    ? Boolean(bonusDoc && bonusDocType)
-    : (!bonusDoc || Boolean(bonusDocType))
+  const identityReady = Boolean(identityDoc)
+  const bonusReady = gender === 'male' ? Boolean(bonusDoc) : true
   const taxReady = !selectedTier || Boolean(taxDoc)
   const companyReady = declaredCompany.trim().length >= 2
 
@@ -371,12 +341,9 @@ export default function IdentityVerifyScreen({
 
   const buildSubmitDocs = async (): Promise<VerificationApplicationDocInput[] | { error: string }> => {
     if (!userId) return { error: '請先登入。' }
-    if (!identityDoc || !identityDocType) return { error: '請上傳政府證件。' }
-    if (gender === 'male' && (!bonusDoc || !bonusDocType)) {
-      return { error: '男性須至少上傳一項任職加分文件（員工證或薪資單）。' }
-    }
-    if (bonusDoc && !bonusDocType) {
-      return { error: '請先選擇加分文件類型（員工證或薪資單）。' }
+    if (!identityDoc) return { error: '請上傳政府證件。' }
+    if (gender === 'male' && !bonusDoc) {
+      return { error: '男性須至少上傳一項任職加分或其他對您有利的證明。' }
     }
     if (selectedTier && !taxDoc) return { error: '選擇收入皇冠時須上傳扣繳憑單。' }
     if (!companyReady) return { error: '請先在個人資料填寫任職公司。' }
@@ -385,12 +352,12 @@ export default function IdentityVerifyScreen({
 
     const idUpload = await uploadProofDoc(userId, identityDoc.file)
     if (!idUpload.ok) return { error: idUpload.error ?? '身分證件上傳失敗。' }
-    docs.push({ kind: 'identity', docType: identityDocType, path: idUpload.path })
+    docs.push({ kind: 'identity', docType: 'other', path: idUpload.path })
 
-    if (bonusDoc && bonusDocType) {
+    if (bonusDoc) {
       const bonusUpload = await uploadProofDoc(userId, bonusDoc.file)
       if (!bonusUpload.ok) return { error: bonusUpload.error ?? '加分文件上傳失敗。' }
-      docs.push({ kind: 'bonus', docType: bonusDocType, path: bonusUpload.path })
+      docs.push({ kind: 'bonus', docType: 'other', path: bonusUpload.path })
     }
 
     if (selectedTier && taxDoc) {
@@ -587,23 +554,11 @@ export default function IdentityVerifyScreen({
               <p className="text-xs font-semibold text-slate-800">
                 身分認證（政府證件） <span className="text-red-400">*</span>
               </p>
-              <div className="grid grid-cols-1 gap-2">
-                {IDENTITY_DOC_TYPES.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => { setIdentityDocType(value); if (identityDoc) { URL.revokeObjectURL(identityDoc.previewUrl); setIdentityDoc(null) } }}
-                    className={cn(
-                      'rounded-xl border-2 px-3 py-2.5 text-left text-sm font-semibold transition-all',
-                      identityDocType === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                可上傳身分證、護照、駕照等政府核發證件（照片或 PDF）。
+              </p>
               <input ref={identityInputRef} type="file" accept="image/*,.pdf" className="hidden"
-                onChange={(e) => pickProof(e.target.files, setIdentityDoc, identityDoc, true, Boolean(identityDocType), '證件')} />
+                onChange={(e) => pickProof(e.target.files, setIdentityDoc, identityDoc)} />
               {!identityDoc ? (
                 <button
                   type="button"
@@ -620,35 +575,23 @@ export default function IdentityVerifyScreen({
             {/* Bonus — male required */}
             <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3">
               <p className="text-xs font-semibold text-slate-800">
-                任職加分 {gender === 'male' ? <span className="text-red-400">*（至少一項）</span> : <span className="text-slate-400 font-normal">（選填）</span>}
+                任職加分或其他對您有利的證明 {gender === 'male' ? <span className="text-red-400">*（至少一項）</span> : <span className="text-slate-400 font-normal">（選填）</span>}
               </p>
-              <div className="grid grid-cols-1 gap-2">
-                {BONUS_DOC_TYPES.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => { setBonusDocType(value); if (bonusDoc) { URL.revokeObjectURL(bonusDoc.previewUrl); setBonusDoc(null) } }}
-                    className={cn(
-                      'rounded-xl border-2 px-3 py-2.5 text-left text-sm font-semibold transition-all',
-                      bonusDocType === value ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                例如員工證、識別證、在職證明、名片等能佐證任職或身分的文件。
+              </p>
               <input ref={bonusInputRef} type="file" accept="image/*,.pdf" className="hidden"
-                onChange={(e) => pickProof(e.target.files, setBonusDoc, bonusDoc, true, Boolean(bonusDocType), '加分文件')} />
+                onChange={(e) => pickProof(e.target.files, setBonusDoc, bonusDoc)} />
               {!bonusDoc ? (
                 <button
                   type="button"
                   onClick={() => clickFileInputWithGrace(bonusInputRef.current)}
                   className="w-full py-3 rounded-xl bg-slate-100 text-sm font-bold text-slate-700 flex items-center justify-center gap-2"
                 >
-                  <Upload className="w-4 h-4" /> 上傳加分文件
+                  <Upload className="w-4 h-4" /> 上傳文件
                 </button>
               ) : (
-                <ProofPreview item={bonusDoc} label="已選加分文件" onRemove={() => { URL.revokeObjectURL(bonusDoc.previewUrl); setBonusDoc(null) }} />
+                <ProofPreview item={bonusDoc} label="已選文件" onRemove={() => { URL.revokeObjectURL(bonusDoc.previewUrl); setBonusDoc(null) }} />
               )}
             </div>
 
@@ -768,7 +711,8 @@ export default function IdentityVerifyScreen({
                 <h2 className="text-base font-bold text-slate-900">確定要送出嗎？</h2>
                 <p className="text-sm text-slate-500 leading-relaxed">
                   目前採<strong className="text-slate-700">全人工審核</strong>，最長等待約 {VERIFICATION_MANUAL_SLA_HOURS} 小時。
-                  審核通過後證件檔案即刪除；若未通過，你的個人資料與生活照會保留。
+                  <br />
+                  審核通過後證件檔案即刪除。
                 </p>
                 <div className="flex gap-3">
                   <button

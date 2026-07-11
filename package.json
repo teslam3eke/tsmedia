@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n api,vite -c blue,green \"npm run dev:api\" \"vite\"",
+    "dev:vite": "vite",
+    "dev:api": "tsx scripts/dev-api-server.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "release:patch": "npm version patch --no-git-tag-version",
@@ -70,6 +72,7 @@
     "vitest": "^3.2.4",
     "workbox-window": "^7.4.0",
     "@playwright/test": "^1.55.0",
+    "concurrently": "^9.2.1",
     "png-to-ico": "^2.1.8",
     "sharp": "^0.34.5"
   }

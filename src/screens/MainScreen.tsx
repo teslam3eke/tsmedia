@@ -105,7 +105,11 @@ import { IncomeBorder, IncomeCrownBadge } from '@/components/IncomeBorder'
 import { BlurredProfilePhotoSlideshow } from '@/components/BlurredProfilePhotoSlideshow'
 import { LifePhotoPreviewTile } from '@/components/LifePhotoPreviewTile'
 import { uuidToGradients } from '@/lib/profileGradients'
-import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 import { AI_AUTO_REVIEW_UI_SECONDS, INCOME_WAIT_OVERLAY_MAX_SECONDS } from '@/lib/aiReviewConstants'
 import { actionTrace, shortId } from '@/lib/clientActionTrace'
 import { CreditRewardFlash, type CreditRewardVariant } from '@/components/CreditRewardFlash'
@@ -124,6 +128,7 @@ import {
   mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
   pickChatAssistPuzzleTiles,
+  puzzleSlotIsComplete,
 } from '@/lib/puzzleUnlockPick'
 import {
   CHAT_ASSIST_CHECK_INTERVAL_MS,
@@ -3403,6 +3408,11 @@ function ChatRoomView({
   const [sendWarning, setSendWarning] = useState('')
   const [sending, setSending] = useState(false)
   const [manualUnlockedTiles, setManualUnlockedTiles] = useState<number[]>([])
+  const [resolvedChatAvatarUrl, setResolvedChatAvatarUrl] = useState<string | null>(() => {
+    const urls = collectConversationPhotoUrls(conversation)
+    return urls.filter(isDisplayablePhotoUrl)[0] ?? null
+  })
+  const [chatAvatarBroken, setChatAvatarBroken] = useState(false)
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false)
   /** Pushes composer + scroll area above the on-screen keyboard — chat shell only. */
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
@@ -3434,6 +3444,28 @@ function ChatRoomView({
   const [chatAssistSubmitError, setChatAssistSubmitError] = useState<string | null>(null)
   sendingRef.current = sending
   chatAssistSessionRef.current = chatAssistSession
+
+  useEffect(() => {
+    setChatAvatarBroken(false)
+    const urls = collectConversationPhotoUrls(conversation)
+    const direct = urls.filter(isDisplayablePhotoUrl)[0] ?? null
+    if (direct) {
+      setResolvedChatAvatarUrl(direct)
+      return
+    }
+    const paths = urls.map((u) => u.trim()).filter((u) => u && !isDisplayablePhotoUrl(u))
+    if (paths.length === 0) {
+      setResolvedChatAvatarUrl(null)
+      return
+    }
+    let cancelled = false
+    void resolvePhotoUrls(paths.slice(0, 1)).then((signed) => {
+      if (!cancelled) setResolvedChatAvatarUrl(signed.filter(isDisplayablePhotoUrl)[0] ?? null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [conversation.photoUrl, conversation.photoUrls, conversation.matchId, conversation.id])
 
   useEffect(() => {
     chatEnteredAtRef.current = Date.now()
@@ -4064,6 +4096,29 @@ function ChatRoomView({
 
   const timelineBlocks = buildChatTimelineWithAssists(messages, chatAssistRevealedSessions)
 
+  const chatAvatarPrivacyCleared = useMemo(() => {
+    const photoSlots = Math.min(
+      PUZZLE_MAX_PHOTO_SLOTS,
+      Math.max(1, collectConversationPhotoUrls(conversation).length),
+    )
+    const puzzleSeedKey = conversation.instantCarrySessionId
+      ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
+      : String(conversation.id)
+    const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
+    const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
+    const progress = getPuzzleProgress(
+      messages,
+      manualUnlockedTiles,
+      matchedAtForPuzzle,
+      Date.now(),
+      puzzleSeedKey,
+      photoSlots,
+      false,
+      recentMatchBoostEnabled,
+    )
+    return puzzleSlotIsComplete(new Set(progress.globalUnlockedTiles), 0)
+  }, [conversation, messages, manualUnlockedTiles])
+
   return (
     <div
       className="relative flex flex-col h-full bg-white"
@@ -4196,12 +4251,26 @@ function ChatRoomView({
             <div key={`grp-${bi}`} className={cn('flex items-end gap-2', isMe ? 'justify-end' : 'justify-start')}>
               {/* Avatar column — only on their side, only on the LAST bubble of the group (bottom-aligned) */}
               {!isMe && (
-                conversation.photoUrl ? (
-                  <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80">
-                    <ProfilePhotoPrivacyImage
-                      src={conversation.photoUrl}
+                resolvedChatAvatarUrl && !chatAvatarBroken ? (
+                  <div
+                    className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80"
+                    onContextMenu={chatAvatarPrivacyCleared ? undefined : preventProfilePhotoContextMenu}
+                  >
+                    <img
+                      src={resolvedChatAvatarUrl}
                       alt=""
-                      className="h-full w-full scale-110 object-cover"
+                      className={cn(
+                        profilePhotoPrivacyGuardClass,
+                        'h-full w-full scale-110 object-cover',
+                        !chatAvatarPrivacyCleared && 'opacity-80',
+                      )}
+                      style={
+                        chatAvatarPrivacyCleared ? undefined : { filter: profilePhotoPrivacyBlurFilter() }
+                      }
+                      decoding="async"
+                      draggable={false}
+                      onContextMenu={chatAvatarPrivacyCleared ? undefined : preventProfilePhotoContextMenu}
+                      onError={() => setChatAvatarBroken(true)}
                     />
                   </div>
                 ) : (
@@ -7216,13 +7285,22 @@ export default function MainScreen({
       setFatedPairSlot(null)
       return
     }
+    const warmPartnerPhotos = (slot: FatedPairSlotState) => {
+      const paths = (slot.partner.photo_urls ?? [])
+        .map((x) => String(x ?? '').trim())
+        .filter(Boolean)
+      if (paths.length === 0 || paths.some(isDisplayablePhotoUrl)) return
+      void ensureConnectionWithBudget().then(() => resolvePhotoUrls(paths.slice(0, 3)))
+    }
     if (poll.show_heaven && poll.heaven) {
+      warmPartnerPhotos(poll.heaven)
       setFatedPairKind('heaven')
       setFatedPairSlot(poll.heaven)
       setFatedPairAcceptError(null)
       return
     }
     if (poll.show_earth && poll.earth) {
+      warmPartnerPhotos(poll.earth)
       setFatedPairKind('earth')
       setFatedPairSlot(poll.earth)
       setFatedPairAcceptError(null)
@@ -7523,7 +7601,7 @@ export default function MainScreen({
         if (rawUrls.length > 0) {
           const resolved = await resolvePhotoUrls(rawUrls)
           if (liveMatchThreadsLoadGenRef.current !== gen) return
-          const cleaned = resolved.filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)
+          const cleaned = resolved.filter(isDisplayablePhotoUrl).slice(0, PUZZLE_MAX_PHOTO_SLOTS)
           if (cleaned.length > 0) {
             photoUrls = cleaned
             photoUrl = cleaned[0]

@@ -15,6 +15,8 @@ export type LifePhotoUploadResult =
   | { ok: true; path: string }
   | { ok: false; error: string; limited?: boolean; failuresToday?: number }
 
+export type LifePhotoUploadPhase = 'compressing' | 'reviewing' | 'uploading'
+
 async function compressProfilePhoto(file: File, maxPx = 1080, quality = 0.85): Promise<File> {
   return new Promise((resolve) => {
     const img = new Image()
@@ -84,7 +86,9 @@ export async function getLifePhotoVerifyFailureStatus(): Promise<LifePhotoFailur
 export async function verifyAndUploadLifePhoto(
   userId: string,
   file: File,
+  opts?: { onPhase?: (phase: LifePhotoUploadPhase) => void },
 ): Promise<LifePhotoUploadResult> {
+  const onPhase = opts?.onPhase
   const status = await getLifePhotoVerifyFailureStatus()
   if (status.limited) {
     return {
@@ -95,7 +99,9 @@ export async function verifyAndUploadLifePhoto(
     }
   }
 
+  onPhase?.('compressing')
   const compressed = await compressProfilePhoto(file)
+  onPhase?.('reviewing')
   const verify = await verifyLifePhotoCompressed(compressed)
   if (!verify.ok) {
     const next = await getLifePhotoVerifyFailureStatus()
@@ -107,6 +113,7 @@ export async function verifyAndUploadLifePhoto(
     }
   }
 
+  onPhase?.('uploading')
   const uploaded = await uploadPhoto(userId, compressed, { skipVerify: true })
   if (!uploaded.ok) {
     return { ok: false, error: uploaded.error }

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertCircle, Camera, ImageIcon, Trash2, Upload, X } from 'lucide-react'
+import { AlertCircle, Camera, ImageIcon, Loader2, Trash2, Upload, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { clickFileInputWithGrace } from '@/lib/resumeHardReload'
 import {
   getLifePhotoVerifyFailureStatus,
   verifyAndUploadLifePhoto,
   type LifePhotoFailureStatus,
+  type LifePhotoUploadPhase,
 } from '@/lib/lifePhotoUpload'
 import { PROFILE_PHOTO_MAX, PROFILE_PHOTO_MIN } from '@/lib/types'
 import { resolvePhotoUrls } from '@/lib/db'
@@ -28,6 +29,20 @@ type Props = {
 
 const UPLOAD_HINT = '必須為露臉之正面獨照，每個帳號每日最多嘗試 10 次'
 
+const UPLOAD_PHASE_LABEL: Record<LifePhotoUploadPhase | 'saving', string> = {
+  compressing: '正在處理照片…',
+  reviewing: 'AI 審核中…',
+  uploading: '上傳中…',
+  saving: '儲存中…',
+}
+
+/** 讓 setState（loading）先畫出來，再跑壓縮／AI 等重工作業 */
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
 export function LifePhotoUploadSection({
   userId,
   photos,
@@ -38,6 +53,7 @@ export function LifePhotoUploadSection({
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingPreview, setPendingPreview] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadPhase, setUploadPhase] = useState<LifePhotoUploadPhase | 'saving' | null>(null)
   const [failureStatus, setFailureStatus] = useState<LifePhotoFailureStatus | null>(null)
   const [rejectReason, setRejectReason] = useState<string | null>(null)
 
@@ -92,13 +108,18 @@ export function LifePhotoUploadSection({
     }
 
     setUploading(true)
+    setUploadPhase('compressing')
     setRejectReason(null)
+    await yieldToUi()
 
-    const result = await verifyAndUploadLifePhoto(userId, pendingFile)
+    const result = await verifyAndUploadLifePhoto(userId, pendingFile, {
+      onPhase: (phase) => setUploadPhase(phase),
+    })
     refreshFailureStatus()
 
     if (!result.ok) {
       setUploading(false)
+      setUploadPhase(null)
       setRejectReason(result.error)
       if (result.limited) clearPending()
       return
@@ -123,12 +144,16 @@ export function LifePhotoUploadSection({
 
     clearPending()
     onPhotosChange(next)
-    setUploading(false)
 
     try {
+      setUploadPhase('saving')
+      await yieldToUi()
       await onUploadSuccess?.(next)
     } catch {
       /* 上傳已成功；儲存失敗由外層處理 */
+    } finally {
+      setUploading(false)
+      setUploadPhase(null)
     }
   }
 
@@ -139,8 +164,34 @@ export function LifePhotoUploadSection({
   const canPickMore = photos.length < PROFILE_PHOTO_MAX && !pendingFile
   const remaining = failureStatus?.remaining ?? 10
 
+  const phaseLabel = uploadPhase ? UPLOAD_PHASE_LABEL[uploadPhase] : null
+
   return (
-    <div className="space-y-3">
+    <div className="relative space-y-3">
+      <AnimatePresence>
+        {uploading && phaseLabel && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[240] flex items-center justify-center bg-white/80 backdrop-blur-sm px-6"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="w-full max-w-xs rounded-3xl bg-white px-6 py-8 shadow-xl ring-1 ring-slate-200 text-center">
+              <Loader2 className="mx-auto h-10 w-10 animate-spin text-slate-800" aria-hidden />
+              <p className="mt-4 text-base font-bold text-slate-900">{phaseLabel}</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                {uploadPhase === 'reviewing'
+                  ? '通常需 5–20 秒，請勿關閉或離開此頁'
+                  : '請稍候，完成後會自動更新'}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <p className="text-xs text-amber-700 bg-amber-50 ring-1 ring-amber-100 rounded-xl px-3 py-2.5 leading-relaxed font-medium">
         {UPLOAD_HINT}
         {failureStatus != null && (
@@ -247,7 +298,7 @@ export function LifePhotoUploadSection({
             )}
           >
             <Upload className="w-4 h-4" />
-            {uploading ? '審核並上傳中…' : '上傳這張照片'}
+            {uploading ? (phaseLabel ?? '處理中…') : '上傳這張照片'}
           </motion.button>
         </div>
       )}

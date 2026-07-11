@@ -49,6 +49,7 @@ import {
   computeChatUnlockedGlobalTiles,
   mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
+  puzzleSlotIsComplete,
 } from '@/lib/puzzleUnlockPick'
 import {
   clearInstantEnqueueIntent,
@@ -65,7 +66,12 @@ export type InstantNavGuardSnapshot = {
   sessionPhase: 'chat' | 'decide' | null
 }
 import { applyDismissedSessionFilter } from '@/lib/instantMatchPollUtils'
-import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
+import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 import InstantMatchIntroSplash from '@/components/InstantMatchIntroSplash'
 import {
   formatMsUntilInstantMatchOpens,
@@ -501,6 +507,7 @@ export default function InstantMatchTab({
   const [sendBusy, setSendBusy] = useState(false)
   const [manualUnlockedTiles, setManualUnlockedTiles] = useState<number[]>([])
   const [puzzleUnlockNotice, setPuzzleUnlockNotice] = useState<string | null>(null)
+  const [peerChatAvatarBroken, setPeerChatAvatarBroken] = useState(false)
 
   const instantInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -699,7 +706,7 @@ export default function InstantMatchTab({
               if (raw.length > 0) {
                 const urls = await resolvePhotoUrls(raw)
                 if (!cancelled) {
-                  const cleaned = urls.filter(Boolean)
+                  const cleaned = urls.filter(isDisplayablePhotoUrl)
                   if (cleaned.length > 0) setResolvedPeerPhotoUrls(cleaned)
                 }
               }
@@ -785,7 +792,7 @@ export default function InstantMatchTab({
     }
     let cancelled = false
     void resolvePhotoUrls(peer.photo_urls.filter(Boolean).slice(0, PUZZLE_MAX_PHOTO_SLOTS)).then((urls) => {
-      if (!cancelled) setResolvedPeerPhotoUrls(urls.filter(Boolean))
+      if (!cancelled) setResolvedPeerPhotoUrls(urls.filter(isDisplayablePhotoUrl))
     })
     return () => {
       cancelled = true
@@ -1171,6 +1178,28 @@ export default function InstantMatchTab({
   }
 
   const peerBlurPhotoUrl = resolvedPeerPhotoUrls[0] ?? null
+  useEffect(() => {
+    setPeerChatAvatarBroken(false)
+  }, [peerBlurPhotoUrl])
+
+  const instantChatAvatarPrivacyCleared = useMemo(() => {
+    if (!puzzleConversation) return false
+    const photoSlots = Math.min(
+      PUZZLE_MAX_PHOTO_SLOTS,
+      Math.max(1, puzzleConversation.photoUrls?.length ?? 0),
+    )
+    const progress = getPuzzleProgress(
+      puzzleChatMessages,
+      manualUnlockedTiles,
+      puzzleConversation.matchedAt,
+      Date.now(),
+      String(puzzleConversation.id),
+      photoSlots,
+      false,
+      false,
+    )
+    return puzzleSlotIsComplete(new Set(progress.globalUnlockedTiles), 0)
+  }, [puzzleConversation, puzzleChatMessages, manualUnlockedTiles])
 
   const confirmLeaveInstantChat = async () => {
     const sid = sessionId
@@ -1459,12 +1488,32 @@ export default function InstantMatchTab({
               className={cn('flex items-end gap-2', m.fromMe ? 'justify-end' : 'justify-start')}
             >
               {!m.fromMe &&
-                (peerBlurPhotoUrl ? (
-                  <div className="h-7 w-7 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80">
-                    <ProfilePhotoPrivacyImage
+                (peerBlurPhotoUrl && !peerChatAvatarBroken ? (
+                  <div
+                    className="h-7 w-7 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-slate-200/80"
+                    onContextMenu={
+                      instantChatAvatarPrivacyCleared ? undefined : preventProfilePhotoContextMenu
+                    }
+                  >
+                    <img
                       src={peerBlurPhotoUrl}
                       alt=""
-                      className="h-full w-full scale-110 object-cover"
+                      className={cn(
+                        profilePhotoPrivacyGuardClass,
+                        'h-full w-full scale-110 object-cover',
+                        !instantChatAvatarPrivacyCleared && 'opacity-80',
+                      )}
+                      style={
+                        instantChatAvatarPrivacyCleared
+                          ? undefined
+                          : { filter: profilePhotoPrivacyBlurFilter() }
+                      }
+                      decoding="async"
+                      draggable={false}
+                      onContextMenu={
+                        instantChatAvatarPrivacyCleared ? undefined : preventProfilePhotoContextMenu
+                      }
+                      onError={() => setPeerChatAvatarBroken(true)}
                     />
                   </div>
                 ) : (

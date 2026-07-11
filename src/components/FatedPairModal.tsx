@@ -13,7 +13,12 @@ import { goldenStars } from '@/lib/mbtiCompat'
 import { normalizeMbtiTypeForDisplay } from '@/lib/mbti'
 import { resolvePhotoUrls } from '@/lib/db'
 import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
-import { ProfilePhotoPrivacyImage, preventProfilePhotoContextMenu } from '@/components/ProfilePhotoPrivacyImage'
+import { ensureConnectionWithBudget } from '@/lib/supabase'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 import type { FatedPairKind, FatedPairPartnerProfile, FatedPairSlotState } from '@/lib/db'
 
 const INTRO_AUTO_MS = 2800
@@ -155,12 +160,14 @@ function FatedPairPhoto({
   photoLoading,
   partnerName,
   privacyBlurred,
+  onPhotoError,
   className,
 }: {
   photoUrl: string | null
   photoLoading: boolean
   partnerName: string
   privacyBlurred: boolean
+  onPhotoError?: () => void
   className?: string
 }) {
   return (
@@ -172,24 +179,20 @@ function FatedPairPhoto({
       onContextMenu={privacyBlurred ? preventProfilePhotoContextMenu : undefined}
     >
       {photoUrl ? (
-        privacyBlurred ? (
-          <ProfilePhotoPrivacyImage
-            src={photoUrl}
-            alt=""
-            className={cn(
-              'absolute inset-0 h-full w-full scale-[1.02]',
-            )}
-            style={{ backgroundPosition: 'center 22%' }}
-          />
-        ) : (
-          <img
-            src={photoUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover object-[center_22%]"
-            decoding="async"
-            draggable={false}
-          />
-        )
+        <img
+          src={photoUrl}
+          alt=""
+          className={cn(
+            profilePhotoPrivacyGuardClass,
+            'absolute inset-0 h-full w-full object-cover object-[center_22%]',
+            privacyBlurred && 'scale-[1.02]',
+          )}
+          style={privacyBlurred ? { filter: profilePhotoPrivacyBlurFilter() } : undefined}
+          decoding="async"
+          draggable={false}
+          onContextMenu={privacyBlurred ? preventProfilePhotoContextMenu : undefined}
+          onError={onPhotoError}
+        />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[#241047]">
           {photoLoading ? (
@@ -304,8 +307,10 @@ export default function FatedPairModal({
     () => `fate-ring-${kind}-${slot.partner_user_id.slice(0, 8)}`,
     [kind, slot.partner_user_id],
   )
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const [photoCandidates, setPhotoCandidates] = useState<string[]>([])
+  const [photoIdx, setPhotoIdx] = useState(0)
   const [photoLoading, setPhotoLoading] = useState(false)
+  const photoUrl = photoCandidates[photoIdx] ?? null
   const [phase, setPhase] = useState<'intro' | 'detail'>('intro')
   const introTimerRef = useRef<number | undefined>(undefined)
 
@@ -345,30 +350,50 @@ export default function FatedPairModal({
     [partner.interests],
   )
 
+  const advancePhotoCandidate = useCallback(() => {
+    setPhotoIdx((i) => Math.min(i + 1, photoCandidates.length))
+  }, [photoCandidates.length])
+
   useEffect(() => {
     if (!open) {
-      setPhotoUrl(null)
+      setPhotoCandidates([])
+      setPhotoIdx(0)
+      setPhotoLoading(false)
       return
     }
 
     const paths = photoPaths(partner)
-    const direct = paths.find(isDisplayablePhotoUrl)
-    if (direct) {
-      setPhotoUrl(direct)
+    const direct = paths.filter(isDisplayablePhotoUrl)
+    if (direct.length > 0) {
+      setPhotoCandidates(direct.slice(0, 3))
+      setPhotoIdx(0)
+      setPhotoLoading(false)
       return
     }
     if (paths.length === 0) {
-      setPhotoUrl(null)
+      setPhotoCandidates([])
+      setPhotoIdx(0)
+      setPhotoLoading(false)
       return
     }
 
     let cancelled = false
+    setPhotoCandidates([])
+    setPhotoIdx(0)
     setPhotoLoading(true)
-    void resolvePhotoUrls(paths.slice(0, 3)).then((urls) => {
-      if (cancelled) return
-      setPhotoUrl(urls.find(isDisplayablePhotoUrl) ?? null)
-      setPhotoLoading(false)
-    })
+    void (async () => {
+      try {
+        await ensureConnectionWithBudget()
+        if (cancelled) return
+        const urls = await resolvePhotoUrls(paths.slice(0, 3))
+        if (cancelled) return
+        const displayable = urls.filter(isDisplayablePhotoUrl)
+        setPhotoCandidates(displayable)
+        setPhotoIdx(0)
+      } finally {
+        if (!cancelled) setPhotoLoading(false)
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -422,10 +447,18 @@ export default function FatedPairModal({
               ))}
               <div className="relative flex h-36 w-36 items-center justify-center overflow-hidden rounded-full bg-[#1a0b2e] ring-2 ring-white/15">
                 {photoUrl ? (
-                  <ProfilePhotoPrivacyImage
+                  <img
                     src={photoUrl}
                     alt=""
-                    className="h-full w-full scale-110 object-cover"
+                    className={cn(
+                      profilePhotoPrivacyGuardClass,
+                      'h-full w-full scale-110 object-cover',
+                    )}
+                    style={{ filter: profilePhotoPrivacyBlurFilter() }}
+                    decoding="async"
+                    draggable={false}
+                    onContextMenu={preventProfilePhotoContextMenu}
+                    onError={advancePhotoCandidate}
                   />
                 ) : photoLoading ? (
                   <div className="h-10 w-10 animate-pulse rounded-full bg-white/15" />
@@ -491,6 +524,7 @@ export default function FatedPairModal({
                   photoLoading={photoLoading}
                   partnerName={partnerName}
                   privacyBlurred
+                  onPhotoError={advancePhotoCandidate}
                 />
 
                 <RibbonBadge title={copy.ribbonTitle} sub={copy.ribbonSub} />

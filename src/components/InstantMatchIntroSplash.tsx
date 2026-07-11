@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { getProfile, resolvePhotoUrls } from '@/lib/db'
-import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
+import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
+import { ensureConnectionWithBudget } from '@/lib/supabase'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 
 const AUTO_ENTER_MS = 2800
 const PREVIEW_PHOTO_SLOTS = 3
@@ -24,7 +31,7 @@ export default function InstantMatchIntroSplash({
   prefetchedDisplayName,
   onComplete,
 }: Props) {
-  const [photoUrl, setPhotoUrl] = useState<string | null>(prefetchedPhotoUrl ?? null)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState(prefetchedDisplayName ?? '')
   const completedRef = useRef(false)
   const onCompleteRef = useRef(onComplete)
@@ -35,6 +42,8 @@ export default function InstantMatchIntroSplash({
     completedRef.current = true
     onCompleteRef.current()
   }
+
+  const clearPhoto = useCallback(() => setPhotoUrl(null), [])
 
   useEffect(() => {
     if (!open) {
@@ -51,23 +60,37 @@ export default function InstantMatchIntroSplash({
       setDisplayName('')
       return
     }
-    if (prefetchedPhotoUrl) setPhotoUrl(prefetchedPhotoUrl)
     if (prefetchedDisplayName) setDisplayName(prefetchedDisplayName)
-    if (!peerUserId) return
-    if (prefetchedPhotoUrl) return
+
+    const prefetch =
+      typeof prefetchedPhotoUrl === 'string' && isDisplayablePhotoUrl(prefetchedPhotoUrl)
+        ? prefetchedPhotoUrl
+        : null
+    if (prefetch) {
+      setPhotoUrl(prefetch)
+      return
+    }
+
+    if (!peerUserId) {
+      setPhotoUrl(null)
+      return
+    }
 
     let cancelled = false
-    ;(async () => {
+    setPhotoUrl(null)
+    void (async () => {
+      await ensureConnectionWithBudget()
+      if (cancelled) return
       const p = await getProfile(peerUserId)
       if (cancelled) return
       const name = p?.nickname?.trim() || p?.name?.trim() || ''
       if (name) setDisplayName(name)
-      if (prefetchedPhotoUrl) return
       const raw = (p?.photo_urls ?? []).filter(Boolean).slice(0, PREVIEW_PHOTO_SLOTS)
       if (raw.length === 0) return
       const urls = await resolvePhotoUrls(raw)
-      const first = urls.filter(Boolean)[0]
-      if (!cancelled && first) setPhotoUrl(first)
+      if (cancelled) return
+      const first = urls.find(isDisplayablePhotoUrl) ?? null
+      if (first) setPhotoUrl(first)
     })()
     return () => {
       cancelled = true
@@ -127,10 +150,18 @@ export default function InstantMatchIntroSplash({
               <div className="relative flex h-40 w-40 items-center justify-center overflow-hidden rounded-full bg-slate-900 p-[3px] shadow-2xl shadow-black/40 ring-2 ring-white/15">
                 <div className="h-full w-full overflow-hidden rounded-full bg-slate-800">
                   {photoUrl ? (
-                    <ProfilePhotoPrivacyImage
+                    <img
                       src={photoUrl}
                       alt=""
-                      className="h-full w-full scale-110 object-cover opacity-80"
+                      className={cn(
+                        profilePhotoPrivacyGuardClass,
+                        'h-full w-full scale-110 object-cover opacity-80',
+                      )}
+                      style={{ filter: profilePhotoPrivacyBlurFilter() }}
+                      decoding="async"
+                      draggable={false}
+                      onContextMenu={preventProfilePhotoContextMenu}
+                      onError={clearPhoto}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">

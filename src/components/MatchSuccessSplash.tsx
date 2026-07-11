@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, Sparkles } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { getProfile, resolvePhotoUrls } from '@/lib/db'
-import { ProfilePhotoPrivacyImage } from '@/components/ProfilePhotoPrivacyImage'
+import { isDisplayablePhotoUrl } from '@/lib/discoverDeckProfilePhotos'
+import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
+import {
+  preventProfilePhotoContextMenu,
+  profilePhotoPrivacyGuardClass,
+} from '@/components/ProfilePhotoPrivacyImage'
 
 const PREVIEW_PHOTO_SLOTS = 3
 
@@ -72,7 +78,7 @@ export default function MatchSuccessSplash({
         return
       }
       const urls = await resolvePhotoUrls(raw)
-      const first = urls.filter(Boolean)[0]
+      const first = urls.filter(isDisplayablePhotoUrl)[0]
       if (!cancelled) setPhotoUrl(first ?? null)
     })()
     return () => {
@@ -120,10 +126,18 @@ export default function MatchSuccessSplash({
             >
               <div className="flex h-36 w-36 items-center justify-center overflow-hidden rounded-full bg-slate-900 ring-2 ring-white/20">
                 {photoUrl ? (
-                  <ProfilePhotoPrivacyImage
+                  <img
                     src={photoUrl}
                     alt=""
-                    className="h-full w-full scale-110 object-cover"
+                    className={cn(
+                      profilePhotoPrivacyGuardClass,
+                      'h-full w-full scale-110 object-cover opacity-80',
+                    )}
+                    style={{ filter: profilePhotoPrivacyBlurFilter() }}
+                    decoding="async"
+                    draggable={false}
+                    onContextMenu={preventProfilePhotoContextMenu}
+                    onError={() => setPhotoUrl(null)}
                   />
                 ) : (
                   <Sparkles className="h-12 w-12 text-amber-200/90" />

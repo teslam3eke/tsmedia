@@ -23,9 +23,22 @@ function emitBuildIdPlugin(): Plugin {
   }
 }
 
+const DEV_API_PORT = Number(process.env.DEV_API_PORT ?? 3001)
+
 export default defineConfig({
   define: {
     __APP_BUILD_ID__: JSON.stringify(APP_BUILD_ID),
+  },
+  server: {
+    /** 同 Wi‑Fi 手機測試：用終端機顯示的 Network 網址（例 http://192.168.x.x:5173） */
+    host: true,
+    /** 本機 npm run dev：/api/* 轉發至 scripts/dev-api-server.ts */
+    proxy: {
+      '/api': {
+        target: `http://127.0.0.1:${DEV_API_PORT}`,
+        changeOrigin: true,
+      },
+    },
   },
   plugins: [
     react(),

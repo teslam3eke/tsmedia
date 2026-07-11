@@ -38,7 +38,7 @@ function bearerToken(req: VercelRequest): string | null {
 }
 
 function adminSupabase() {
-  const url = process.env.SUPABASE_URL?.trim()
+  const url = process.env.SUPABASE_URL?.trim() ?? process.env.VITE_SUPABASE_URL?.trim()
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
   if (!url || !key) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
   return createClient(url, key)
@@ -83,7 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const token = bearerToken(req)
-  const url = process.env.SUPABASE_URL?.trim()
+  const url = process.env.SUPABASE_URL?.trim() ?? process.env.VITE_SUPABASE_URL?.trim()
   const anon = process.env.SUPABASE_ANON_KEY?.trim() ?? process.env.VITE_SUPABASE_ANON_KEY?.trim()
   if (!token || !url || !anon) {
     return res.status(401).json({ ok: false, message: '請先登入後再上傳生活照' })
