@@ -18,7 +18,8 @@ export default function MaintenanceScreen() {
         <h1 className="text-2xl font-black tracking-[-0.03em]">本站暫停開放</h1>
 
         <div className="mt-6 space-y-4 text-[15px] leading-[1.85] text-slate-900">
-          <p>目前進行內部封測中，預計八月初會與大家見面。</p>
+          <p>本站目前進行內部封測，預計八月初與大家見面。</p>
+          <p>若您在此頁感到空虛，代表功能正常。</p>
         </div>
 
         <SupportEmailFooter className="mt-10 !text-slate-600 [&_a]:!text-slate-900" />
