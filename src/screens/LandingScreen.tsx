@@ -14,10 +14,6 @@ const GOLD_LIGHT = '#C4A574'
 const PAGE_BG = '#faf7f2'
 const LANDING_COUPLE_BG = '/assets/landing-couple-bg.png'
 
-/** 上下羽化：頂部保留臉部，只柔化邊緣 */
-const PHOTO_MASK =
-  'linear-gradient(to bottom, transparent 0%, black 6%, black 84%, transparent 100%)'
-
 const FEATURES = [
   {
     icon: ShieldCheck,
@@ -44,11 +40,11 @@ const FEATURES = [
 export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }: Props) {
   return (
     <div className="min-h-dvh overflow-x-hidden" style={{ backgroundColor: PAGE_BG }}>
-      <div className="relative z-10 mx-auto flex min-h-dvh max-w-md flex-col px-5 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-safe">
+      <div className="relative mx-auto flex min-h-dvh max-w-md flex-col px-5 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-safe">
         {authNotice ? (
           <div
             role="alert"
-            className="mb-4 rounded-2xl bg-amber-50/95 px-4 py-3 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200/80"
+            className="relative z-30 mb-4 rounded-2xl bg-amber-50/95 px-4 py-3 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200/80"
           >
             {authNotice}
           </div>
@@ -59,7 +55,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45 }}
-          className="flex flex-col items-center pt-6"
+          className="relative z-20 flex flex-col items-center pt-6"
         >
           <BrandMark className="h-14 w-14" />
           <p
@@ -78,7 +74,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.08, duration: 0.5 }}
-          className="relative z-20 mt-8 text-center"
+          className="relative z-20 mt-7 text-center"
         >
           <h1
             className="text-[clamp(1.65rem,6.2vw,2rem)] font-normal leading-[1.45] tracking-[0.01em] text-[#3f372f]"
@@ -96,35 +92,39 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           </p>
         </motion.div>
 
-        {/* 全寬人像：緊接標語下方，如設計稿 */}
+        {/* 設計稿同款：全寬大圖，完整顯示男女對視（不裁頭） */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.12, duration: 0.55 }}
-          className="relative z-10 -mx-5 -mt-2 h-[clamp(13rem,40vw,16.5rem)] shrink-0"
-          aria-hidden
+          className="relative z-10 -mx-5 mt-3 w-[calc(100%+2.5rem)] shrink-0"
         >
           <div
-            className="absolute inset-0 left-1/2 w-screen -translate-x-1/2"
-            style={{
-              WebkitMaskImage: PHOTO_MASK,
-              maskImage: PHOTO_MASK,
-            }}
+            className="relative mx-auto w-full max-w-[min(100vw,28rem)]"
+            style={{ aspectRatio: '576 / 343' }}
           >
             <img
               src={LANDING_COUPLE_BG}
               alt=""
-              className="h-full w-full object-cover object-[center_38%]"
+              aria-hidden
+              className="h-full w-full object-contain object-center"
+            />
+            {/* 上下柔化，融進米色底（不裁切人像） */}
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background: `linear-gradient(180deg, ${PAGE_BG} 0%, transparent 14%, transparent 72%, ${PAGE_BG} 100%)`,
+              }}
             />
           </div>
         </motion.div>
 
-        {/* 四大特色 */}
+        {/* 四大特色：疊在照片下緣漸層上，如設計稿 */}
         <motion.section
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.18, duration: 0.45 }}
-          className="relative z-20 -mt-2 grid grid-cols-4 gap-2 px-0.5"
+          className="relative z-20 -mt-6 grid grid-cols-4 gap-2 px-0.5"
         >
           {FEATURES.map(({ icon: Icon, title, desc }, i) => (
             <motion.div
@@ -153,14 +153,14 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           ))}
         </motion.section>
 
-        <div className="min-h-4 flex-1" aria-hidden />
+        <div className="min-h-3 flex-1" aria-hidden />
 
         {/* CTA */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.32, duration: 0.4 }}
-          className="relative z-20 mt-6"
+          className="relative z-20 mt-5"
         >
           <motion.button
             type="button"
