@@ -11,6 +11,7 @@ interface Props {
 const SERIF = '"Noto Serif TC", "Songti TC", "STSong", "Georgia", serif'
 const GOLD = '#A8884E'
 const GOLD_LIGHT = '#C4A574'
+const LANDING_COUPLE_BG = '/assets/landing-couple-bg.png'
 
 const FEATURES = [
   {
@@ -37,25 +38,7 @@ const FEATURES = [
 
 export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }: Props) {
   return (
-    <div className="relative min-h-dvh overflow-x-hidden bg-[#f7f3ed] text-[#4a4035]">
-      {/* 背景人像 */}
-      <div className="pointer-events-none absolute inset-0">
-        <img
-          src="/landing-photo.png"
-          alt=""
-          aria-hidden
-          className="absolute inset-0 h-full w-full object-cover object-[center_28%] scale-105"
-          style={{ filter: 'blur(1.5px) saturate(0.92)' }}
-        />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              'linear-gradient(180deg, rgba(255,252,247,0.94) 0%, rgba(255,250,244,0.72) 34%, rgba(255,248,240,0.55) 58%, rgba(247,241,232,0.88) 100%)',
-          }}
-        />
-      </div>
-
+    <div className="min-h-dvh overflow-x-hidden bg-[#faf7f2] text-[#4a4035]">
       <div className="relative z-10 mx-auto flex min-h-dvh max-w-md flex-col px-5 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-safe">
         {authNotice ? (
           <div
@@ -108,8 +91,29 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           </p>
         </motion.div>
 
-        {/* Spacer：讓背景人像落在中段 */}
-        <div className="min-h-[clamp(7rem,22vw,10rem)] flex-1" aria-hidden />
+        {/* 中段男女對視背景（設計稿同款） */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.14, duration: 0.5 }}
+          className="relative mx-[-0.25rem] mt-5 h-[clamp(10.5rem,32vw,13.5rem)] overflow-hidden"
+          aria-hidden
+        >
+          <img
+            src={LANDING_COUPLE_BG}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover object-center"
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(180deg, rgba(250,247,242,0.72) 0%, rgba(250,247,242,0.08) 22%, rgba(250,247,242,0.05) 55%, rgba(250,247,242,0.55) 100%)',
+            }}
+          />
+        </motion.div>
+
+        <div className="flex-1 min-h-2" aria-hidden />
 
         {/* 四大特色 */}
         <motion.section
