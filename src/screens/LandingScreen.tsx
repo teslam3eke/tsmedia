@@ -14,9 +14,9 @@ const GOLD_LIGHT = '#C4A574'
 const PAGE_BG = '#faf7f2'
 const LANDING_COUPLE_BG = '/assets/landing-couple-bg.png'
 
-/** 上下羽化，避免出現「貼圖小框」 */
+/** 上下羽化：頂部保留臉部，只柔化邊緣 */
 const PHOTO_MASK =
-  'linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.35) 8%, black 22%, black 78%, rgba(0,0,0,0.4) 92%, transparent 100%)'
+  'linear-gradient(to bottom, transparent 0%, black 6%, black 84%, transparent 100%)'
 
 const FEATURES = [
   {
@@ -101,7 +101,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.12, duration: 0.55 }}
-          className="relative z-10 -mx-5 -mt-3 h-[clamp(11.5rem,36vw,14.5rem)] shrink-0"
+          className="relative z-10 -mx-5 -mt-2 h-[clamp(13rem,40vw,16.5rem)] shrink-0"
           aria-hidden
         >
           <div
@@ -114,7 +114,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
             <img
               src={LANDING_COUPLE_BG}
               alt=""
-              className="h-full w-full scale-[1.08] object-cover object-center"
+              className="h-full w-full object-cover object-[center_38%]"
             />
           </div>
         </motion.div>
