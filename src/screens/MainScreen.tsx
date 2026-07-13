@@ -83,7 +83,7 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
-import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased } from '@/lib/membershipProducts'
+import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased, showIncomeBorderFromDiscoverRpc } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
   hardReloadOnceAfterPaymentReturn,
@@ -527,7 +527,7 @@ function mapDailyDiscoverRow(row: DailyDiscoverRpcRow, slot: number): Profile {
     workRegion: wr,
     homeRegion: hr,
     incomeTier: row.income_tier ?? undefined,
-    showIncomeBorder: effectiveShowIncomeBorder(row),
+    showIncomeBorder: showIncomeBorderFromDiscoverRpc(row),
     likedToday: Boolean(row.liked_today),
     superLikedToday: Boolean(row.super_liked_today),
     incomingSuperLiked: Boolean(row.incoming_super_liked),

@@ -80,6 +80,15 @@ export function effectiveShowIncomeBorder(profile: {
   )
 }
 
+/** 探索 deck RPC：`show_income_border` 已在 SQL 套用男性付費 guard；列上無 `crown_effect_purchased_at`。 */
+export function showIncomeBorderFromDiscoverRpc(row: {
+  show_income_border?: boolean | null
+  income_tier?: string | null
+} | null | undefined): boolean {
+  if (!row) return false
+  return Boolean(row.show_income_border && row.income_tier)
+}
+
 export function formatMembershipExpiryZhTw(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return '尚未訂閱'
   const d = new Date(iso)
