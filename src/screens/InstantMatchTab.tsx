@@ -251,7 +251,7 @@ function InstantQueueBlockedNotice() {
         你的「加為好友」免費次數（2 次）已用完，且目前沒有愛心。若聊天後選擇加好友，需消耗 1 顆愛心。
       </p>
       <p className="mt-1.5 text-[11px] leading-relaxed text-rose-800/90">
-        每日登入（每晚 10 點換日）可領 1 顆愛心與 2 次拼圖解鎖；有效會員另加 2 顆愛心。請先取得愛心後再開始配對。
+        訂閱 VIP 後，每日登入（每晚 10 點換日）可領 3 顆愛心與 2 次拼圖解鎖。請先取得愛心後再開始配對。
       </p>
     </div>
   )
@@ -298,7 +298,7 @@ function InstantQueueBlockedModal({
           </p>
           <p>若七分鐘聊天後你選擇「加為好友」，需消耗 1 顆愛心；愛心不足時也無法送出加好友。</p>
           <p className="text-[11px] text-slate-500">
-            每日登入（每晚 10 點換日）可領 1 顆愛心與 2 次拼圖解鎖；有效會員另加 2 顆愛心。
+            VIP 會員每日登入（每晚 10 點換日）可領 3 顆愛心與 2 次拼圖解鎖。
           </p>
         </div>
         <button

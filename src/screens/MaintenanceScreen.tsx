@@ -18,9 +18,7 @@ export default function MaintenanceScreen() {
         <h1 className="text-2xl font-black tracking-[-0.03em]">本站暫停開放</h1>
 
         <div className="mt-6 space-y-4 text-[15px] leading-[1.85] text-slate-900">
-          <p>由於女生數量太多，導致男女比例差異懸殊。</p>
-          <p>我們將會調整行銷策略並盡速改善，</p>
-          <p>現在正在努力抓工程師回來，請稍候。</p>
+          <p>目前進行內部封測中，預計八月初會與大家見面。</p>
         </div>
 
         <SupportEmailFooter className="mt-10 !text-slate-600 [&_a]:!text-slate-900" />
