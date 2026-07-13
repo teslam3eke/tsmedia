@@ -16,7 +16,7 @@ import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 
-export const TERMS_VERSION = '2026-04-28'
+export const TERMS_VERSION = '2026-07-14'
 
 function isRecoverableResumeAuthError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
