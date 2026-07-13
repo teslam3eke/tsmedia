@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion'
 import { ChevronRight, CreditCard, Lock, Puzzle, ShieldCheck, Users } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 
@@ -9,10 +8,7 @@ interface Props {
 }
 
 const SERIF = '"Noto Serif TC", "Songti TC", "STSong", "Georgia", serif'
-const GOLD = '#A8884E'
-const GOLD_LIGHT = '#C4A574'
-const PAGE_BG = '#faf7f2'
-const LANDING_COUPLE_BG = '/assets/landing-couple-bg.png'
+const GOLD = '#aa8147'
 
 const FEATURES = [
   {
@@ -39,161 +35,114 @@ const FEATURES = [
 
 export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }: Props) {
   return (
-    <div className="min-h-dvh overflow-x-hidden" style={{ backgroundColor: PAGE_BG }}>
-      <div className="relative mx-auto flex min-h-dvh max-w-md flex-col px-5 pb-[max(1.75rem,env(safe-area-inset-bottom))] pt-safe">
+    <div className="min-h-dvh bg-[#f8f3ed]">
+      <div
+        className="relative mx-auto w-full max-w-[576px] overflow-hidden bg-[#f8f3ed]"
+        style={{ aspectRatio: '9 / 16' }}
+      >
         {authNotice ? (
           <div
             role="alert"
-            className="relative z-30 mb-4 rounded-2xl bg-amber-50/95 px-4 py-3 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200/80"
+            className="absolute inset-x-4 top-[max(1rem,env(safe-area-inset-top))] z-30 rounded-2xl bg-amber-50/95 px-4 py-3 text-sm leading-relaxed text-amber-900 shadow-lg ring-1 ring-amber-200/80"
           >
             {authNotice}
           </div>
         ) : null}
 
-        {/* Logo */}
-        <motion.header
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45 }}
-          className="relative z-20 flex flex-col items-center pt-6"
-        >
-          <BrandMark className="h-14 w-14" />
+        {/* 高解析背景照片；所有文字與圖示由 HTML 呈現，避免點陣化。 */}
+        <img
+          src="/assets/landing-couple-premium.png"
+          alt=""
+          aria-hidden
+          className="absolute inset-0 h-full w-full select-none object-cover object-center"
+          draggable={false}
+        />
+
+        <header className="absolute inset-x-0 top-[7.4%] z-10 flex flex-col items-center">
+          <BrandMark className="h-[clamp(3.2rem,11vw,4rem)] w-[clamp(3.2rem,11vw,4rem)]" />
           <p
-            className="mt-3 text-[2rem] font-normal leading-none tracking-[0.02em]"
-            style={{ fontFamily: SERIF, color: GOLD }}
+            className="mt-[1.2%] text-[clamp(1.7rem,7.2vw,2.6rem)] font-normal leading-none tracking-[0.02em]"
+            style={{ color: GOLD, fontFamily: SERIF }}
           >
             tsmedia
           </p>
-          <p className="mt-2 text-[11px] font-medium tracking-[0.28em] text-[#8a7d6e]">
+          <p className="mt-[1.3%] text-[clamp(0.58rem,2.15vw,0.76rem)] tracking-[0.3em] text-[#685b4e]">
             高品質交友平台
           </p>
-        </motion.header>
+        </header>
 
-        {/* Hero copy */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08, duration: 0.5 }}
-          className="relative z-20 mt-7 text-center"
-        >
+        <section className="absolute inset-x-0 top-[22.2%] z-10 text-center">
           <h1
-            className="text-[clamp(1.65rem,6.2vw,2rem)] font-normal leading-[1.45] tracking-[0.01em] text-[#3f372f]"
+            className="text-[clamp(1.65rem,7.3vw,2.65rem)] font-normal leading-[1.48] tracking-[0.06em] text-[#3f3932]"
             style={{ fontFamily: SERIF }}
           >
             值得等待的人，
             <br />
-            值得
-            <span style={{ color: GOLD_LIGHT }}>更好</span>
-            的相遇。
+            值得<span style={{ color: '#b89058' }}>更好的相遇</span>。
           </h1>
-          <div className="mx-auto mt-5 h-px w-16" style={{ backgroundColor: GOLD_LIGHT }} />
-          <p className="mt-4 text-[13px] leading-relaxed tracking-[0.04em] text-[#7a6f62]">
+          <div className="mx-auto mt-[3.2%] h-px w-[12%] bg-[#b89058]" />
+          <p className="mt-[2.7%] text-[clamp(0.65rem,2.5vw,0.9rem)] tracking-[0.11em] text-[#74695d]">
             在這裡，遇見值得認識的彼此
           </p>
-        </motion.div>
+        </section>
 
-        {/* 設計稿同款：全寬大圖，完整顯示男女對視（不裁頭） */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.12, duration: 0.55 }}
-          className="relative z-10 -mx-5 mt-3 w-[calc(100%+2.5rem)] shrink-0"
-        >
-          <div
-            className="relative mx-auto w-full max-w-[min(100vw,28rem)]"
-            style={{ aspectRatio: '576 / 343' }}
-          >
-            <img
-              src={LANDING_COUPLE_BG}
-              alt=""
-              aria-hidden
-              className="h-full w-full object-contain object-center"
-            />
-            {/* 上下柔化，融進米色底（不裁切人像） */}
-            <div
-              className="pointer-events-none absolute inset-0"
-              style={{
-                background: `linear-gradient(180deg, ${PAGE_BG} 0%, transparent 14%, transparent 72%, ${PAGE_BG} 100%)`,
-              }}
-            />
-          </div>
-        </motion.div>
+        {/* 人像左右較深，先用柔和米白霧層托住特色文字。 */}
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 top-[69.5%] z-[5]"
+          style={{
+            background:
+              'linear-gradient(180deg, transparent 0%, rgba(248,243,237,0.58) 22%, rgba(248,243,237,0.9) 46%, #f8f3ed 66%, #f8f3ed 100%)',
+          }}
+          aria-hidden
+        />
 
-        {/* 四大特色：疊在照片下緣漸層上，如設計稿 */}
-        <motion.section
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.18, duration: 0.45 }}
-          className="relative z-20 -mt-6 grid grid-cols-4 gap-2 px-0.5"
-        >
-          {FEATURES.map(({ icon: Icon, title, desc }, i) => (
-            <motion.div
-              key={title}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.22 + i * 0.05, duration: 0.35 }}
-              className="flex flex-col items-center text-center"
-            >
-              <div
-                className="flex h-10 w-10 items-center justify-center rounded-full"
-                style={{ color: GOLD, backgroundColor: 'rgba(168,136,78,0.12)' }}
-              >
-                <Icon className="h-[18px] w-[18px]" strokeWidth={1.6} />
-              </div>
+        <section className="absolute inset-x-[4%] top-[74.2%] z-10 grid grid-cols-4 gap-[2%]">
+          {FEATURES.map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="flex min-w-0 flex-col items-center text-center">
+              <Icon
+                className="h-[clamp(1.45rem,6vw,2.25rem)] w-[clamp(1.45rem,6vw,2.25rem)]"
+                color={GOLD}
+                strokeWidth={1.45}
+              />
               <p
-                className="mt-2 text-[10px] font-bold leading-tight text-[#5c5248]"
+                className="mt-[12%] whitespace-nowrap text-[clamp(0.54rem,2.2vw,0.78rem)] font-semibold text-[#473d34]"
                 style={{ fontFamily: SERIF }}
               >
                 {title}
               </p>
-              <p className="mt-1 whitespace-pre-line text-[8.5px] leading-[1.45] text-[#8a7d6e]">
+              <p className="mt-[5%] whitespace-pre-line text-[clamp(0.42rem,1.65vw,0.58rem)] font-medium leading-[1.55] text-[#695d51]">
                 {desc}
               </p>
-            </motion.div>
+            </div>
           ))}
-        </motion.section>
+        </section>
 
-        <div className="min-h-3 flex-1" aria-hidden />
-
-        {/* CTA */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.32, duration: 0.4 }}
-          className="relative z-20 mt-5"
+        <button
+          type="button"
+          onClick={onStart}
+          className="absolute left-[14.2%] top-[88.05%] z-10 flex h-[5.9%] w-[71.6%] items-center rounded-[clamp(0.75rem,3vw,1rem)] px-[5%] text-white shadow-[0_12px_32px_rgba(151,107,50,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8f6c38]"
+          style={{ background: 'linear-gradient(135deg, #bd9865 0%, #a77d3f 100%)' }}
+          aria-label="新規申請或會員登入"
         >
-          <motion.button
-            type="button"
-            onClick={onStart}
-            whileTap={{ scale: 0.98 }}
-            className="flex w-full items-center justify-between rounded-xl px-5 py-4 text-[15px] font-semibold tracking-[0.06em] text-white shadow-[0_10px_28px_rgba(168,136,78,0.28)]"
-            style={{
-              background: 'linear-gradient(135deg, #B8956A 0%, #A8884E 52%, #9A7944 100%)',
-            }}
-          >
-            <span className="flex-1 text-center pl-6">新規申請 / 會員登入</span>
-            <ChevronRight className="h-5 w-5 shrink-0 opacity-90" strokeWidth={2.2} />
-          </motion.button>
+          <span className="flex-1 pl-[6%] text-center text-[clamp(0.85rem,3.5vw,1.2rem)] font-semibold tracking-[0.06em]">
+            新規申請 / 會員登入
+          </span>
+          <ChevronRight className="h-[clamp(1rem,4vw,1.4rem)] w-[clamp(1rem,4vw,1.4rem)]" />
+        </button>
 
-          <button
-            type="button"
-            onClick={onOpenPaymentInfo}
-            className="mt-4 w-full py-2 text-center text-[11px] font-medium text-[#8a7d6e] underline-offset-2 active:text-[#5c5248]"
-          >
-            會員收付資訊
-          </button>
-        </motion.div>
-
-        {/* Footer */}
-        <motion.footer
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.42, duration: 0.4 }}
-          className="relative z-20 mt-5 flex items-center justify-center gap-1.5 text-[10px] text-[#9a8d7e]"
-        >
-          <Lock className="h-3 w-3 shrink-0" strokeWidth={2} />
+        <div className="absolute inset-x-0 top-[96.4%] z-10 flex items-center justify-center gap-[1.5%] text-[clamp(0.48rem,1.9vw,0.66rem)] text-[#8a7d70]">
+          <Lock className="h-[clamp(0.7rem,2.6vw,0.9rem)] w-[clamp(0.7rem,2.6vw,0.9rem)]" />
           <span>我們承諾保護你的隱私與資料安全</span>
-        </motion.footer>
+        </div>
+
+        {/* 金流查核入口保留給鍵盤與輔助技術使用。 */}
+        <button
+          type="button"
+          onClick={onOpenPaymentInfo}
+          className="sr-only"
+        >
+          會員收付資訊
+        </button>
       </div>
     </div>
   )
