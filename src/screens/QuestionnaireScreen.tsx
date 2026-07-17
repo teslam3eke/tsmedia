@@ -19,6 +19,7 @@ interface Props {
   onBack?: () => void
   onBackToProfile?: () => void
   onReturnToVerify?: () => void
+  returnGateLabel?: string
 }
 
 const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot: string }> = {
@@ -36,6 +37,7 @@ export default function QuestionnaireScreen({
   onBack,
   onBackToProfile,
   onReturnToVerify,
+  returnGateLabel = '返回審核等待',
 }: Props) {
   const questions = useMemo(() => getQuestionnaireQuestions(gender), [gender])
   const [current, setCurrent] = useState(0)
@@ -137,7 +139,7 @@ export default function QuestionnaireScreen({
                 onClick={onReturnToVerify}
                 className="ml-auto text-xs font-semibold text-slate-500 active:text-slate-800"
               >
-                返回審核等待
+                {returnGateLabel}
               </button>
             ) : null}
           </div>

@@ -83,10 +83,11 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
-import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased, showIncomeBorderFromDiscoverRpc } from '@/lib/membershipProducts'
+import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased, isMembershipActive, showIncomeBorderFromDiscoverRpc } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
   hardReloadOnceAfterPaymentReturn,
+  hasPendingPaymentReturn,
   isPaymentReturnPostReloadPass,
   paymentReturnHardReloadPending,
   pollEcpayOrderPaid,
@@ -6646,6 +6647,7 @@ export default function MainScreen({
   initialDiscoverGender = 'male',
   initialTab = 'discover',
   onRequireMbtiQuiz,
+  onRequireMembership,
 }: {
   user?: import('@supabase/supabase-js').User | null
   /** 與 App 問卷／個資同步，避免探索分頁預設 male 在 getProfile 前誤濾掉異性名單 */
@@ -6655,6 +6657,8 @@ export default function MainScreen({
   onSignOut?: () => void
   /** 未完成 MBTI 時由 App 開啟測驗全頁 */
   onRequireMbtiQuiz?: () => void
+  /** 無有效 VIP 時由 App 導向強制付費牆（防付款返回／舊 session 繞過） */
+  onRequireMembership?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const prevTab = useRef<Tab>('discover')
@@ -7988,6 +7992,26 @@ export default function MainScreen({
     onRequireMbtiQuiz?.()
   }, [user?.id, selfMbtiOk, activeTab, onRequireMbtiQuiz])
 
+  /** 全收費制：無有效 VIP 不可留在主殼（付款返回先 sync 再判定） */
+  useEffect(() => {
+    if (!user?.id || !onRequireMembership) return
+    let cancelled = false
+    void (async () => {
+      if (hasPendingPaymentReturn()) {
+        await syncPendingEcpayOrders()
+        if (cancelled) return
+      }
+      const profile = await getProfile(user.id)
+      if (cancelled || !profile) return
+      if (!isMembershipActive(profile.subscription_expires_at)) {
+        onRequireMembership()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, onRequireMembership, foregroundReloadNonce])
+
   const handleSignOut = async () => {
     try {
       if (user?.id) clearLiveConvSessionCache(user.id)
@@ -8264,6 +8288,10 @@ export default function MainScreen({
                     // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
                     void getProfile(user.id).then((profile) => {
                       if (!profile) return
+                      if (!isMembershipActive(profile.subscription_expires_at)) {
+                        onRequireMembership?.()
+                        return
+                      }
                       const photoOk = (profile.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
                       const mbtiOk = profileHasMbti(profile)
                       setSelfPhotoOk(photoOk)

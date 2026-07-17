@@ -14,10 +14,12 @@ import TermsConsentScreen from '@/screens/TermsConsentScreen'
 import IosSafariRequiredScreen from '@/screens/IosSafariRequiredScreen'
 import ResetPasswordScreen from '@/screens/ResetPasswordScreen'
 import MembershipPaymentDisclosureScreen from '@/screens/MembershipPaymentDisclosureScreen'
+import MembershipPaywallScreen from '@/screens/MembershipPaywallScreen'
 import MaintenanceScreen from '@/screens/MaintenanceScreen'
 import StagingEnvBanner from '@/components/StagingEnvBanner'
 import { BrandMark } from '@/components/BrandMark'
 import { isStagingAppEnv } from '@/lib/appEnv'
+import { isMembershipActive } from '@/lib/membershipProducts'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
@@ -72,6 +74,7 @@ type Screen =
   | 'questionnaire'
   | 'mbti-quiz'
   | 'identity-verify'
+  | 'membership-paywall'
   | 'main'
 
 const SCREEN_ORDER: Screen[] = [
@@ -86,6 +89,7 @@ const SCREEN_ORDER: Screen[] = [
   'questionnaire',
   'mbti-quiz',
   'identity-verify',
+  'membership-paywall',
   'main',
 ]
 
@@ -157,8 +161,10 @@ export default function App() {
   const [connectionBannerMsg, setConnectionBannerMsg] = useState<string | null>(null)
   /** 進入主畫面時預設分頁：生活照未達標時強制「我的」以便上傳 */
   const [mainInitialTab, setMainInitialTab] = useState<MainScreenTab>('discover')
-  /** 職業 submitted 等待時從驗證頁返回編輯資料／問卷 */
-  const [verifyWaitRevisit, setVerifyWaitRevisit] = useState(false)
+  /** 審核等待／付費牆：返回編輯資料／問卷後要回到的閘門 */
+  const [gateRevisit, setGateRevisit] = useState<'identity-verify' | 'membership-paywall' | null>(
+    null,
+  )
   /** MBTI 測驗完成後導向：入門流程 vs 探索分頁門檻 */
   const [mbtiQuizReturnTo, setMbtiQuizReturnTo] = useState<'onboarding' | 'main-discover'>('onboarding')
   /** iOS 非 Safari 開啟 PKCE 確認連結，或換券失敗 */
@@ -200,6 +206,10 @@ export default function App() {
       && (!profileHasMinPhotos(profile) || profile.verification_status !== 'approved'),
     )
 
+  /** 審核通過後須有效 VIP（subscription_expires_at）才可進主殼／探索 */
+  const needsMembershipPaywall = (profile: import('@/lib/types').ProfileRow | null) =>
+    Boolean(profile && !isMembershipActive(profile.subscription_expires_at))
+
   const profileHasMinPhotos = (profile: import('@/lib/types').ProfileRow | null) =>
     (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN
 
@@ -221,7 +231,7 @@ export default function App() {
 
   const canEnterMainShell = (
     profile: import('@/lib/types').ProfileRow | null,
-    opts?: { devBypassMaleVerify?: boolean },
+    opts?: { devBypassMaleVerify?: boolean; allowUnpaid?: boolean },
   ) => {
     if (
       profile &&
@@ -230,18 +240,34 @@ export default function App() {
     ) {
       return false
     }
+    if (profile && needsMembershipPaywall(profile) && !opts?.allowUnpaid) {
+      return false
+    }
     return true
   }
 
   const launchMainFromProfile = (
     profile: import('@/lib/types').ProfileRow | null,
-    opts?: { devBypassMaleVerify?: boolean },
+    opts?: { devBypassMaleVerify?: boolean; allowUnpaid?: boolean },
   ) => {
     if (needsIosSafariBrowserGate()) return
     if (!canEnterMainShell(profile, opts)) {
+      if (
+        profile &&
+        needsIdentityVerify(profile) &&
+        !(import.meta.env.DEV && opts?.devBypassMaleVerify)
+      ) {
+        go('identity-verify')
+        return
+      }
+      if (profile && needsMembershipPaywall(profile) && !opts?.allowUnpaid) {
+        go('membership-paywall')
+        return
+      }
       go('identity-verify')
       return
     }
+    setGateRevisit(null)
     const tabHint = readPreferredMainShellTab()
     if (!profile) {
       setMainInitialTab(tabHint ?? 'discover')
@@ -257,9 +283,10 @@ export default function App() {
     go('main')
   }
 
-  /** 問卷／MBTI 完成後：仍缺生活照或會員審核時進 identity-verify */
+  /** 問卷／MBTI 完成後：仍缺生活照／審核／VIP 時進對應閘門 */
   const routeAfterOnboardingMilestone = (profile: import('@/lib/types').ProfileRow | null) => {
     if (needsIdentityVerify(profile)) return go('identity-verify')
+    if (needsMembershipPaywall(profile)) return go('membership-paywall')
     launchMainFromProfile(profile)
   }
 
@@ -629,7 +656,8 @@ export default function App() {
         readSecurityOnboardingDone(u.id) &&
         !readPasswordRecoveryPending()
 
-      if (onboarded && (paymentReturn || hasMainShellSessionHint())) {
+      /** 綠界返回：先入主殼再 sync；一般 reload 仍須拉 profile 以強制 VIP 閘門 */
+      if (onboarded && paymentReturn) {
         launchMainFromProfile(null)
         return
       }
@@ -891,7 +919,7 @@ export default function App() {
   }, [authReady])
 
   const handleSignOut = async () => {
-    setVerifyWaitRevisit(false)
+    setGateRevisit(null)
     await signOut()
     setUser(null)
     go('landing')
@@ -960,12 +988,12 @@ export default function App() {
       await upsertProfile({ userId: activeUser.id, mbtiType })
       clearOnboardingJsonDraft(activeUser.id, 'mbti-quiz')
     }
+    const profile = activeUser ? await getProfile(activeUser.id) : null
     if (mbtiQuizReturnTo === 'main-discover') {
       setMainInitialTab('discover')
-      go('main')
+      launchMainFromProfile(profile)
       return
     }
-    const profile = activeUser ? await getProfile(activeUser.id) : null
     routeAfterOnboardingMilestone(profile)
   }
 
@@ -1087,6 +1115,7 @@ export default function App() {
             initialTab={mainInitialTab}
             onSignOut={() => go('landing')}
             onRequireMbtiQuiz={openMbtiQuizFromDiscoverGate}
+            onRequireMembership={() => go('membership-paywall')}
           />
         </div>
       </>
@@ -1182,9 +1211,16 @@ export default function App() {
           <ProfileSetupScreen
             userId={user?.id}
             onComplete={handleProfileSetupComplete}
-            onBack={verifyWaitRevisit ? undefined : () => go('terms-consent')}
-            onBackToQuestionnaire={verifyWaitRevisit ? () => go('questionnaire') : undefined}
-            onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
+            onBack={gateRevisit ? undefined : () => go('terms-consent')}
+            onBackToQuestionnaire={gateRevisit ? () => go('questionnaire') : undefined}
+            onReturnToVerify={
+              gateRevisit
+                ? () => go(gateRevisit)
+                : undefined
+            }
+            returnGateLabel={
+              gateRevisit === 'membership-paywall' ? '返回開通會員' : '返回審核等待'
+            }
           />
         )}
 
@@ -1194,7 +1230,14 @@ export default function App() {
             gender={userGender}
             userId={user?.id}
             onBack={() => go('profile-setup')}
-            onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
+            onReturnToVerify={
+              gateRevisit
+                ? () => go(gateRevisit)
+                : undefined
+            }
+            returnGateLabel={
+              gateRevisit === 'membership-paywall' ? '返回開通會員' : '返回審核等待'
+            }
           />
         )}
 
@@ -1207,7 +1250,14 @@ export default function App() {
                 ? () => go('main')
                 : () => go('questionnaire')
             }
-            onReturnToVerify={verifyWaitRevisit ? () => go('identity-verify') : undefined}
+            onReturnToVerify={
+              gateRevisit
+                ? () => go(gateRevisit)
+                : undefined
+            }
+            returnGateLabel={
+              gateRevisit === 'membership-paywall' ? '返回開通會員' : '返回驗證頁'
+            }
           />
         )}
 
@@ -1217,21 +1267,44 @@ export default function App() {
             claimedName={currentProfileName}
             gender={userGender}
             onComplete={async () => {
-              setVerifyWaitRevisit(false)
+              setGateRevisit(null)
               const u = await getActiveUser()
               const profile = u ? await getProfile(u.id) : null
               launchMainFromProfile(profile)
             }}
             onEditProfile={() => {
-              setVerifyWaitRevisit(true)
+              setGateRevisit('identity-verify')
               go('profile-setup')
             }}
             onEditQuestionnaire={() => {
-              setVerifyWaitRevisit(true)
+              setGateRevisit('identity-verify')
               go('questionnaire')
             }}
             onSignOut={() => void handleSignOut()}
           />
+        )}
+
+        {screen === 'membership-paywall' && user?.id && (
+          <div
+            className="app-container flex flex-col overflow-hidden"
+            style={{ height: 'var(--app-height, 100dvh)' }}
+          >
+            <MembershipPaywallScreen
+              userId={user.id}
+              gender={userGender}
+              userEmail={user.email ?? ''}
+              onMembershipActive={async () => {
+                setGateRevisit(null)
+                const profile = await getProfile(user.id)
+                launchMainFromProfile(profile)
+              }}
+              onEditProfile={() => {
+                setGateRevisit('membership-paywall')
+                go('profile-setup')
+              }}
+              onSignOut={() => void handleSignOut()}
+            />
+          </div>
         )}
       </motion.div>
     </AnimatePresence>

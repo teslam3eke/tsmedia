@@ -18,6 +18,8 @@ interface Props {
   onBack?: () => void
   onBackToQuestionnaire?: () => void
   onReturnToVerify?: () => void
+  /** 審核等待／付費牆 revisit 時右上角返回文案 */
+  returnGateLabel?: string
 }
 
 export interface ProfileSetupData {
@@ -51,6 +53,7 @@ export default function ProfileSetupScreen({
   onBack,
   onBackToQuestionnaire,
   onReturnToVerify,
+  returnGateLabel = '返回審核等待',
 }: Props) {
   const [form, setForm] = useState<ProfileSetupData>({
     name: '',
@@ -188,7 +191,7 @@ export default function ProfileSetupScreen({
                 onClick={onReturnToVerify}
                 className="ml-auto text-xs font-semibold text-slate-500 active:text-slate-800"
               >
-                返回審核等待
+                {returnGateLabel}
               </button>
             ) : null}
           </div>

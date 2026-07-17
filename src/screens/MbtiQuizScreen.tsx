@@ -19,6 +19,7 @@ interface Props {
   userId?: string
   onBack?: () => void
   onReturnToVerify?: () => void
+  returnGateLabel?: string
 }
 
 export default function MbtiQuizScreen({
@@ -26,6 +27,7 @@ export default function MbtiQuizScreen({
   userId,
   onBack,
   onReturnToVerify,
+  returnGateLabel = '返回驗證頁',
 }: Props) {
   const questions = MBTI_QUESTIONS
   const [current, setCurrent] = useState(0)
@@ -131,7 +133,7 @@ export default function MbtiQuizScreen({
                 onClick={onReturnToVerify}
                 className="ml-auto text-xs font-semibold text-slate-400"
               >
-                返回驗證頁
+                {returnGateLabel}
               </button>
             )}
           </div>

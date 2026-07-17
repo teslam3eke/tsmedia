@@ -10,6 +10,7 @@ export const ONBOARDING_FLOW_SCREENS = [
   'questionnaire',
   'mbti-quiz',
   'identity-verify',
+  'membership-paywall',
 ] as const
 
 export type OnboardingFlowScreen = (typeof ONBOARDING_FLOW_SCREENS)[number]
