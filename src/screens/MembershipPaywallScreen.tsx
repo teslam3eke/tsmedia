@@ -59,7 +59,7 @@ const VALUE_CARDS = [
   },
 ] as const
 
-const BENEFITS = ['探索所有會員', '無限制聊天', '拼圖完整解鎖', '專屬會員標示'] as const
+const BENEFITS = ['即時配對功能', '天選之人配對', '每日6位探索卡片'] as const
 
 export default function MembershipPaywallScreen({
   userId,
