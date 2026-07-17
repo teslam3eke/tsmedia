@@ -120,11 +120,6 @@ function readPreferredMainShellTab(): MainScreenTab | null {
   return null
 }
 
-/** 曾進入主殼（`?tab=` 或 sessionStorage）；PWA 重載時可直進 main，避免 splash→landing 閃屏。 */
-function hasMainShellSessionHint(): boolean {
-  return readPreferredMainShellTab() != null
-}
-
 // ── Splash loader ─────────────────────────────────────────────────────────────
 function SplashScreen({ subtitle }: { subtitle?: string }) {
   return (
