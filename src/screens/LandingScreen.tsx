@@ -35,11 +35,8 @@ const FEATURES = [
 
 export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }: Props) {
   return (
-    <div className="min-h-dvh bg-[#f8f3ed]">
-      <div
-        className="relative mx-auto w-full max-w-[576px] overflow-hidden bg-[#f8f3ed]"
-        style={{ aspectRatio: '9 / 16' }}
-      >
+    <div className="flex h-[100dvh] min-h-[100dvh] justify-center bg-[#f8f3ed]">
+      <div className="relative h-full w-full max-w-[576px] overflow-hidden bg-[#f8f3ed]">
         {authNotice ? (
           <div
             role="alert"
@@ -130,7 +127,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
           <ChevronRight className="h-[clamp(1rem,4vw,1.4rem)] w-[clamp(1rem,4vw,1.4rem)]" />
         </button>
 
-        <div className="absolute inset-x-0 top-[96.4%] z-10 flex items-center justify-center gap-[1.5%] text-[clamp(0.48rem,1.9vw,0.66rem)] text-[#8a7d70]">
+        <div className="absolute inset-x-0 bottom-[max(0.65rem,env(safe-area-inset-bottom))] z-10 flex items-center justify-center gap-[1.5%] text-[clamp(0.48rem,1.9vw,0.66rem)] text-[#8a7d70]">
           <Lock className="h-[clamp(0.7rem,2.6vw,0.9rem)] w-[clamp(0.7rem,2.6vw,0.9rem)]" />
           <span>我們承諾保護你的隱私與資料安全</span>
         </div>

@@ -300,7 +300,7 @@ export default function MembershipPaywallScreen({
         className="relative z-10 flex-1 min-h-0 overflow-y-auto"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        <div className="relative mx-auto w-full max-w-[430px] pb-[calc(env(safe-area-inset-bottom,0px)+20px)]">
+        <div className="relative mx-auto w-full max-w-[430px] bg-[#f6ecdc] pb-[calc(env(safe-area-inset-bottom,0px)+20px)]">
           {/* 意見反映：相對置中內容欄右上，桌機不會跑到視窗最右 */}
           <header className="absolute right-3 top-[calc(env(safe-area-inset-top,0px)+10px)] z-30 flex items-start">
             <div className="relative" ref={menuRef}>
@@ -389,16 +389,71 @@ export default function MembershipPaywallScreen({
             </div>
           </header>
 
-          {/* 整頁延伸的金色光點背景（卡片區已清掉，避免與 HTML 重疊模糊） */}
+          {/* 依寬度等比顯示（946x1960 為 430pt 的 2x 圖）；勿用 h-full object-cover，
+              否則會被整頁高度放大裁切造成模糊（手機版曾因此糊掉＋被切）。 */}
           <img
-            src="/assets/images/membership-paywall-background.png"
+            src="/assets/images/membership-paywall-background.png?v=7"
             alt=""
-            className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover object-top"
+            width={1419}
+            height={3195}
+            className="pointer-events-none absolute inset-x-0 top-0 h-auto w-full select-none"
             draggable={false}
+            decoding="async"
           />
 
-          {/* 預留 Logo／愛心／標題區，讓背景上半完整露出 */}
-          <div className="relative z-10 aspect-[473/288] w-full" aria-hidden />
+          {/* Hero：背景圖內嵌文字與舊愛心已抹除（光暈保留），文字用原生 HTML、
+              愛心用 871px 高解析透明 PNG 疊回原位（Retina 才不會糊）。
+              位置以 hero 高度百分比對齊原稿；1180/1419 對應原稿 hero 至分隔符下緣。 */}
+          <div className="relative z-10 aspect-[1419/1180] w-full">
+            <img
+              src="/assets/images/membership-paywall-hearts.png?v=3"
+              alt=""
+              width={871}
+              height={779}
+              className="pointer-events-none absolute right-[-4%] top-[24%] w-[38%] select-none object-contain"
+              draggable={false}
+              decoding="async"
+            />
+            <div className="absolute inset-x-0 top-[23%] flex flex-col items-center">
+              <img
+                src="/assets/brand/logo-mark.png"
+                alt=""
+                width={1024}
+                height={1024}
+                className="w-[clamp(2.6rem,10.5vw,2.95rem)] select-none"
+                draggable={false}
+                decoding="async"
+              />
+              <p
+                className="mt-1 text-[clamp(1.55rem,7vw,1.9rem)] font-normal leading-tight tracking-[0.04em] text-[#ab8248]"
+                style={{ fontFamily: SERIF }}
+              >
+                tsmedia
+              </p>
+              <p className="mt-1.5 text-[clamp(0.6rem,2.8vw,0.8rem)] font-semibold tracking-[0.42em] text-[#5d544a] [text-indent:0.42em]">
+                高品質交友平台
+              </p>
+            </div>
+
+            <p
+              className="absolute inset-x-0 top-[59.5%] text-center text-[clamp(1rem,4.4vw,1.2rem)] font-semibold tracking-[0.3em] text-[#37312a] [text-indent:0.3em]"
+              style={{ fontFamily: SERIF }}
+            >
+              你已通過審核！
+            </p>
+            <h1
+              className="absolute inset-x-0 top-[68.5%] whitespace-nowrap text-center text-[clamp(1.8rem,8vw,2.2rem)] font-medium leading-none tracking-[0.1em] text-[#37312a]"
+              style={{ fontFamily: SERIF }}
+            >
+              現在，<span className="text-[#ad7530]">遇見對的人</span>。
+            </h1>
+
+            <div className="absolute inset-x-0 top-[85%] flex items-center justify-center">
+              <span className="h-px w-[70px] bg-gradient-to-r from-transparent to-[#c6954b]" />
+              <span className="mx-2 h-1.5 w-1.5 rotate-45 bg-[#bd873b]" />
+              <span className="h-px w-[70px] bg-gradient-to-l from-transparent to-[#c6954b]" />
+            </div>
+          </div>
 
           <div className="relative z-10 space-y-2.5 px-5">
             {VALUE_CARDS.map(({ key, image, title, text }) => (
