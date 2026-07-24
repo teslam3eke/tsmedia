@@ -202,7 +202,7 @@ export default function IdentityVerifyScreen({
     setReviewPendingHold(false)
   }, [])
 
-  const { alertPortal } = useVerificationReviewNotifications({
+  const { alertPortal, notifyReviewResult } = useVerificationReviewNotifications({
     userId,
     enabled: Boolean(userId) && waitingForReview,
     onApproved: onReviewApproved,
@@ -248,15 +248,13 @@ export default function IdentityVerifyScreen({
     const poll = window.setInterval(async () => {
       const p = await getProfile(userId)
       if (p?.verification_status === 'approved') {
-        setVerifyGate('approved')
-        setReviewPendingHold(false)
+        notifyReviewResult('verification_approved')
       } else if (p?.verification_status === 'rejected') {
-        setVerifyGate('rejected')
-        setReviewPendingHold(false)
+        notifyReviewResult('verification_rejected')
       }
     }, 4000)
     return () => window.clearInterval(poll)
-  }, [userId, waitingForReview])
+  }, [userId, waitingForReview, notifyReviewResult])
 
   useEffect(() => {
     if (!userId || !draftHydrated) return

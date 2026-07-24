@@ -1,5 +1,5 @@
 /**
- * 「即時配對」七分鐘隨機房：佇列、倒數時間以 DB `chat_ends_at` 為準；
+ * 「即時配對」限時隨機房：佇列、倒數時間以 DB `chat_ends_at` 為準；
  * 決策為雙向 friend 後由 RPC 寫入 matches。
  */
 import {
@@ -221,7 +221,7 @@ function InstantHeading({ lines }: { lines: readonly string[] }) {
 
 const INSTANT_IDLE_GUIDE_LINES = [
   `開放時段：${INSTANT_MATCH_HOURS_LABEL}。`,
-  '七分鐘匿名聊天，照片以拼圖方式解鎖。',
+  '測試期間為 10 秒匿名聊天，照片以拼圖方式解鎖。',
   '時間結束後，雙方都選加好友才會開通正式配對。',
 ] as const
 
@@ -296,7 +296,7 @@ function InstantQueueBlockedModal({
             <span className="font-semibold text-slate-800">沒有愛心</span>
             。
           </p>
-          <p>若七分鐘聊天後你選擇「加為好友」，需消耗 1 顆愛心；愛心不足時也無法送出加好友。</p>
+          <p>若限時聊天後你選擇「加為好友」，需消耗 1 顆愛心；愛心不足時也無法送出加好友。</p>
           <p className="text-[11px] text-slate-500">
             VIP 會員每日登入（每晚 10 點換日）可領 3 顆愛心與 2 次拼圖解鎖。
           </p>
@@ -1034,7 +1034,7 @@ export default function InstantMatchTab({
   }, [creditBalance?.heart, instantFriendFreeUsesRemaining, userGender])
 
   const INSTANT_QUEUE_BLOCKED_HINT =
-    '你的即時配對「加為好友」免費次數（2 次）已用完，且目前沒有愛心。若七分鐘後選擇加好友，需消耗 1 顆愛心。請先取得愛心後再開始配對。'
+    '你的即時配對「加為好友」免費次數（2 次）已用完，且目前沒有愛心。若限時聊天後選擇加好友，需消耗 1 顆愛心。請先取得愛心後再開始配對。'
 
   const startQueue = async () => {
     if (!isInstantMatchOpenNow(new Date(nowTick))) {

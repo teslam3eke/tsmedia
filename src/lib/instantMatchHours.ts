@@ -1,5 +1,9 @@
-/** 即時配對開放時段：台灣時間每晚 22:00 至隔日 01:00（01:00 起關閉）。 */
-export const INSTANT_MATCH_HOURS_LABEL = '每晚 22:00 至隔日 01:00（台灣時間）'
+/** 測試期間暫時全天開放；恢復正式營運時改回 false。 */
+const TEMPORARILY_ALWAYS_OPEN = true
+
+export const INSTANT_MATCH_HOURS_LABEL = TEMPORARILY_ALWAYS_OPEN
+  ? '測試期間全天開放'
+  : '每晚 22:00 至隔日 01:00（台灣時間）'
 
 export const INSTANT_MATCH_CLOSED_HINT =
   `即時配對僅在${INSTANT_MATCH_HOURS_LABEL}開放。`
@@ -17,9 +21,9 @@ function taipeiHourMinute(date: Date): { hour: number; minute: number } {
   }
 }
 
-/** 與 DB `instant_match_open_now()` 對齊：hour >= 22 或 hour < 1。 */
+/** 與 DB `instant_match_open_now()`／instant_match_always_open 旗標對齊。 */
 export function instantMatchAlwaysOpenForTesting(): boolean {
-  return import.meta.env.VITE_INSTANT_MATCH_ALWAYS_OPEN === '1'
+  return TEMPORARILY_ALWAYS_OPEN || import.meta.env.VITE_INSTANT_MATCH_ALWAYS_OPEN === '1'
 }
 
 export function isInstantMatchOpenNow(date = new Date()): boolean {

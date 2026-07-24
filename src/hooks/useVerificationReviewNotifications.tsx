@@ -9,6 +9,7 @@ import {
 import type { AppNotificationRow } from '@/lib/types'
 
 type VerificationReviewKind = 'verification_approved' | 'verification_rejected'
+const LOCAL_REVIEW_ID_PREFIX = 'local-review-status:'
 
 function isVerificationReviewKind(kind: string): kind is VerificationReviewKind {
   return kind === 'verification_approved' || kind === 'verification_rejected'
@@ -102,6 +103,7 @@ export function useVerificationReviewNotifications(opts: {
 }) {
   const { userId, enabled, onApproved, onRejected } = opts
   const seenIdsRef = useRef(new Set<string>())
+  const activeKindRef = useRef<VerificationReviewKind | null>(null)
   const [activeAlert, setActiveAlert] = useState<AppNotificationRow | null>(null)
 
   const handleRow = useCallback(
@@ -110,17 +112,22 @@ export function useVerificationReviewNotifications(opts: {
       if (seenIdsRef.current.has(row.id)) return
       seenIdsRef.current.add(row.id)
 
+      // 輪詢可能比 Realtime 先偵測到結果；同一結果只顯示一次，
+      // 但仍將稍後抵達的資料庫通知標為已讀，避免切頁後再次彈出。
+      if (activeKindRef.current === row.kind) {
+        if (!row.id.startsWith(LOCAL_REVIEW_ID_PREFIX)) void markAppNotificationRead(row.id)
+        return
+      }
+      activeKindRef.current = row.kind
       void showForegroundVerificationNotice(row)
       setActiveAlert((prev) => prev ?? row)
-
-      if (row.kind === 'verification_approved') onApproved?.()
-      if (row.kind === 'verification_rejected') onRejected?.()
     },
-    [onApproved, onRejected],
+    [],
   )
 
   useEffect(() => {
     seenIdsRef.current.clear()
+    activeKindRef.current = null
     setActiveAlert(null)
   }, [userId])
 
@@ -147,16 +154,43 @@ export function useVerificationReviewNotifications(opts: {
     }
   }, [userId, enabled, handleRow])
 
+  /** profiles 輪詢備援：即使 Realtime／app_notifications 暫時延遲，也先顯示審核結果。 */
+  const notifyReviewResult = useCallback(
+    (kind: VerificationReviewKind) => {
+      if (!userId || !enabled) return
+      const approved = kind === 'verification_approved'
+      handleRow({
+        id: `${LOCAL_REVIEW_ID_PREFIX}${userId}:${kind}`,
+        user_id: userId,
+        kind,
+        title: approved ? '會員審核已通過' : '會員審核未通過',
+        body: approved
+          ? '你的身分與任職認證已通過。'
+          : '你的會員審核未通過，請依審核提示修正後重新送審。',
+        ref_match_id: null,
+        read_at: null,
+        created_at: new Date().toISOString(),
+      })
+    },
+    [userId, enabled, handleRow],
+  )
+
   const dismissAlert = useCallback(() => {
-    setActiveAlert((row) => {
-      if (row) void markAppNotificationRead(row.id)
-      return null
-    })
-  }, [])
+    if (!activeAlert) return
+    if (!activeAlert.id.startsWith(LOCAL_REVIEW_ID_PREFIX)) {
+      void markAppNotificationRead(activeAlert.id)
+    }
+    activeKindRef.current = null
+    setActiveAlert(null)
+    // 先讓使用者看見結果；按下「我知道了」後才切換畫面，避免 hook
+    // 在狀態更新瞬間被卸載而讓彈窗消失。
+    if (activeAlert.kind === 'verification_approved') onApproved?.()
+    if (activeAlert.kind === 'verification_rejected') onRejected?.()
+  }, [activeAlert, onApproved, onRejected])
 
   const alertPortal = activeAlert ? (
     <VerificationReviewAlert notification={activeAlert} onDismiss={dismissAlert} />
   ) : null
 
-  return { alertPortal }
+  return { alertPortal, notifyReviewResult }
 }
