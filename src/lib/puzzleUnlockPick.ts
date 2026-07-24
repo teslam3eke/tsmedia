@@ -102,6 +102,18 @@ export function puzzleMulberry32(seed: number): () => number {
   }
 }
 
+/**
+ * 同一段對話的拼圖順序依觀看者分流：男女雙方順序不同，但同一使用者跨重新整理／裝置仍可重現。
+ * viewer 缺失時保留舊 seed，供未登入 demo 使用。
+ */
+export function buildViewerPuzzleSeedKey(
+  conversationSeedKey: string,
+  viewerUserId: string | null | undefined,
+): string {
+  const viewer = typeof viewerUserId === 'string' ? viewerUserId.trim().toLowerCase() : ''
+  return viewer ? `${conversationSeedKey}|viewer:${viewer}` : conversationSeedKey
+}
+
 export function puzzleSlotIsComplete(globalSet: ReadonlySet<number>, slot: number): boolean {
   const base = slot * 16
   for (let l = 0; l < 16; l += 1) {

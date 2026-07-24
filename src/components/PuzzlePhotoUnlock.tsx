@@ -11,6 +11,7 @@ import {
   profilePhotoPrivacyGuardClass,
 } from '@/components/ProfilePhotoPrivacyImage'
 import {
+  buildViewerPuzzleSeedKey,
   clampPuzzlePhotoSlots,
   computeChatUnlockedGlobalTiles,
   getRecentMatchBoostState,
@@ -192,6 +193,7 @@ export function listCompletedPuzzlePhotoSlots(
 
 export function PuzzlePhotoUnlock({
   conversation,
+  viewerUserId,
   messages,
   manualUnlockedTiles,
   isKeyboardOpen,
@@ -200,6 +202,8 @@ export function PuzzlePhotoUnlock({
   onPuzzleSlotComplete,
 }: {
   conversation: PuzzleConversation
+  /** 納入隨機 seed，讓同一對話雙方各自解不同格；同一使用者仍可穩定重現。 */
+  viewerUserId?: string | null
   messages: PuzzleChatMessage[]
   manualUnlockedTiles: number[]
   isKeyboardOpen: boolean
@@ -213,9 +217,10 @@ export function PuzzlePhotoUnlock({
     PUZZLE_MAX_PHOTO_SLOTS,
     Math.max(1, collectConversationPhotoUrls(conversation).length),
   )
-  const puzzleSeedKey = conversation.instantCarrySessionId
+  const conversationSeedKey = conversation.instantCarrySessionId
     ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
     : String(conversation.id)
+  const puzzleSeedKey = buildViewerPuzzleSeedKey(conversationSeedKey, viewerUserId)
   const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
   const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
 

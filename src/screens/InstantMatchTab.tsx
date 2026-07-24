@@ -46,6 +46,7 @@ import {
 } from '@/components/PuzzlePhotoUnlock'
 import { PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
 import {
+  buildViewerPuzzleSeedKey,
   computeChatUnlockedGlobalTiles,
   mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
@@ -1112,7 +1113,7 @@ export default function InstantMatchTab({
       PUZZLE_MAX_PHOTO_SLOTS,
       Math.max(1, puzzleConversation.photoUrls?.length ?? 0),
     )
-    const puzzleSeedKey = String(puzzleConversation.id)
+    const puzzleSeedKey = buildViewerPuzzleSeedKey(String(puzzleConversation.id), userId)
     const matchedAtForPuzzle = puzzleConversation.matchedAt
     const progress = getPuzzleProgress(
       puzzleChatMessages,
@@ -1462,6 +1463,7 @@ export default function InstantMatchTab({
       {liveChat && puzzleConversation ? (
         <PuzzlePhotoUnlock
           conversation={puzzleConversation}
+          viewerUserId={userId}
           messages={puzzleChatMessages}
           manualUnlockedTiles={manualUnlockedTiles}
           isKeyboardOpen={instantPuzzleKeyboardOpen}

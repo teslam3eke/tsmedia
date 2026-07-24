@@ -125,6 +125,7 @@ import {
   DISCOVER_DEMO_PEER_MALE_PHOTO_URL,
 } from '@/lib/discoverDemoPhotoUrls'
 import {
+  buildViewerPuzzleSeedKey,
   computeChatUnlockedGlobalTiles,
   mergePuzzleManualTilesOrdered,
   pickBlurUnlockGlobalTiles,
@@ -3095,9 +3096,10 @@ function PersonDetailView({
       ])
       if (cancelled || rows === null) return
       const chatMessages = rows.map((r) => formatChatMessageFromRow(r, currentUserId))
-      const puzzleSeedKey = person.instantCarrySessionId
+      const conversationSeedKey = person.instantCarrySessionId
         ? `instant:${String(person.instantCarrySessionId).trim().toLowerCase()}`
         : liveMatchId
+      const puzzleSeedKey = buildViewerPuzzleSeedKey(conversationSeedKey, currentUserId)
       const matchedAtForPuzzle = person.instantPuzzleMatchedAtMs ?? person.matchedAt
       const recentBoost = puzzleRecentMatchBoostEnabled({
         id: liveMatchId,
@@ -3741,9 +3743,10 @@ function ChatRoomView({
         PUZZLE_MAX_PHOTO_SLOTS,
         Math.max(1, collectConversationPhotoUrls(conversation).length),
       )
-      const puzzleSeedKey = conversation.instantCarrySessionId
+      const conversationSeedKey = conversation.instantCarrySessionId
         ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
         : String(conversation.id)
+      const puzzleSeedKey = buildViewerPuzzleSeedKey(conversationSeedKey, currentUserId)
       const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
       const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
       const progress = getPuzzleProgress(
@@ -3796,6 +3799,7 @@ function ChatRoomView({
   }, [
     isLive,
     conversation,
+    currentUserId,
     manualUnlockedTiles,
   ])
 
@@ -4101,9 +4105,10 @@ function ChatRoomView({
       Math.max(1, collectConversationPhotoUrls(conversation).length),
     )
     const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
-    const puzzleSeedKey = conversation.instantCarrySessionId
+    const conversationSeedKey = conversation.instantCarrySessionId
       ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
       : String(conversation.id)
+    const puzzleSeedKey = buildViewerPuzzleSeedKey(conversationSeedKey, currentUserId)
     const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
     const progress = getPuzzleProgress(
       messages,
@@ -4218,9 +4223,10 @@ function ChatRoomView({
       PUZZLE_MAX_PHOTO_SLOTS,
       Math.max(1, collectConversationPhotoUrls(conversation).length),
     )
-    const puzzleSeedKey = conversation.instantCarrySessionId
+    const conversationSeedKey = conversation.instantCarrySessionId
       ? `instant:${String(conversation.instantCarrySessionId).trim().toLowerCase()}`
       : String(conversation.id)
+    const puzzleSeedKey = buildViewerPuzzleSeedKey(conversationSeedKey, currentUserId)
     const matchedAtForPuzzle = conversation.instantPuzzleMatchedAtMs ?? conversation.matchedAt
     const recentMatchBoostEnabled = puzzleRecentMatchBoostEnabled(conversation)
     const progress = getPuzzleProgress(
@@ -4234,7 +4240,7 @@ function ChatRoomView({
       recentMatchBoostEnabled,
     )
     return puzzleSlotIsComplete(new Set(progress.globalUnlockedTiles), 0)
-  }, [conversation, messages, manualUnlockedTiles])
+  }, [conversation, currentUserId, messages, manualUnlockedTiles])
 
   return (
     <div
@@ -4284,6 +4290,7 @@ function ChatRoomView({
         </div>
         <PuzzlePhotoUnlock
           conversation={conversation}
+          viewerUserId={currentUserId}
           messages={messages}
           manualUnlockedTiles={manualUnlockedTiles}
           isKeyboardOpen={isKeyboardOpen}

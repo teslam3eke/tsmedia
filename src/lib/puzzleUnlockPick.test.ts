@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildViewerPuzzleSeedKey,
   computeChatUnlockedGlobalTiles,
   getRecentMatchBoostState,
   mergePuzzleManualTilesOrdered,
@@ -10,6 +11,17 @@ import {
   puzzleTilesAdjacent,
   RECENT_MATCH_BOOST_MS,
 } from '@/lib/puzzleUnlockPick'
+
+describe('buildViewerPuzzleSeedKey', () => {
+  it('同一對話依觀看者產生不同且穩定的拼圖順序', () => {
+    const maleSeed = buildViewerPuzzleSeedKey('match-1', 'USER-A')
+    const femaleSeed = buildViewerPuzzleSeedKey('match-1', 'user-b')
+    expect(maleSeed).toBe('match-1|viewer:user-a')
+    expect(femaleSeed).toBe('match-1|viewer:user-b')
+    expect(maleSeed).not.toBe(femaleSeed)
+    expect(buildViewerPuzzleSeedKey('match-1', 'USER-A')).toBe(maleSeed)
+  })
+})
 
 describe('pickOnePuzzleTileLocal', () => {
   it('連續兩格不相鄰（有非相鄰候選時）', () => {
