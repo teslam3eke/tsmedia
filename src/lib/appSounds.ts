@@ -2,20 +2,14 @@
  * App 內短音效（配對成功／新訊息）。使用 Web Audio，不依賴音檔。
  * 與「通知設定」中 newMatch / messages 開關連動（見 shouldPlayInAppSound）。
  */
+import { readNotificationSettings } from './notificationSettings'
 
 type NotifSoundKey = 'newMatch' | 'messages'
 
 export function shouldPlayInAppSound(kind: NotifSoundKey): boolean {
   if (typeof window === 'undefined') return false
-  try {
-    const raw = localStorage.getItem('notif_settings')
-    if (!raw) return true
-    const s = JSON.parse(raw) as Partial<Record<NotifSoundKey, boolean>>
-    if (kind === 'newMatch') return s.newMatch !== false
-    return s.messages !== false
-  } catch {
-    return true
-  }
+  const settings = readNotificationSettings()
+  return settings[kind]
 }
 
 let sharedCtx: AudioContext | null = null

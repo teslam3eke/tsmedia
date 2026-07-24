@@ -24,7 +24,8 @@ async function showForegroundVerificationNotice(row: AppNotificationRow): Promis
     body: row.body,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: `verification-review-${row.kind}`,
+    // 與伺服器 Web Push 使用相同 tag；Realtime 與 Webhook 同時抵達時只保留一則。
+    tag: `app-notif-${row.kind}`,
   }
 
   try {

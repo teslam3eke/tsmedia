@@ -30,25 +30,9 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-/** 主執行緒回報：使用者正待在與該 match 的一對一聊；此 match 的新訊息不顯示推播橫幅 */
-let activeChatMatchIdLc: string | null = null
-
-/** 與 URL / JSON 可能帶 hyphen 的 uuid 對齊：比對時一律 compact 小寫 hex */
-function normalizeMatchIdForCompare(raw: string | null | undefined): string | null {
-  if (typeof raw !== 'string') return null
-  const t = raw.trim().toLowerCase()
-  if (!t) return null
-  const compact = t.replace(/-/g, '')
-  return compact.length > 0 ? compact : null
-}
-
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
   try {
     const d = event.data as { type?: string; matchId?: string | null; count?: number } | undefined
-    if (d?.type === 'TM_ACTIVE_CHAT_MATCH') {
-      activeChatMatchIdLc = normalizeMatchIdForCompare(d.matchId)
-      return
-    }
     if (d?.type === 'TM_BADGE_SYNC' && typeof d.count === 'number') {
       event.waitUntil(syncBadgeFromClient(Math.max(0, Math.min(BADGE_MAX, Math.floor(d.count)))))
       return
@@ -134,71 +118,9 @@ async function bumpAppIconBadgeForBackgroundMessage(): Promise<void> {
   await applyBackgroundMessageBadge(base + 1)
 }
 
-function matchIdFromPayloadUrl(openUrlPath: string): string | null {
-  try {
-    const u = openUrlPath.startsWith('http')
-      ? new URL(openUrlPath)
-      : new URL(openUrlPath, self.location.origin)
-    const raw = u.searchParams.get('match')
-    if (!raw || !raw.trim()) return null
-    return normalizeMatchIdForCompare(raw)
-  } catch {
-    return null
-  }
-}
-
-/** 前景聊天室備援：`?tm_chat=`（主執行緒 replaceState）或推播 deep link 的 `?match=` */
-function matchIdFromClientUrl(clientUrl: string): string | null {
-  try {
-    const u = new URL(clientUrl)
-    if (u.origin !== self.location.origin) return null
-    const raw = u.searchParams.get('tm_chat') ?? u.searchParams.get('match')
-    if (!raw?.trim()) return null
-    return normalizeMatchIdForCompare(raw)
-  } catch {
-    return null
-  }
-}
-
 /** client 明確可見（不接受 undefined，避免 iOS PWA 背景被誤判為前景） */
 function isClientClearlyForeground(c: WindowClient): boolean {
   return c.visibilityState === 'visible' || c.focused === true
-}
-
-function shouldSuppressMessagePushForMatch(
-  incomingMatchLc: string,
-  clients: readonly Client[],
-): boolean {
-  const originClients = clients.filter(
-    (x): x is WindowClient =>
-      x instanceof WindowClient &&
-      typeof x.url === 'string' &&
-      x.url.startsWith(self.location.origin),
-  )
-  if (originClients.length === 0) return false
-
-  /**
-   * iOS：postMessage 常漏，以 clients.url 的 ?tm_chat= 為備援。
-   * 但必須同時確認 client 明確在前景（visible/focused），
-   * 否則背景 URL 殘留會讓推播橫幅被吃掉。
-   */
-  if (
-    originClients.some(
-      (c) => matchIdFromClientUrl(c.url) === incomingMatchLc && isClientClearlyForeground(c),
-    )
-  ) {
-    return true
-  }
-
-  /**
-   * postMessage 有 arm 時：僅在 client 明確前景才抑制。
-   * 移除 visibilityState === undefined，避免 iOS PWA 背景狀態未知時誤擋橫幅。
-   */
-  if (activeChatMatchIdLc === incomingMatchLc) {
-    return originClients.some(isClientClearlyForeground)
-  }
-
-  return false
 }
 
 async function pingClientsPushOpenQuiet(openUrl: string): Promise<void> {
@@ -257,19 +179,6 @@ async function pingClientsDiscoverRolloverNotified(dayKey: string): Promise<void
   }
 }
 
-async function pingClientsForegroundMessageQuiet(): Promise<void> {
-  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-  for (const x of clients) {
-    if (!(x instanceof WindowClient)) continue
-    if (!x.url.startsWith(self.location.origin)) continue
-    try {
-      x.postMessage({ type: 'TM_PUSH_MESSAGE_RECEIVED_FOREGROUND' })
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 self.addEventListener('push', (event: PushEvent) => {
   event.waitUntil(
     (async () => {
@@ -277,7 +186,6 @@ self.addEventListener('push', (event: PushEvent) => {
       let body = ''
       let tag = 'tsmedia'
       let openUrl = '/'
-      let payloadMatchLc: string | null = null
       let payloadRefMatchId: string | null = null
       let payloadBadgeCount: number | null = null
       let payloadKind: string | null = null
@@ -303,7 +211,6 @@ self.addEventListener('push', (event: PushEvent) => {
             payloadRefMatchId = j.refMatchId.trim()
           }
           if (typeof j.matchId === 'string' && j.matchId.trim()) {
-            payloadMatchLc = normalizeMatchIdForCompare(j.matchId)
             if (!payloadRefMatchId) payloadRefMatchId = j.matchId.trim()
           }
           if (typeof j.badgeCount === 'number' && Number.isFinite(j.badgeCount)) {
@@ -326,39 +233,23 @@ self.addEventListener('push', (event: PushEvent) => {
         tag.startsWith('app-notif-') || (tag.includes('app-notif') && !tag.includes('discover'))
       const isMessageReceivedTag =
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
+      const isVerificationReviewTag =
+        payloadKind === 'verification_approved' ||
+        payloadKind === 'verification_rejected' ||
+        tag === 'app-notif-verification_approved' ||
+        tag === 'app-notif-verification_rejected'
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
-      /** 站內事件（驗證／超喜等）：前景不秀 OS 橫幅，改與背景點擊相同的 deep link 路徑 */
+      /** 次要站內事件前景可靜默處理；審核結果與訊息屬關鍵通知，前景也必須顯示。 */
       if (
         !isInstantMatchPairedTag &&
+        !isVerificationReviewTag &&
         isAppNotifTag &&
         !isMessageReceivedTag &&
         hasForegroundOriginClient(clients)
       ) {
         await pingClientsPushOpenQuiet(openUrl)
         return
-      }
-
-      if (isMessageReceivedTag) {
-        const incomingMatchLc = payloadMatchLc ?? matchIdFromPayloadUrl(openUrl)
-
-        if (incomingMatchLc != null && shouldSuppressMessagePushForMatch(incomingMatchLc, clients)) {
-          await pingClientsForegroundMessageQuiet()
-          return
-        }
-
-        /** 舊 payload 無 match：僅在前景 focused 時略過（站內靠列表／角標） */
-        const focusedVisibleHere = clients.some(
-          (x) =>
-            x instanceof WindowClient &&
-            x.focused === true &&
-            typeof x.url === 'string' &&
-            x.url.startsWith(self.location.origin),
-        )
-        if (focusedVisibleHere && incomingMatchLc == null) {
-          await pingClientsForegroundMessageQuiet()
-          return
-        }
       }
 
       /** 10 點探索換日：不論前景背景一律 showNotification（若同 tag 已由準點本地通知顯示則略過） */

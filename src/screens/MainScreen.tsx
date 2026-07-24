@@ -156,6 +156,12 @@ import FeedbackScreen from '@/screens/FeedbackScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import {
+  readNotificationSettings as readNotifSettings,
+  writeNotificationSettings as writeNotifSettings,
+  type NotificationSettingKey as NotifKey,
+  type NotificationSettings as NotifSettings,
+} from '@/lib/notificationSettings'
 import { needsPwaEncapsulationGate } from '@/lib/pwaEncapsulationGate'
 import { shouldSkipNotificationNudge } from '@/lib/appEnv'
 import { mergeInterestTagOptions } from '@/lib/profileInterestTags'
@@ -676,32 +682,6 @@ function InfoChip({ icon: Icon, label }: { icon: React.ElementType; label: strin
 }
 
 // ─── Notification Settings Modal ─────────────────────────────────────────────
-
-type NotifKey = 'newMatch' | 'messages'
-
-interface NotifSettings {
-  newMatch: boolean
-  messages: boolean
-}
-
-function readNotifSettings(): NotifSettings {
-  const defaults: NotifSettings = { newMatch: false, messages: false }
-  try {
-    const saved = localStorage.getItem('notif_settings')
-    if (!saved) return defaults
-    const parsed = JSON.parse(saved) as Partial<Record<string, boolean>>
-    return {
-      newMatch: parsed.newMatch === true,
-      messages: parsed.messages === true,
-    }
-  } catch {
-    return defaults
-  }
-}
-
-function writeNotifSettings(next: NotifSettings): void {
-  localStorage.setItem('notif_settings', JSON.stringify(next))
-}
 
 function NotificationModal({
   onClose,

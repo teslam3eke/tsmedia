@@ -9,6 +9,7 @@ import { BrandMark } from '@/components/BrandMark'
 import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import { enableAllNotificationSettings } from '@/lib/notificationSettings'
 import { shouldSkipNotificationNudge } from '@/lib/appEnv'
 
 interface Check {
@@ -199,6 +200,7 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
       // 可能受 iOS／網路影響等待十多秒，不應讓使用者誤以為畫面當機。
       setNotifDismissed(true)
       if (perm === 'granted' && userId) {
+        enableAllNotificationSettings()
         void subscribeWebPushForCurrentUser(userId)
       }
     } finally {
