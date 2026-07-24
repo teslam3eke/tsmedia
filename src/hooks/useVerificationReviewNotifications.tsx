@@ -63,7 +63,7 @@ function VerificationReviewAlert({
             ) : (
               <div className="mt-2 space-y-2">
                 {rejectionReason ? (
-                  <div className="rounded-2xl bg-white/80 px-3 py-2.5 ring-1 ring-red-200">
+                  <div>
                     <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
                     <p className="mt-1 text-sm leading-relaxed text-red-800">{rejectionReason}</p>
                   </div>

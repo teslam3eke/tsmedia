@@ -524,7 +524,7 @@ export default function IdentityVerifyScreen({
               <div className="min-w-0">
                 <p className="text-sm font-bold text-red-800">上次審核未通過</p>
                 {rejectionNote ? (
-                  <div className="mt-2 rounded-xl bg-white/80 px-3 py-2 ring-1 ring-red-100">
+                  <div className="mt-2">
                     <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
                     <p className="mt-1 text-sm leading-relaxed text-red-800">
                       {sanitizeVerificationUserMessage(rejectionNote)}

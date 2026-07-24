@@ -6135,7 +6135,7 @@ function AppNotificationAlertPortal({
             </p>
             {notification.kind === 'verification_rejected' && rejectionReason ? (
               <div className="mt-2 space-y-2">
-                <div className="rounded-xl bg-white/80 px-3 py-2 ring-1 ring-red-200">
+                <div>
                   <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
                   <p className={cn('mt-1 text-sm leading-relaxed', meta.bodyClass)}>{rejectionReason}</p>
                 </div>
