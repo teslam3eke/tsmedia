@@ -362,6 +362,41 @@ export default function App() {
     return () => setOnboardingResumeProtect(false)
   }, [screen])
 
+  /**
+   * iOS PWA 的底部安全區偶爾由頁面 canvas／theme-color 繪製，而不是 Landing
+   * 元件本身。Landing 顯示期間同步根層米色，避免滿版內容下方仍露出白條；
+   * 離開後完整還原，避免影響登入與主殼畫面。
+   */
+  useEffect(() => {
+    if (screen !== 'landing') return
+
+    const root = document.getElementById('root')
+    const elements = [document.documentElement, document.body, root].filter(
+      (element): element is HTMLElement => element instanceof HTMLElement,
+    )
+    const previousBackgrounds = elements.map((element) => element.style.backgroundColor)
+    const themeMetas = Array.from(
+      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'),
+    )
+    const previousThemeColors = themeMetas.map((meta) => meta.content)
+
+    elements.forEach((element) => {
+      element.style.backgroundColor = '#f8f3ed'
+    })
+    themeMetas.forEach((meta) => {
+      meta.content = '#f8f3ed'
+    })
+
+    return () => {
+      elements.forEach((element, index) => {
+        element.style.backgroundColor = previousBackgrounds[index] ?? ''
+      })
+      themeMetas.forEach((meta, index) => {
+        meta.content = previousThemeColors[index] ?? ''
+      })
+    }
+  }, [screen])
+
   // ── iOS PWA layout recalc hack ────────────────────────────────────
   // On cold-start, iOS PWA occasionally renders with a stale viewport
   // (phantom URL-bar reservation). Forcing a 1px scroll after mount
