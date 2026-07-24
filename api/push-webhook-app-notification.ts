@@ -81,7 +81,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return
     }
 
-    const tag = `app-notif-${record.kind ?? 'generic'}`
+    const baseTag = `app-notif-${record.kind ?? 'generic'}`
+    // iOS 對相同 tag 的後續 Web Push 可能只更新角標／通知中心而不再跳橫幅。
+    // 聊天訊息必須每則使用唯一 tag，確保使用者看到新訊息通知。
+    const tag =
+      record.kind === 'message_received' && record.id
+        ? `${baseTag}-${record.id}`
+        : baseTag
     const url = buildOpenUrlForAppNotification(record)
     let result: { sent: number; failed: number; skipped: number }
     if (record.kind === 'message_received') {
