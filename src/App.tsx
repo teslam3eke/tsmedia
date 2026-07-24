@@ -376,30 +376,24 @@ export default function App() {
     }
   }, [])
 
-  // ── visualViewport → --app-height (main screen only) ──────────────
-  // This fix is specifically for the logged-in app shell. If we keep it
-  // enabled on landing/auth flows, their normal page scrolling gets mistaken
-  // for iOS keyboard-avoidance and we end up snapping the document back to 0,
-  // which feels like the landing page "jumps" while scrolling.
+  // ── visualViewport → --app-height (main + landing) ────────────────
+  // Main shell needs scrollTo(0) for keyboard quirks; landing only needs
+  // the height pin so iOS Safari/PWA does not leave a white strip below 100dvh.
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
-    if (screen !== 'main') {
+    if (screen !== 'main' && screen !== 'landing') {
       document.documentElement.style.removeProperty('--app-height')
       return
     }
 
     const update = () => {
-      // 切回前景瞬間 vv.height 偶為 0／極小，會把主殼壓扁且觸控區錯位。
       const raw = vv.height
       const fallback = window.innerHeight || document.documentElement.clientHeight || 600
       const h = raw > 96 ? raw : fallback
       document.documentElement.style.setProperty('--app-height', `${h}px`)
-      // Additionally, forcibly un-scroll the document. While typing, iOS
-      // likes to scroll html/body to keep the caret on-screen — since our
-      // container already matches the visible viewport, any such scroll
-      // is pure garbage and visually "flies" the content up.
-      if (window.scrollY !== 0 || window.scrollX !== 0) {
+      // Main shell only: iOS scrolls html/body while typing — snap back.
+      if (screen === 'main' && (window.scrollY !== 0 || window.scrollX !== 0)) {
         window.scrollTo(0, 0)
       }
     }
@@ -1117,6 +1111,24 @@ export default function App() {
     )
   }
 
+  if (screen === 'landing') {
+    return (
+      <>
+        {stagingBanner}
+        {connectivityToast}
+        <LandingScreen
+          authNotice={
+            paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
+              ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
+              : authCallbackError
+          }
+          onStart={() => go('auth')}
+          onOpenPaymentInfo={() => go('membership-payment-info')}
+        />
+      </>
+    )
+  }
+
   return (
     <>
       {stagingBanner}
@@ -1130,18 +1142,6 @@ export default function App() {
         transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
         style={{ minHeight: '100dvh' }}
       >
-        {screen === 'landing' && (
-          <LandingScreen
-            authNotice={
-              paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
-                ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
-                : authCallbackError
-            }
-            onStart={() => go('auth')}
-            onOpenPaymentInfo={() => go('membership-payment-info')}
-          />
-        )}
-
         {screen === 'membership-payment-info' && (
           <MembershipPaymentDisclosureScreen onBack={() => go('landing')} />
         )}
