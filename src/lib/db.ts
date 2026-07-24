@@ -15,6 +15,7 @@ import type {
 import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
+import { formatVerificationApplicationRejectionAlertBody } from './verificationAiUtils'
 
 export const TERMS_VERSION = '2026-07-14'
 
@@ -754,6 +755,25 @@ export async function getTodayVerificationApplicationCount(userId: string): Prom
   return count ?? 0
 }
 
+/** 最近一次被退件的 reviewer_note（供重新送審畫面固定顯示，不只靠推播）。 */
+export async function getLatestVerificationRejectionNote(userId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('verification_applications')
+    .select('reviewer_note')
+    .eq('user_id', userId)
+    .eq('status', 'rejected')
+    .order('reviewed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    console.error('[db] getLatestVerificationRejectionNote error:', error.message)
+    return null
+  }
+  const note = data?.reviewer_note?.trim()
+  return note || null
+}
+
 export async function getLatestVerificationApplication(
   userId: string,
 ): Promise<VerificationApplicationWithProfile | null> {
@@ -1088,9 +1108,7 @@ export async function rejectVerificationApplication(
     userId: application.user_id,
     kind: 'verification_rejected',
     title: '會員審核未通過',
-    body: reviewerNote
-      ? `原因：${reviewerNote}。你的個人資料與生活照已保留，請修正後重新送審。`
-      : '審核未通過。你的個人資料與生活照已保留，請修正證件後重新送審。',
+    body: formatVerificationApplicationRejectionAlertBody(reviewerNote),
   })
 
   return {

@@ -13,6 +13,7 @@ import {
   resolvePhotoUrls,
   submitVerificationApplication,
   getTodayVerificationApplicationCount,
+  getLatestVerificationRejectionNote,
   type VerificationApplicationDocInput,
 } from '@/lib/db'
 import {
@@ -30,7 +31,11 @@ import {
   useOnboardingForegroundRepair,
 } from '@/lib/onboardingDraft'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
-import { VERIFICATION_DAILY_SUBMIT_LIMIT } from '@/lib/verificationAiUtils'
+import {
+  VERIFICATION_DAILY_SUBMIT_LIMIT,
+  VERIFICATION_APPLICATION_REJECTION_FOOTER,
+} from '@/lib/verificationAiUtils'
+import { sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 
@@ -184,6 +189,7 @@ export default function IdentityVerifyScreen({
   const [submitError, setSubmitError] = useState('')
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [dailyCount, setDailyCount] = useState<number | null>(null)
+  const [rejectionNote, setRejectionNote] = useState<string | null>(null)
 
   const identityInputRef = useRef<HTMLInputElement>(null)
   const bonusInputRef = useRef<HTMLInputElement>(null)
@@ -223,6 +229,12 @@ export default function IdentityVerifyScreen({
       const st = p?.verification_status ?? 'pending'
       setVerifyGate(st)
       if (st === 'submitted') setReviewPendingHold(true)
+      if (st === 'rejected') {
+        const note = await getLatestVerificationRejectionNote(userId)
+        if (!cancelled) setRejectionNote(note)
+      } else if (!cancelled) {
+        setRejectionNote(null)
+      }
       if (st === 'approved') return
 
       const paths = (p?.photo_urls ?? []).filter(Boolean)
@@ -254,7 +266,9 @@ export default function IdentityVerifyScreen({
       if (p?.verification_status === 'approved') {
         notifyReviewResult('verification_approved')
       } else if (p?.verification_status === 'rejected') {
-        notifyReviewResult('verification_rejected')
+        const note = await getLatestVerificationRejectionNote(userId)
+        setRejectionNote(note)
+        notifyReviewResult('verification_rejected', { reviewerNote: note })
       }
     }, 4000)
     return () => window.clearInterval(poll)
@@ -504,11 +518,28 @@ export default function IdentityVerifyScreen({
         </div>
 
         {verifyGate === 'rejected' && (
-          <div className="mb-4 rounded-2xl bg-red-50 px-4 py-3 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-red-700 leading-relaxed">
-              上次審核未通過。你的個人資料、問卷與生活照已保留，請修正證件後重新送審。
-            </p>
+          <div className="mb-4 rounded-2xl bg-red-50 px-4 py-3 ring-1 ring-red-100">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-red-800">上次審核未通過</p>
+                {rejectionNote ? (
+                  <div className="mt-2 rounded-xl bg-white/80 px-3 py-2 ring-1 ring-red-100">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
+                    <p className="mt-1 text-sm leading-relaxed text-red-800">
+                      {sanitizeVerificationUserMessage(rejectionNote)}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-red-700 leading-relaxed">
+                    管理員未留下文字說明，請確認證件是否清楚、資料是否一致後重新送審。
+                  </p>
+                )}
+                <p className="mt-2 text-xs text-red-700 leading-relaxed">
+                  {VERIFICATION_APPLICATION_REJECTION_FOOTER}
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

@@ -162,3 +162,26 @@ export function verifyIdReasonFromBody(data: VerifyIdResponseBody): string {
     data.reason ?? data.message ?? `AI 未通過，已轉人工審核。${VERIFICATION_MANUAL_REVIEW_TAIL}`,
   )
 }
+
+/** 整包人工審核退件：站內彈窗／推播／重新送審畫面共用文案 */
+export const VERIFICATION_APPLICATION_REJECTION_FOOTER =
+  '你的個人資料與生活照已保留，請修正證件後重新送審。'
+
+export function formatVerificationApplicationRejectionAlertBody(
+  reviewerNote?: string | null,
+): string {
+  const reason = reviewerNote?.trim()
+    ? sanitizeVerificationUserMessage(reviewerNote.trim())
+    : null
+  if (reason) return `退件原因：${reason}。${VERIFICATION_APPLICATION_REJECTION_FOOTER}`
+  return `審核未通過。${VERIFICATION_APPLICATION_REJECTION_FOOTER}`
+}
+
+/** 從通知正文取出退件原因（相容舊版「原因：」前綴）。 */
+export function parseVerificationRejectionReasonFromBody(body: string): string | null {
+  const modern = body.match(/^退件原因：(.+?)。/)
+  if (modern?.[1]?.trim()) return sanitizeVerificationUserMessage(modern[1].trim())
+  const legacy = body.match(/^原因：(.+?)。/)
+  if (legacy?.[1]?.trim()) return sanitizeVerificationUserMessage(legacy[1].trim())
+  return null
+}

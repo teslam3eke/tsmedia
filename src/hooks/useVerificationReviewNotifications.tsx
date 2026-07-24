@@ -7,6 +7,11 @@ import {
   subscribeToMyAppNotifications,
 } from '@/lib/db'
 import type { AppNotificationRow } from '@/lib/types'
+import {
+  VERIFICATION_APPLICATION_REJECTION_FOOTER,
+  formatVerificationApplicationRejectionAlertBody,
+  parseVerificationRejectionReasonFromBody,
+} from '@/lib/verificationAiUtils'
 
 type VerificationReviewKind = 'verification_approved' | 'verification_rejected'
 const LOCAL_REVIEW_ID_PREFIX = 'local-review-status:'
@@ -23,6 +28,9 @@ function VerificationReviewAlert({
   onDismiss: () => void
 }) {
   const approved = notification.kind === 'verification_approved'
+  const rejectionReason = approved
+    ? null
+    : parseVerificationRejectionReasonFromBody(notification.body)
   return createPortal(
     <div
       className="fixed inset-0 z-[260] flex items-center justify-center bg-slate-950/55 px-5"
@@ -50,9 +58,21 @@ function VerificationReviewAlert({
             >
               {notification.title}
             </h2>
-            <p className={`mt-2 text-sm leading-relaxed ${approved ? 'text-emerald-700' : 'text-red-700'}`}>
-              {notification.body}
-            </p>
+            {approved ? (
+              <p className={`mt-2 text-sm leading-relaxed text-emerald-700`}>{notification.body}</p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {rejectionReason ? (
+                  <div className="rounded-2xl bg-white/80 px-3 py-2.5 ring-1 ring-red-200">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
+                    <p className="mt-1 text-sm leading-relaxed text-red-800">{rejectionReason}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm leading-relaxed text-red-700">{notification.body}</p>
+                )}
+                <p className="text-xs leading-relaxed text-red-700">{VERIFICATION_APPLICATION_REJECTION_FOOTER}</p>
+              </div>
+            )}
           </div>
         </div>
         <button
@@ -131,7 +151,7 @@ export function useVerificationReviewNotifications(opts: {
 
   /** profiles 輪詢備援：即使 Realtime／app_notifications 暫時延遲，也先顯示審核結果。 */
   const notifyReviewResult = useCallback(
-    (kind: VerificationReviewKind) => {
+    (kind: VerificationReviewKind, opts?: { reviewerNote?: string | null }) => {
       if (!userId || !enabled) return
       const approved = kind === 'verification_approved'
       handleRow({
@@ -141,7 +161,7 @@ export function useVerificationReviewNotifications(opts: {
         title: approved ? '會員審核已通過' : '會員審核未通過',
         body: approved
           ? '你的身分與任職認證已通過。'
-          : '你的會員審核未通過，請依審核提示修正後重新送審。',
+          : formatVerificationApplicationRejectionAlertBody(opts?.reviewerNote),
         ref_match_id: null,
         read_at: null,
         created_at: new Date().toISOString(),
