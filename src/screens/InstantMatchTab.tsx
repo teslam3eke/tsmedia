@@ -222,7 +222,7 @@ function InstantHeading({ lines }: { lines: readonly string[] }) {
 
 const INSTANT_IDLE_GUIDE_LINES = [
   `開放時段：${INSTANT_MATCH_HOURS_LABEL}。`,
-  '測試期間為 10 秒匿名聊天，照片以拼圖方式解鎖。',
+  '配對後進行 7 分鐘匿名聊天，照片以拼圖方式解鎖。',
   '時間結束後，雙方都選加好友才會開通正式配對。',
 ] as const
 

@@ -1231,6 +1231,9 @@ export default function App() {
         {screen === 'security-check' && (
           <SecurityCheckScreen
             userId={user?.id}
+            requireNotificationPermission={
+              user ? !readSecurityOnboardingDone(user.id) : false
+            }
             onContinue={async () => {
               const activeUser = await getActiveUser()
               if (!activeUser) return go('profile-setup')

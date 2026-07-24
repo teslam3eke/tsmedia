@@ -1,5 +1,5 @@
-/** 測試期間暫時全天開放；恢復正式營運時改回 false。 */
-const TEMPORARILY_ALWAYS_OPEN = true
+/** 正式營運使用 22:00–01:00；僅本機明確設定環境變數時才全天開放。 */
+const TEMPORARILY_ALWAYS_OPEN = false
 
 export const INSTANT_MATCH_HOURS_LABEL = TEMPORARILY_ALWAYS_OPEN
   ? '測試期間全天開放'

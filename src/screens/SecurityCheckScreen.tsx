@@ -55,6 +55,8 @@ const CHECKS: Omit<Check, 'status'>[] = [
 interface Props {
   onContinue: () => void
   userId?: string | null
+  /** 僅首次登入流程強制要求；既有帳號再次進入安全檢查時仍可略過。 */
+  requireNotificationPermission?: boolean
 }
 
 /** 正常動畫最後一步約 2330ms；WebKit resume 會凍計時器，`allDone` 永不到 → 卡住本頁。 */
@@ -66,7 +68,11 @@ function readStandaloneMode(): boolean {
   return readPwaStandaloneMode()
 }
 
-export default function SecurityCheckScreen({ onContinue, userId }: Props) {
+export default function SecurityCheckScreen({
+  onContinue,
+  userId,
+  requireNotificationPermission = false,
+}: Props) {
   const [checks, setChecks] = useState<Check[]>(
     CHECKS.map((c) => ({ ...c, status: 'pending' })),
   )
@@ -75,6 +81,12 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
   const [pwaSkipped, setPwaSkipped] = useState(false)
   const [notifBusy, setNotifBusy] = useState(false)
   const [notifDismissed, setNotifDismissed] = useState(false)
+  const [pushSubscriptionReady, setPushSubscriptionReady] = useState(false)
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
+    () => typeof window !== 'undefined' && 'Notification' in window
+      ? Notification.permission
+      : 'unsupported',
+  )
 
   const allDoneRef = useRef(allDone)
   const forceFinalizeRef = useRef(false)
@@ -86,6 +98,34 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
   useEffect(() => {
     allDoneRef.current = allDone
   }, [allDone])
+
+  useEffect(() => {
+    setPushSubscriptionReady(false)
+    const refreshPermission = () => {
+      if (typeof window === 'undefined' || !('Notification' in window)) {
+        setNotificationPermission('unsupported')
+        setPushSubscriptionReady(false)
+        return
+      }
+      const permission = Notification.permission
+      setNotificationPermission(permission)
+      if (permission === 'granted' && userId) {
+        enableAllNotificationSettings()
+        void subscribeWebPushForCurrentUser(userId).then(setPushSubscriptionReady)
+      } else {
+        setPushSubscriptionReady(false)
+      }
+    }
+    refreshPermission()
+    document.addEventListener('visibilitychange', refreshPermission)
+    window.addEventListener('pageshow', refreshPermission)
+    window.addEventListener('focus', refreshPermission)
+    return () => {
+      document.removeEventListener('visibilitychange', refreshPermission)
+      window.removeEventListener('pageshow', refreshPermission)
+      window.removeEventListener('focus', refreshPermission)
+    }
+  }, [userId])
 
   useEffect(() => {
     const timeouts: number[] = []
@@ -169,20 +209,30 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
   }, [])
 
   const isStandaloneMode = readStandaloneMode()
-  const notifSupported = typeof window !== 'undefined' && 'Notification' in window
-  const notifGranted = notifSupported && Notification.permission === 'granted'
+  const notifSupported = notificationPermission !== 'unsupported'
+  const notifGranted = notificationPermission === 'granted'
+  const notificationRequired =
+    requireNotificationPermission &&
+    isStandaloneMode &&
+    notifSupported &&
+    !shouldSkipNotificationNudge()
+  const notificationGateReady =
+    notifGranted && (!notificationRequired || pushSubscriptionReady)
   const showNotifStep =
     allDone &&
     isStandaloneMode &&
     notifSupported &&
-    !notifGranted &&
-    !notifDismissed &&
+    !notificationGateReady &&
+    (notificationRequired || !notifDismissed) &&
     !shouldSkipNotificationNudge()
 
   const canContinue =
     allDone &&
     (isStandaloneMode
-      ? notifGranted || notifDismissed || !notifSupported || shouldSkipNotificationNudge()
+      ? notificationGateReady ||
+        (!notificationRequired && notifDismissed) ||
+        !notifSupported ||
+        shouldSkipNotificationNudge()
       : pwaSkipped)
 
   const requestNotifications = async () => {
@@ -196,12 +246,14 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
         Notification.permission === 'default'
           ? await Notification.requestPermission()
           : Notification.permission
-      // 權限結果取得後立即解除登入流程；SW ready、PushManager 與資料庫寫入
-      // 可能受 iOS／網路影響等待十多秒，不應讓使用者誤以為畫面當機。
-      setNotifDismissed(true)
+      setNotificationPermission(perm)
+      // 首次登入必須連推播訂閱都建立成功才放行，避免只有系統權限、
+      // 資料庫卻沒有 push_subscriptions 而造成審核通知送出 0 則。
+      if (!notificationRequired) setNotifDismissed(true)
       if (perm === 'granted' && userId) {
         enableAllNotificationSettings()
-        void subscribeWebPushForCurrentUser(userId)
+        const ready = await subscribeWebPushForCurrentUser(userId)
+        setPushSubscriptionReady(ready)
       }
     } finally {
       setNotifBusy(false)
@@ -361,8 +413,20 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
                   <BellRing className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">開啟推播通知</p>
-                  <p className="text-xs text-slate-500 mt-0.5">配對成功、探索換日與新訊息才不會漏接</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {notificationPermission === 'denied'
+                      ? '通知尚未開啟'
+                      : notifGranted && !pushSubscriptionReady
+                        ? '完成推播設定'
+                        : '開啟推播通知'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {notificationPermission === 'denied'
+                      ? '請到 iPhone「設定 → 通知 → tsMedia」開啟允許通知，再回來重新檢查。'
+                      : notifGranted && !pushSubscriptionReady
+                        ? '通知權限已開啟，請完成本裝置的推播訂閱。'
+                        : '配對成功、審核結果與新訊息才不會漏接'}
+                  </p>
                 </div>
               </div>
               <button
@@ -371,15 +435,28 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
                 onClick={() => void requestNotifications()}
                 className="touch-manipulation w-full bg-slate-900 text-white rounded-xl py-3 text-sm font-bold disabled:opacity-50"
               >
-                {notifBusy ? '處理中⋯' : '允許通知'}
+                {notifBusy
+                  ? '處理中⋯'
+                  : notificationPermission === 'denied'
+                    ? '我已開啟，重新檢查'
+                    : notifGranted && !pushSubscriptionReady
+                      ? '重試推播設定'
+                    : '允許通知'}
               </button>
-              <button
-                type="button"
-                onClick={() => setNotifDismissed(true)}
-                className="touch-manipulation w-full text-slate-400 text-xs py-2 mt-1"
-              >
-                稍後再說
-              </button>
+              {!notificationRequired && (
+                <button
+                  type="button"
+                  onClick={() => setNotifDismissed(true)}
+                  className="touch-manipulation w-full text-slate-400 text-xs py-2 mt-1"
+                >
+                  稍後再說
+                </button>
+              )}
+              {notificationRequired && (
+                <p className="mt-2 text-center text-[11px] leading-relaxed text-amber-600">
+                  首次登入必須開啟通知後才能繼續。
+                </p>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

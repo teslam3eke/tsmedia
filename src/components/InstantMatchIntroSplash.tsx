@@ -179,7 +179,7 @@ export default function InstantMatchIntroSplash({
               {displayName || '神秘對象'}
             </h2>
             <p className="mt-3 text-center text-xs leading-relaxed text-white/55">
-              測試期間將進入 10 秒匿名聊天
+              即將進入 7 分鐘匿名聊天
             </p>
 
             <div className="relative mt-8 h-1 w-full max-w-[12rem] overflow-hidden rounded-full bg-white/10">
