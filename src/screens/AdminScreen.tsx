@@ -127,6 +127,13 @@ export default function AdminScreen({ onBack }: Props) {
     load()
   }
 
+  const handleApproveWithoutIncome = async (app: VerificationApplicationWithProfile) => {
+    setActing(app.id)
+    await approveVerificationApplication(app.id, app, { skipIncome: true })
+    setActing(null)
+    load()
+  }
+
   const handleReject = async () => {
     if (!rejectTarget) return
     const built = buildAdminVerificationRejectNote(rejectPresetId, rejectExtraNote)
@@ -265,6 +272,7 @@ export default function AdminScreen({ onBack }: Props) {
                 photoUrls={photoPreviewMap[app.user_id] ?? []}
                 acting={acting === app.id}
                 onApprove={() => handleApprove(app)}
+                onApproveWithoutIncome={() => handleApproveWithoutIncome(app)}
                 onReject={() => setRejectTarget(app)}
                 onViewDoc={(doc) => void handleViewDoc(doc)}
               />
@@ -491,15 +499,17 @@ interface ApplicationCardProps {
   photoUrls: string[]
   acting: boolean
   onApprove: () => void
+  onApproveWithoutIncome: () => void
   onReject: () => void
   onViewDoc: (doc: VerificationDocRow) => void
 }
 
-function ApplicationCard({ app, photoUrls, acting, onApprove, onReject, onViewDoc }: ApplicationCardProps) {
+function ApplicationCard({ app, photoUrls, acting, onApprove, onApproveWithoutIncome, onReject, onViewDoc }: ApplicationCardProps) {
   const p = app.profiles
   const name = p?.name ?? '未知用戶'
   const isPending = app.status === 'pending'
   const isApproved = app.status === 'approved'
+  const hasIncomeDoc = app.docs.some((d) => d.verification_kind === 'income')
   const genderLabel = p?.gender === 'female' ? '女' : p?.gender === 'male' ? '男' : '—'
   const questionnaire = Array.isArray(p?.questionnaire) ? p!.questionnaire!.slice(0, 3) : []
 
@@ -596,31 +606,44 @@ function ApplicationCard({ app, photoUrls, acting, onApprove, onReject, onViewDo
       )}
 
       {isPending && (
-        <div className="relative z-[1] grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
-          <button
-            type="button"
-            onClick={onReject}
-            disabled={acting}
-            className="py-2.5 rounded-xl bg-red-50 text-red-500 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            整包拒絕
-          </button>
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={acting}
-            className="py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-          >
-            {acting ? (
-              <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}>
-                <RefreshCw className="w-3.5 h-3.5" />
-              </motion.div>
-            ) : (
-              <ShieldCheck className="w-3.5 h-3.5" />
-            )}
-            整包通過
-          </button>
+        <div className="relative z-[1] space-y-2 border-t border-slate-100 pt-3">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={onReject}
+              disabled={acting}
+              className="py-2.5 rounded-xl bg-red-50 text-red-500 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              整包拒絕
+            </button>
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={acting}
+              className="py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+            >
+              {acting ? (
+                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </motion.div>
+              ) : (
+                <ShieldCheck className="w-3.5 h-3.5" />
+              )}
+              整包通過
+            </button>
+          </div>
+          {hasIncomeDoc ? (
+            <button
+              type="button"
+              onClick={onApproveWithoutIncome}
+              disabled={acting}
+              className="w-full py-2.5 rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              通過（不含收入皇冠）
+            </button>
+          ) : null}
         </div>
       )}
     </motion.div>

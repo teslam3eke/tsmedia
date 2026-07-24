@@ -19,7 +19,7 @@ export async function upsertUserAppPresenceOnServer(
   }
 }
 
-/** 登入後全 App 心跳：Webhook 依此略過 verification_approved 推播 */
+/** 登入後全 App 心跳（保留供未來前景抑制邏輯；審核結果推播已不再略過） */
 export function useAppPresenceHeartbeat(userId: string | undefined): void {
   useEffect(() => {
     if (!userId) return

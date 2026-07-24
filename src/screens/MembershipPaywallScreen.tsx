@@ -30,6 +30,7 @@ import {
   type TPDirectAPI,
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
+import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 import FeedbackScreen from '@/screens/FeedbackScreen'
@@ -88,6 +89,11 @@ export default function MembershipPaywallScreen({
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const prefersReducedMotion = useReducedMotion()
+
+  const { alertPortal: verificationAlertPortal } = useVerificationReviewNotifications({
+    userId,
+    enabled: true,
+  })
 
   const { mode: paymentMode, loading: paymentLoading } = usePaymentProvider()
 
@@ -291,6 +297,7 @@ export default function MembershipPaywallScreen({
     : '立即開始探索'
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
@@ -756,5 +763,7 @@ export default function MembershipPaywallScreen({
           document.body,
         )}
     </motion.div>
+    {verificationAlertPortal}
+    </>
   )
 }

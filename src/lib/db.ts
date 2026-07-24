@@ -931,19 +931,27 @@ export async function getAllVerificationApplications(
 export async function approveVerificationApplication(
   applicationId: string,
   application: VerificationApplicationWithProfile,
-  reviewerNote?: string,
+  opts?: { reviewerNote?: string; skipIncome?: boolean },
 ): Promise<{ ok: boolean; error?: string }> {
   const reviewedAt = new Date().toISOString()
-  const incomeDoc = application.docs.find(
-    (d) => d.verification_kind === 'income' && d.claimed_income_tier,
-  )
+  const reviewerNote = opts?.reviewerNote ?? null
+  const skipIncome = opts?.skipIncome === true
+  const incomeDocs = application.docs.filter((d) => d.verification_kind === 'income')
+  const incomeDoc = incomeDocs.find((d) => d.claimed_income_tier)
+  const nonIncomeDocIds = application.docs
+    .filter((d) => d.verification_kind !== 'income')
+    .map((d) => d.id)
+  const incomeDocIds = incomeDocs.map((d) => d.id)
+  const incomeSkipNote = '收入皇冠認證未通過；會員身分與任職已通過。'
 
   const { error: appError } = await supabase
     .from('verification_applications')
     .update({
       status: 'approved',
       reviewed_at: reviewedAt,
-      reviewer_note: reviewerNote ?? null,
+      reviewer_note: skipIncome && incomeDocIds.length > 0
+        ? (reviewerNote ?? '身分通過；收入皇冠未核可')
+        : reviewerNote,
     })
     .eq('id', applicationId)
 
@@ -952,21 +960,49 @@ export async function approveVerificationApplication(
     return { ok: false, error: appError.message }
   }
 
-  const { error: docsError } = await supabase
-    .from('verification_docs')
-    .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote ?? null })
-    .eq('application_id', applicationId)
+  if (nonIncomeDocIds.length > 0) {
+    const { error: docsError } = await supabase
+      .from('verification_docs')
+      .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote })
+      .in('id', nonIncomeDocIds)
 
-  if (docsError) {
-    console.error('[db] approveVerificationApplication docs error:', docsError.message)
-    return { ok: false, error: docsError.message }
+    if (docsError) {
+      console.error('[db] approveVerificationApplication docs error:', docsError.message)
+      return { ok: false, error: docsError.message }
+    }
+  }
+
+  if (skipIncome && incomeDocIds.length > 0) {
+    const { error: incomeRejectError } = await supabase
+      .from('verification_docs')
+      .update({
+        status: 'rejected',
+        reviewed_at: reviewedAt,
+        reviewer_note: incomeSkipNote,
+      })
+      .in('id', incomeDocIds)
+
+    if (incomeRejectError) {
+      console.error('[db] approveVerificationApplication income reject error:', incomeRejectError.message)
+      return { ok: false, error: incomeRejectError.message }
+    }
+  } else if (incomeDocIds.length > 0) {
+    const { error: incomeApproveError } = await supabase
+      .from('verification_docs')
+      .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote })
+      .in('id', incomeDocIds)
+
+    if (incomeApproveError) {
+      console.error('[db] approveVerificationApplication income approve error:', incomeApproveError.message)
+      return { ok: false, error: incomeApproveError.message }
+    }
   }
 
   const profilePatch: Record<string, unknown> = {
     is_verified: true,
     verification_status: 'approved',
   }
-  if (incomeDoc?.claimed_income_tier) {
+  if (!skipIncome && incomeDoc?.claimed_income_tier) {
     profilePatch.income_tier = incomeDoc.claimed_income_tier
   }
 
@@ -991,7 +1027,9 @@ export async function approveVerificationApplication(
   }
 
   const bodyParts = ['你的身分與任職認證已通過。']
-  if (incomeDoc?.claimed_income_tier) {
+  if (skipIncome && incomeDocIds.length > 0) {
+    bodyParts.push('收入皇冠認證未通過；若日後有合適文件，可重新申請皇冠。')
+  } else if (incomeDoc?.claimed_income_tier) {
     bodyParts.push('收入皇冠認證已一併通過，可到編輯個人資訊開啟皇冠顯示。')
   }
 

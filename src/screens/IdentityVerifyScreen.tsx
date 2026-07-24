@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -31,6 +31,7 @@ import {
 } from '@/lib/onboardingDraft'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { VERIFICATION_DAILY_SUBMIT_LIMIT } from '@/lib/verificationAiUtils'
+import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 
 interface Props {
   userId?: string
@@ -189,6 +190,25 @@ export default function IdentityVerifyScreen({
 
   useOnboardingForegroundRepair(true)
 
+  const waitingForReview = reviewPendingHold || verifyGate === 'submitted'
+
+  const onReviewApproved = useCallback(() => {
+    setVerifyGate('approved')
+    setReviewPendingHold(false)
+  }, [])
+
+  const onReviewRejected = useCallback(() => {
+    setVerifyGate('rejected')
+    setReviewPendingHold(false)
+  }, [])
+
+  const { alertPortal } = useVerificationReviewNotifications({
+    userId,
+    enabled: Boolean(userId) && waitingForReview,
+    onApproved: onReviewApproved,
+    onRejected: onReviewRejected,
+  })
+
   useEffect(() => {
     if (!userId) return
     let cancelled = false
@@ -224,20 +244,19 @@ export default function IdentityVerifyScreen({
   }, [verifyGate, onComplete])
 
   useEffect(() => {
-    if (!userId || verifyGate !== 'submitted') return
+    if (!userId || !waitingForReview) return
     const poll = window.setInterval(async () => {
       const p = await getProfile(userId)
       if (p?.verification_status === 'approved') {
         setVerifyGate('approved')
         setReviewPendingHold(false)
-        onComplete()
       } else if (p?.verification_status === 'rejected') {
         setVerifyGate('rejected')
         setReviewPendingHold(false)
       }
-    }, 8000)
+    }, 4000)
     return () => window.clearInterval(poll)
-  }, [userId, verifyGate, onComplete])
+  }, [userId, waitingForReview])
 
   useEffect(() => {
     if (!userId || !draftHydrated) return
@@ -402,14 +421,18 @@ export default function IdentityVerifyScreen({
 
   if (verifyGate === 'loading') {
     return (
-      <div className="min-h-dvh max-w-md mx-auto flex items-center justify-center bg-[#fafafa]">
-        <p className="text-sm text-slate-500">載入中…</p>
-      </div>
+      <>
+        <div className="min-h-dvh max-w-md mx-auto flex items-center justify-center bg-[#fafafa]">
+          <p className="text-sm text-slate-500">載入中…</p>
+        </div>
+        {alertPortal}
+      </>
     )
   }
 
-  if (reviewPendingHold || verifyGate === 'submitted') {
+  if (waitingForReview) {
     return (
+      <>
       <div className="min-h-dvh max-w-md mx-auto flex flex-col items-center justify-center bg-[#fafafa] px-6 text-center">
         <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-4">
           <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
@@ -432,18 +455,24 @@ export default function IdentityVerifyScreen({
           />
         </motion.div>
       </div>
+      {alertPortal}
+      </>
     )
   }
 
   if (verifyGate === 'approved') {
     return (
-      <div className="min-h-dvh max-w-md mx-auto flex items-center justify-center bg-[#fafafa]">
-        <p className="text-sm text-slate-500">審核已通過，正在進入…</p>
-      </div>
+      <>
+        <div className="min-h-dvh max-w-md mx-auto flex items-center justify-center bg-[#fafafa]">
+          <p className="text-sm text-slate-500">審核已通過，正在進入…</p>
+        </div>
+        {alertPortal}
+      </>
     )
   }
 
   return (
+    <>
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa]">
       <div className="px-5 pt-safe pb-6">
         <div className="flex items-center gap-3 mb-6">
@@ -738,5 +767,7 @@ export default function IdentityVerifyScreen({
         document.body,
       )}
     </div>
+    {alertPortal}
+    </>
   )
 }
