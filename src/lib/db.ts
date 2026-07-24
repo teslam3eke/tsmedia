@@ -932,7 +932,7 @@ export async function approveVerificationApplication(
   applicationId: string,
   application: VerificationApplicationWithProfile,
   opts?: { reviewerNote?: string; skipIncome?: boolean },
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
   const reviewedAt = new Date().toISOString()
   const reviewerNote = opts?.reviewerNote ?? null
   const skipIncome = opts?.skipIncome === true
@@ -1033,21 +1033,26 @@ export async function approveVerificationApplication(
     bodyParts.push('收入皇冠認證已一併通過，可到編輯個人資訊開啟皇冠顯示。')
   }
 
-  await createAppNotification({
+  const notification = await createAppNotification({
     userId: application.user_id,
     kind: 'verification_approved',
     title: '會員審核已通過',
     body: bodyParts.join(''),
   })
 
-  return { ok: true }
+  return {
+    ok: notification.ok,
+    ...(notification.error ? { error: notification.error } : {}),
+    ...(typeof notification.pushSent === 'number' ? { pushSent: notification.pushSent } : {}),
+    ...(typeof notification.pushFailed === 'number' ? { pushFailed: notification.pushFailed } : {}),
+  }
 }
 
 export async function rejectVerificationApplication(
   applicationId: string,
   application: VerificationApplicationWithProfile,
   reviewerNote?: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
   const reviewedAt = new Date().toISOString()
 
   const { error: appError } = await supabase
@@ -1079,7 +1084,7 @@ export async function rejectVerificationApplication(
     .update({ is_verified: false, verification_status: 'rejected' })
     .eq('id', application.user_id)
 
-  await createAppNotification({
+  const notification = await createAppNotification({
     userId: application.user_id,
     kind: 'verification_rejected',
     title: '會員審核未通過',
@@ -1088,7 +1093,12 @@ export async function rejectVerificationApplication(
       : '審核未通過。你的個人資料與生活照已保留，請修正證件後重新送審。',
   })
 
-  return { ok: true }
+  return {
+    ok: notification.ok,
+    ...(notification.error ? { error: notification.error } : {}),
+    ...(typeof notification.pushSent === 'number' ? { pushSent: notification.pushSent } : {}),
+    ...(typeof notification.pushFailed === 'number' ? { pushFailed: notification.pushFailed } : {}),
+  }
 }
 
 async function requestAdminVerificationNotification(payload: {
@@ -1096,11 +1106,11 @@ async function requestAdminVerificationNotification(payload: {
   kind: 'verification_approved' | 'verification_rejected'
   title: string
   body: string
-}): Promise<boolean> {
+}): Promise<{ created: boolean; sent: number; failed: number; error?: string }> {
   try {
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
-    if (!token) return false
+    if (!token) return { created: false, sent: 0, failed: 0, error: '管理員登入已失效' }
     const response = await fetch('/api/push-verification-review', {
       method: 'POST',
       headers: {
@@ -1123,10 +1133,20 @@ async function requestAdminVerificationNotification(payload: {
         body.error ?? `sent=${body.sent ?? 0}, failed=${body.failed ?? 0}`,
       )
     }
-    return created
+    return {
+      created,
+      sent: body.sent ?? 0,
+      failed: body.failed ?? 0,
+      error: body.error,
+    }
   } catch (error) {
     console.warn('[db] verification push fallback:', error)
-    return false
+    return {
+      created: false,
+      sent: 0,
+      failed: 0,
+      error: error instanceof Error ? error.message : '推播 API 請求失敗',
+    }
   }
 }
 
@@ -1135,14 +1155,35 @@ export async function createAppNotification(payload: {
   kind: AppNotificationKind
   title: string
   body: string
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
   if (payload.kind === 'verification_approved' || payload.kind === 'verification_rejected') {
-    const created = await requestAdminVerificationNotification({
+    const push = await requestAdminVerificationNotification({
       ...payload,
       kind: payload.kind,
     })
-    if (created) return { ok: true }
+    if (push.created) {
+      return {
+        ok: true,
+        pushSent: push.sent,
+        pushFailed: push.failed,
+        error: push.sent > 0 ? undefined : push.error ?? '伺服器未送到任何推播訂閱',
+      }
+    }
     /** API 暫時失敗仍至少保留站內通知；不要求 RETURNING，避免管理員 SELECT RLS 擋下 INSERT。 */
+    const fallbackError = push.error ?? '直接推播 API 未建立通知'
+    const { error } = await supabase
+      .from('app_notifications')
+      .insert({
+        user_id: payload.userId,
+        kind: payload.kind,
+        title: payload.title,
+        body: payload.body,
+      })
+    if (error) {
+      console.error('[db] createAppNotification error:', error.message)
+      return { ok: false, error: error.message, pushSent: 0, pushFailed: push.failed }
+    }
+    return { ok: true, error: fallbackError, pushSent: 0, pushFailed: push.failed }
   }
 
   const { error } = await supabase

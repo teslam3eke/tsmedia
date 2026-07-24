@@ -120,17 +120,35 @@ export default function AdminScreen({ onBack }: Props) {
 
   useEffect(() => { load() }, [load])
 
+  const reportVerificationPushResult = (result: {
+    ok: boolean
+    error?: string
+    pushSent?: number
+    pushFailed?: number
+  }) => {
+    if (!result.ok) {
+      window.alert(`審核資料未完成更新：${result.error ?? '未知錯誤'}`)
+      return
+    }
+    if ((result.pushSent ?? 0) > 0) return
+    window.alert(
+      `審核已更新，但推播未確認送達（成功 ${result.pushSent ?? 0}、失敗 ${result.pushFailed ?? 0}）。\n${result.error ?? '請將這段訊息截圖回報，勿視為通知已送出。'}`,
+    )
+  }
+
   const handleApprove = async (app: VerificationApplicationWithProfile) => {
     setActing(app.id)
-    await approveVerificationApplication(app.id, app)
+    const result = await approveVerificationApplication(app.id, app)
     setActing(null)
+    reportVerificationPushResult(result)
     load()
   }
 
   const handleApproveWithoutIncome = async (app: VerificationApplicationWithProfile) => {
     setActing(app.id)
-    await approveVerificationApplication(app.id, app, { skipIncome: true })
+    const result = await approveVerificationApplication(app.id, app, { skipIncome: true })
     setActing(null)
+    reportVerificationPushResult(result)
     load()
   }
 
@@ -143,9 +161,10 @@ export default function AdminScreen({ onBack }: Props) {
     }
     setRejectError('')
     setActing(rejectTarget.id)
-    await rejectVerificationApplication(rejectTarget.id, rejectTarget, built.note)
+    const result = await rejectVerificationApplication(rejectTarget.id, rejectTarget, built.note)
     setActing(null)
     clearRejectModal()
+    reportVerificationPushResult(result)
     load()
   }
 
