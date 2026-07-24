@@ -31,6 +31,7 @@ import {
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
+import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 import FeedbackScreen from '@/screens/FeedbackScreen'
@@ -94,6 +95,9 @@ export default function MembershipPaywallScreen({
     userId,
     enabled: true,
   })
+
+  /** 付費牆與審核等待一樣是主畫面之外的長駐點，需自行維持推播訂閱。 */
+  useWebPushSubscriptionSync(userId)
 
   const { mode: paymentMode, loading: paymentLoading } = usePaymentProvider()
 

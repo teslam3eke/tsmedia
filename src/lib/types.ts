@@ -16,7 +16,14 @@ export type VerificationApplicationStatus = 'pending' | 'approved' | 'rejected'
 
 /** 人工審核 SLA（小時）— 對使用者文案與後台排序用 */
 export const VERIFICATION_MANUAL_SLA_HOURS = 12
-export type AppNotificationKind = 'verification_approved' | 'verification_rejected' | 'super_like_received' | 'match_created' | 'message_received' | 'instant_match_paired'
+export type AppNotificationKind =
+  | 'verification_approved'
+  | 'verification_rejected'
+  | 'verification_submitted'
+  | 'super_like_received'
+  | 'match_created'
+  | 'message_received'
+  | 'instant_match_paired'
 export type ReviewMode = 'manual' | 'ai_auto'
 export type ProfileInteractionAction = 'pass' | 'like' | 'super_like'
 export type ReportReason = 'fake_profile' | 'married_or_not_single' | 'harassment' | 'scam_or_sales' | 'inappropriate_content' | 'privacy_violation' | 'other'

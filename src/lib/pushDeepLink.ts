@@ -134,6 +134,7 @@ export function pushDeepLinkIntentFromAppNotification(payload: {
       break
     case 'verification_approved':
     case 'verification_rejected':
+    case 'verification_submitted':
       intent.tab = 'profile'
       break
   }

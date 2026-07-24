@@ -36,7 +36,11 @@ function buildOpenUrlForAppNotification(record: {
     if (record.ref_match_id) p.set('match', record.ref_match_id)
   } else if (kind === 'instant_match_paired') {
     p.set('tab', 'instant')
-  } else if (kind === 'verification_approved' || kind === 'verification_rejected') {
+  } else if (
+    kind === 'verification_approved' ||
+    kind === 'verification_rejected' ||
+    kind === 'verification_submitted'
+  ) {
     p.set('tab', 'profile')
   } else {
     p.set('tab', 'discover')

@@ -6056,6 +6056,14 @@ function appNotificationModalMeta(kind: AppNotificationKind) {
         bodyClass: 'text-red-600',
         Icon: AlertCircle,
       }
+    case 'verification_submitted':
+      return {
+        ring: 'ring-amber-200',
+        bg: 'bg-amber-50',
+        titleClass: 'text-amber-900',
+        bodyClass: 'text-amber-800',
+        Icon: ShieldCheck,
+      }
     case 'super_like_received':
       return {
         ring: 'ring-fuchsia-200',
@@ -7228,6 +7236,7 @@ export default function MainScreen({
   const APP_NOTIF_POPUP_KINDS = new Set<AppNotificationKind>([
     'verification_approved',
     'verification_rejected',
+    'verification_submitted',
     'super_like_received',
     'match_created',
   ])

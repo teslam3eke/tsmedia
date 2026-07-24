@@ -32,6 +32,7 @@ import {
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { VERIFICATION_DAILY_SUBMIT_LIMIT } from '@/lib/verificationAiUtils'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
+import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 
 interface Props {
   userId?: string
@@ -189,6 +190,9 @@ export default function IdentityVerifyScreen({
   const taxInputRef = useRef<HTMLInputElement>(null)
 
   useOnboardingForegroundRepair(true)
+
+  /** 送審帳號常停在本畫面、從未進主畫面；沒有這行就不會有推播訂閱，審核結果推不出去。 */
+  useWebPushSubscriptionSync(userId)
 
   const waitingForReview = reviewPendingHold || verifyGate === 'submitted'
 
