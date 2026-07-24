@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -20,6 +20,10 @@ import type {
   VerificationApplicationWithProfile, VerificationDocRow,
 } from '@/lib/types'
 import { INCOME_TIER_META, VERIFICATION_MANUAL_SLA_HOURS } from '@/lib/types'
+import {
+  ADMIN_VERIFICATION_REJECT_PRESETS,
+  buildAdminVerificationRejectNote,
+} from '@/lib/adminVerificationRejectReasons'
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all'
 type AdminTab = 'verifications' | 'reports' | 'feedback' | 'pricing'
@@ -57,8 +61,32 @@ export default function AdminScreen({ onBack }: Props) {
   const [acting, setActing]     = useState<string | null>(null)
   const [viewUrl, setViewUrl]   = useState<string | null>(null)
   const [viewKind, setViewKind] = useState<'image' | 'pdf' | null>(null)
-  const [rejectNote, setRejectNote] = useState('')
+  const [rejectPresetId, setRejectPresetId] = useState<string | null>(null)
+  const [rejectExtraNote, setRejectExtraNote] = useState('')
+  const [rejectError, setRejectError] = useState('')
   const [rejectTarget, setRejectTarget] = useState<VerificationApplicationWithProfile | null>(null)
+
+  const rejectPresetsByCategory = useMemo(() => {
+    const map = new Map<string, typeof ADMIN_VERIFICATION_REJECT_PRESETS>()
+    for (const preset of ADMIN_VERIFICATION_REJECT_PRESETS) {
+      const list = map.get(preset.category) ?? []
+      list.push(preset)
+      map.set(preset.category, list)
+    }
+    return [...map.entries()]
+  }, [])
+
+  const selectedRejectPreset = useMemo(
+    () => ADMIN_VERIFICATION_REJECT_PRESETS.find((p) => p.id === rejectPresetId) ?? null,
+    [rejectPresetId],
+  )
+
+  const clearRejectModal = () => {
+    setRejectTarget(null)
+    setRejectPresetId(null)
+    setRejectExtraNote('')
+    setRejectError('')
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -101,11 +129,16 @@ export default function AdminScreen({ onBack }: Props) {
 
   const handleReject = async () => {
     if (!rejectTarget) return
+    const built = buildAdminVerificationRejectNote(rejectPresetId, rejectExtraNote)
+    if (!built.ok) {
+      setRejectError(built.error)
+      return
+    }
+    setRejectError('')
     setActing(rejectTarget.id)
-    await rejectVerificationApplication(rejectTarget.id, rejectTarget, rejectNote || undefined)
+    await rejectVerificationApplication(rejectTarget.id, rejectTarget, built.note)
     setActing(null)
-    setRejectTarget(null)
-    setRejectNote('')
+    clearRejectModal()
     load()
   }
 
@@ -352,24 +385,73 @@ export default function AdminScreen({ onBack }: Props) {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.96, y: 8 }}
                 transition={{ type: 'spring', stiffness: 340, damping: 30 }}
-                className="flex w-full max-w-sm max-h-[70dvh] flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
+                className="flex w-full max-w-md max-h-[85dvh] flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
               >
                 <div className="flex-1 overflow-y-auto px-5 pt-6 pb-4 space-y-4">
                   <h2 className="text-base font-bold text-slate-900">拒絕申請</h2>
                   <p className="text-xs text-slate-500">
                     {rejectTarget.profiles?.name ?? rejectTarget.user_id.slice(0, 8)} 的會員審核申請
                   </p>
-                  <textarea
-                    value={rejectNote}
-                    onChange={(e) => setRejectNote(e.target.value)}
-                    placeholder="拒絕原因（選填，會記錄在審核備註中）"
-                    className="w-full rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder-slate-400 resize-none outline-none ring-1 ring-slate-100 focus:ring-slate-300 transition-all"
-                    rows={4}
-                  />
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-slate-600">選擇拒絕理由</p>
+                    {rejectPresetsByCategory.map(([category, presets]) => (
+                      <div key={category} className="space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{category}</p>
+                        <div className="flex flex-wrap gap-2">
+                          {presets.map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => {
+                                setRejectPresetId(preset.id)
+                                setRejectError('')
+                              }}
+                              className={cn(
+                                'rounded-full px-3 py-1.5 text-xs font-semibold transition-all ring-1',
+                                rejectPresetId === preset.id
+                                  ? 'bg-red-50 text-red-700 ring-red-200'
+                                  : 'bg-slate-50 text-slate-600 ring-slate-100 hover:bg-slate-100',
+                              )}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {selectedRejectPreset && !selectedRejectPreset.requiresExtra && selectedRejectPreset.message && (
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 mb-1">申請者將收到</p>
+                      <p className="text-xs leading-relaxed text-slate-700">{selectedRejectPreset.message}</p>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-600">
+                      {selectedRejectPreset?.requiresExtra ? '補充說明（必填）' : '補充說明（選填）'}
+                    </p>
+                    <textarea
+                      value={rejectExtraNote}
+                      onChange={(e) => {
+                        setRejectExtraNote(e.target.value)
+                        setRejectError('')
+                      }}
+                      placeholder={
+                        selectedRejectPreset?.requiresExtra
+                          ? '請填寫拒絕原因，會通知申請者'
+                          : '可補充一句說明，會附加在預設理由後'
+                      }
+                      className="w-full rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-800 placeholder-slate-400 resize-none outline-none ring-1 ring-slate-100 focus:ring-slate-300 transition-all"
+                      rows={3}
+                    />
+                  </div>
+                  {rejectError && (
+                    <p className="text-xs font-semibold text-red-600">{rejectError}</p>
+                  )}
                 </div>
                 <div className="flex flex-shrink-0 gap-3 border-t border-slate-100 bg-white px-5 py-4">
                   <button
-                    onClick={() => { setRejectTarget(null); setRejectNote('') }}
+                    onClick={clearRejectModal}
                     className="flex-1 py-3.5 rounded-2xl bg-slate-100 text-slate-600 text-sm font-semibold"
                   >
                     取消
