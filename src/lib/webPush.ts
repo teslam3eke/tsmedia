@@ -2,6 +2,11 @@ import { getPushClientKey } from './chatPresence'
 import { supabase } from './supabase'
 
 const VAPID = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
+let lastServiceWorkerRegistrationError: string | null = null
+
+export function getServiceWorkerRegistrationError(): string | null {
+  return lastServiceWorkerRegistrationError
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -36,6 +41,7 @@ export async function ensureServiceWorkerRegistration(
 ): Promise<ServiceWorkerRegistration | null> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null
   try {
+    lastServiceWorkerRegistrationError = null
     let reg = await navigator.serviceWorker.getRegistration()
     if (!reg) {
       reg = await navigator.serviceWorker.register('/sw.js', {
@@ -44,11 +50,18 @@ export async function ensureServiceWorkerRegistration(
       })
     }
     if (reg.active) return reg
-    return await Promise.race([
+    const ready = await Promise.race([
       navigator.serviceWorker.ready,
       new Promise<null>((resolve) => globalThis.setTimeout(() => resolve(null), ms)),
     ])
-  } catch {
+    if (!ready) {
+      const state = reg.installing?.state ?? reg.waiting?.state ?? '無 active worker'
+      lastServiceWorkerRegistrationError = `安裝逾時（${state}）`
+    }
+    return ready
+  } catch (error) {
+    lastServiceWorkerRegistrationError =
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error)
     return null
   }
 }

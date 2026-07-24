@@ -157,6 +157,7 @@ import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePho
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
 import {
   ensureServiceWorkerRegistration,
+  getServiceWorkerRegistrationError,
   requestRemotePushSelfTest,
   subscribeWebPushForCurrentUser,
 } from '@/lib/webPush'
@@ -722,7 +723,8 @@ function NotificationModal({
         const reg = await ensureServiceWorkerRegistration(8_000)
         if (!reg) {
           if (!cancelled) {
-            setSwVersion('註冊失敗')
+            const detail = getServiceWorkerRegistrationError()
+            setSwVersion(detail ? `註冊失敗：${detail}` : '註冊失敗')
             setPushSubState('無法偵測')
           }
           return

@@ -45,13 +45,14 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'favicon.svg', 'manifest.json', 'icons/*.png', 'hero.png', 'landing-photo.png', 'assets/landing-couple-premium.png'],
+      /** 首次 SW 安裝只預快取必要殼層；大型照片走一般網路快取，避免 iOS 安裝逾時而整個 SW 註冊失敗。 */
+      includeAssets: ['favicon.ico', 'favicon.svg', 'manifest.json', 'icons/*.png'],
       manifest: false,
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,json}'],
+        globPatterns: ['**/*.{js,css,html,ico,svg,json}'],
         globIgnores: ['**/*eruda*.js'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
