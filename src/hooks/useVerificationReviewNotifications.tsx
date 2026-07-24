@@ -15,31 +15,6 @@ function isVerificationReviewKind(kind: string): kind is VerificationReviewKind 
   return kind === 'verification_approved' || kind === 'verification_rejected'
 }
 
-async function showForegroundVerificationNotice(row: AppNotificationRow): Promise<void> {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return
-  if (document.visibilityState !== 'visible') return
-  if (!('Notification' in window) || Notification.permission !== 'granted') return
-
-  const options: NotificationOptions = {
-    body: row.body,
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    // 與伺服器 Web Push 使用相同 tag；Realtime 與 Webhook 同時抵達時只保留一則。
-    tag: `app-notif-${row.kind}`,
-  }
-
-  try {
-    if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready
-      await reg.showNotification(row.title, options)
-      return
-    }
-    new Notification(row.title, options)
-  } catch {
-    /* 前景本地通知失敗不阻斷流程 */
-  }
-}
-
 function VerificationReviewAlert({
   notification,
   onDismiss,
@@ -120,7 +95,6 @@ export function useVerificationReviewNotifications(opts: {
         return
       }
       activeKindRef.current = row.kind
-      void showForegroundVerificationNotice(row)
       setActiveAlert((prev) => prev ?? row)
     },
     [],

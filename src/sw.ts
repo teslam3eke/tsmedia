@@ -6,7 +6,7 @@ import { NetworkOnly } from 'workbox-strategies'
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: string | string[] }
 
 /** 供通知設定畫面查詢裝置實際運行的 SW 版本（診斷 iOS 舊 SW 未更新）；改推播邏輯時記得遞增 */
-const SW_VERSION = '2026-07-24.3'
+const SW_VERSION = '2026-07-24.4'
 
 precacheAndRoute(self.__WB_MANIFEST)
 
@@ -162,6 +162,7 @@ self.addEventListener('push', (event: PushEvent) => {
       let tag = 'tsmedia'
       let openUrl = '/'
       let payloadBadgeCount: number | null = null
+      let payloadKind: string | null = null
       try {
         if (event.data) {
           const j = event.data.json() as {
@@ -178,6 +179,7 @@ self.addEventListener('push', (event: PushEvent) => {
           if (j.title) title = j.title
           if (typeof j.body === 'string') body = j.body
           if (j.tag) tag = j.tag
+          if (typeof j.kind === 'string') payloadKind = j.kind
           if (typeof j.url === 'string') openUrl = j.url
           if (typeof j.badgeCount === 'number' && Number.isFinite(j.badgeCount)) {
             payloadBadgeCount = clampBadgeCount(j.badgeCount)
@@ -195,6 +197,11 @@ self.addEventListener('push', (event: PushEvent) => {
       const isDiscoverDeckTag = tag.startsWith('tsm-discover-deck-day-')
       const isMessageReceivedTag =
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
+      const isVerificationReviewTag =
+        payloadKind === 'verification_approved' ||
+        payloadKind === 'verification_rejected' ||
+        tag.includes('app-notif-verification_approved') ||
+        tag.includes('app-notif-verification_rejected')
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
       /**
@@ -219,8 +226,8 @@ self.addEventListener('push', (event: PushEvent) => {
         badge: '/icons/icon-192.png',
         tag,
         data: { url: openUrl },
-        /** 換日 tag 固定；renotify 會在 Cron + 前景各 show 一次時連跳兩則 */
-        renotify: !isDiscoverDeckTag,
+        /** 審核通知可能由 Webhook + 管理後台備援同時送達；相同 ID 更新時勿連跳兩次。 */
+        renotify: !isDiscoverDeckTag && !isVerificationReviewTag,
       }
       /** 僅 App 真正在背景時更新角標；server 傳 badgeCount 絕對值，避免累加漂移／重複推播 +2 */
       const shouldUpdateBackgroundBadge =

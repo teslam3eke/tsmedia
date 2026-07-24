@@ -1091,13 +1091,43 @@ export async function rejectVerificationApplication(
   return { ok: true }
 }
 
+async function requestAdminVerificationPush(notificationId: string): Promise<void> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    if (!token) return
+    const response = await fetch('/api/push-verification-review', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ notificationId }),
+    })
+    const body = (await response.json().catch(() => ({}))) as {
+      ok?: boolean
+      sent?: number
+      failed?: number
+      error?: string
+    }
+    if (!response.ok || body.ok === false) {
+      console.warn(
+        '[db] verification push fallback:',
+        body.error ?? `sent=${body.sent ?? 0}, failed=${body.failed ?? 0}`,
+      )
+    }
+  } catch (error) {
+    console.warn('[db] verification push fallback:', error)
+  }
+}
+
 export async function createAppNotification(payload: {
   userId: string
   kind: AppNotificationKind
   title: string
   body: string
 }): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('app_notifications')
     .insert({
       user_id: payload.userId,
@@ -1105,10 +1135,18 @@ export async function createAppNotification(payload: {
       title: payload.title,
       body: payload.body,
     })
+    .select('id')
+    .single()
 
   if (error) {
     console.error('[db] createAppNotification error:', error.message)
     return { ok: false, error: error.message }
+  }
+  if (
+    data?.id &&
+    (payload.kind === 'verification_approved' || payload.kind === 'verification_rejected')
+  ) {
+    await requestAdminVerificationPush(String(data.id))
   }
   return { ok: true }
 }
