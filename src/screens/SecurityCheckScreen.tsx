@@ -195,10 +195,12 @@ export default function SecurityCheckScreen({ onContinue, userId }: Props) {
         Notification.permission === 'default'
           ? await Notification.requestPermission()
           : Notification.permission
-      if (perm === 'granted' && userId) {
-        await subscribeWebPushForCurrentUser(userId)
-      }
+      // 權限結果取得後立即解除登入流程；SW ready、PushManager 與資料庫寫入
+      // 可能受 iOS／網路影響等待十多秒，不應讓使用者誤以為畫面當機。
       setNotifDismissed(true)
+      if (perm === 'granted' && userId) {
+        void subscribeWebPushForCurrentUser(userId)
+      }
     } finally {
       setNotifBusy(false)
     }
