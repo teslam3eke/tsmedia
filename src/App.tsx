@@ -1100,16 +1100,19 @@ export default function App() {
     return (
       <>
         {stagingBanner}
-        <div className="fixed inset-0 overflow-hidden bg-[#f8f3ed]">
-          <LandingScreen
-            authNotice={
-              paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
-                ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
-                : authCallbackError
-            }
-            onStart={() => go('auth')}
-            onOpenPaymentInfo={() => go('membership-payment-info')}
-          />
+        {/* 流式外層保留 body 高度；固定內層仍負責貼齊 iOS viewport 四邊。 */}
+        <div className="min-h-dvh bg-[#f8f3ed]">
+          <div className="fixed inset-0 overflow-hidden bg-[#f8f3ed]">
+            <LandingScreen
+              authNotice={
+                paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
+                  ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
+                  : authCallbackError
+              }
+              onStart={() => go('auth')}
+              onOpenPaymentInfo={() => go('membership-payment-info')}
+            />
+          </div>
         </div>
       </>
     )

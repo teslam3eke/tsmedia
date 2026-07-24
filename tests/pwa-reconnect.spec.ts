@@ -51,6 +51,11 @@ async function assertMatchesContentVisible(page: Page) {
 }
 
 test.describe('PWA 背景／前景', () => {
+  test.skip(
+    !process.env.E2E_STORAGE_STATE,
+    '此測試需要透過 E2E_STORAGE_STATE 提供已登入的瀏覽器狀態',
+  )
+
   test('切換背景再回來時，探索與配對不應卡死轉圈', async ({ page, baseURL }) => {
     test.info().annotations.push({
       type: 'target',
