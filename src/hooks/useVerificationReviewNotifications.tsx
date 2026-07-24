@@ -94,10 +94,12 @@ function VerificationReviewAlert({
 export function useVerificationReviewNotifications(opts: {
   userId?: string
   enabled: boolean
+  /** 本輪送審開始時間；更早的審核通知皆屬上一輪，不得改變目前畫面。 */
+  notBefore?: string | null
   onApproved?: () => void
   onRejected?: () => void
 }) {
-  const { userId, enabled, onApproved, onRejected } = opts
+  const { userId, enabled, notBefore, onApproved, onRejected } = opts
   const seenIdsRef = useRef(new Set<string>())
   const activeKindRef = useRef<VerificationReviewKind | null>(null)
   const [activeAlert, setActiveAlert] = useState<AppNotificationRow | null>(null)
@@ -108,6 +110,17 @@ export function useVerificationReviewNotifications(opts: {
       if (seenIdsRef.current.has(row.id)) return
       seenIdsRef.current.add(row.id)
 
+      const cutoffMs = notBefore ? Date.parse(notBefore) : Number.NaN
+      const rowCreatedMs = Date.parse(row.created_at)
+      if (
+        Number.isFinite(cutoffMs) &&
+        Number.isFinite(rowCreatedMs) &&
+        rowCreatedMs < cutoffMs
+      ) {
+        if (!row.id.startsWith(LOCAL_REVIEW_ID_PREFIX)) void markAppNotificationRead(row.id)
+        return
+      }
+
       // 輪詢可能比 Realtime 先偵測到結果；同一結果只顯示一次，
       // 但仍將稍後抵達的資料庫通知標為已讀，避免切頁後再次彈出。
       if (activeKindRef.current === row.kind) {
@@ -117,7 +130,7 @@ export function useVerificationReviewNotifications(opts: {
       activeKindRef.current = row.kind
       setActiveAlert((prev) => prev ?? row)
     },
-    [],
+    [notBefore],
   )
 
   useEffect(() => {

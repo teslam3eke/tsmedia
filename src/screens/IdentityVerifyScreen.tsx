@@ -14,6 +14,7 @@ import {
   submitVerificationApplication,
   getTodayVerificationApplicationCount,
   getLatestVerificationRejectionNote,
+  markVerificationReviewNotificationsRead,
   type VerificationApplicationDocInput,
 } from '@/lib/db'
 import {
@@ -190,6 +191,7 @@ export default function IdentityVerifyScreen({
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [dailyCount, setDailyCount] = useState<number | null>(null)
   const [rejectionNote, setRejectionNote] = useState<string | null>(null)
+  const [reviewNotificationCutoff, setReviewNotificationCutoff] = useState<string | null>(null)
 
   const identityInputRef = useRef<HTMLInputElement>(null)
   const bonusInputRef = useRef<HTMLInputElement>(null)
@@ -215,6 +217,7 @@ export default function IdentityVerifyScreen({
   const { alertPortal, notifyReviewResult } = useVerificationReviewNotifications({
     userId,
     enabled: Boolean(userId) && waitingForReview,
+    notBefore: reviewNotificationCutoff,
     onApproved: onReviewApproved,
     onRejected: onReviewRejected,
   })
@@ -429,6 +432,11 @@ export default function IdentityVerifyScreen({
       return
     }
 
+    // 必須先把上一輪結果設為已讀，再啟用 waiting 的通知 backlog；
+    // 否則舊退件會被誤判成本輪剛退件，使用者會立刻被送回表單。
+    await markVerificationReviewNotificationsRead(userId)
+    setRejectionNote(null)
+    setReviewNotificationCutoff(new Date().toISOString())
     setVerifyGate('submitted')
     setReviewPendingHold(true)
     setSubmitting(false)

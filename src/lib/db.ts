@@ -1259,6 +1259,27 @@ export async function markAppNotificationRead(notificationId: string): Promise<{
   return { ok: true }
 }
 
+/**
+ * 開始新一輪審核前清掉上一輪結果通知。
+ * 否則重新送審切回 waiting 時，backlog 會把舊退件誤認為本輪結果。
+ */
+export async function markVerificationReviewNotificationsRead(
+  userId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('app_notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .in('kind', ['verification_approved', 'verification_rejected'])
+    .is('read_at', null)
+
+  if (error) {
+    console.error('[db] markVerificationReviewNotificationsRead error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
 // ─── Matching / likes ────────────────────────────────────────────────────────
 
 /** `get_daily_discover_deck_v2` RPC 回傳的單筆資料（jsonb） */
