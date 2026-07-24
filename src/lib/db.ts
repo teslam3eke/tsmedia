@@ -1091,33 +1091,42 @@ export async function rejectVerificationApplication(
   return { ok: true }
 }
 
-async function requestAdminVerificationPush(notificationId: string): Promise<void> {
+async function requestAdminVerificationNotification(payload: {
+  userId: string
+  kind: 'verification_approved' | 'verification_rejected'
+  title: string
+  body: string
+}): Promise<boolean> {
   try {
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
-    if (!token) return
+    if (!token) return false
     const response = await fetch('/api/push-verification-review', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ notificationId }),
+      body: JSON.stringify(payload),
     })
     const body = (await response.json().catch(() => ({}))) as {
       ok?: boolean
+      notificationId?: string
       sent?: number
       failed?: number
       error?: string
     }
-    if (!response.ok || body.ok === false) {
+    const created = response.ok && Boolean(body.notificationId)
+    if (!created || body.ok === false) {
       console.warn(
         '[db] verification push fallback:',
         body.error ?? `sent=${body.sent ?? 0}, failed=${body.failed ?? 0}`,
       )
     }
+    return created
   } catch (error) {
     console.warn('[db] verification push fallback:', error)
+    return false
   }
 }
 
@@ -1127,7 +1136,16 @@ export async function createAppNotification(payload: {
   title: string
   body: string
 }): Promise<{ ok: boolean; error?: string }> {
-  const { data, error } = await supabase
+  if (payload.kind === 'verification_approved' || payload.kind === 'verification_rejected') {
+    const created = await requestAdminVerificationNotification({
+      ...payload,
+      kind: payload.kind,
+    })
+    if (created) return { ok: true }
+    /** API 暫時失敗仍至少保留站內通知；不要求 RETURNING，避免管理員 SELECT RLS 擋下 INSERT。 */
+  }
+
+  const { error } = await supabase
     .from('app_notifications')
     .insert({
       user_id: payload.userId,
@@ -1135,18 +1153,10 @@ export async function createAppNotification(payload: {
       title: payload.title,
       body: payload.body,
     })
-    .select('id')
-    .single()
 
   if (error) {
     console.error('[db] createAppNotification error:', error.message)
     return { ok: false, error: error.message }
-  }
-  if (
-    data?.id &&
-    (payload.kind === 'verification_approved' || payload.kind === 'verification_rejected')
-  ) {
-    await requestAdminVerificationPush(String(data.id))
   }
   return { ok: true }
 }

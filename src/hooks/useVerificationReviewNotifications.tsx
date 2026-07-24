@@ -104,7 +104,7 @@ export function useVerificationReviewNotifications(opts: {
     seenIdsRef.current.clear()
     activeKindRef.current = null
     setActiveAlert(null)
-  }, [userId])
+  }, [userId, enabled])
 
   useEffect(() => {
     if (!userId || !enabled) return
