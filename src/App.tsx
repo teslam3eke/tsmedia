@@ -376,24 +376,30 @@ export default function App() {
     }
   }, [])
 
-  // ── visualViewport → --app-height (main + landing) ────────────────
-  // Main shell needs scrollTo(0) for keyboard quirks; landing only needs
-  // the height pin so iOS Safari/PWA does not leave a white strip below 100dvh.
+  // ── visualViewport → --app-height (main screen only) ──────────────
+  // This fix is specifically for the logged-in app shell. If we keep it
+  // enabled on landing/auth flows, their normal page scrolling gets mistaken
+  // for iOS keyboard-avoidance and we end up snapping the document back to 0,
+  // which feels like the landing page "jumps" while scrolling.
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv) return
-    if (screen !== 'main' && screen !== 'landing') {
+    if (screen !== 'main') {
       document.documentElement.style.removeProperty('--app-height')
       return
     }
 
     const update = () => {
+      // 切回前景瞬間 vv.height 偶為 0／極小，會把主殼壓扁且觸控區錯位。
       const raw = vv.height
       const fallback = window.innerHeight || document.documentElement.clientHeight || 600
       const h = raw > 96 ? raw : fallback
       document.documentElement.style.setProperty('--app-height', `${h}px`)
-      // Main shell only: iOS scrolls html/body while typing — snap back.
-      if (screen === 'main' && (window.scrollY !== 0 || window.scrollX !== 0)) {
+      // Additionally, forcibly un-scroll the document. While typing, iOS
+      // likes to scroll html/body to keep the caret on-screen — since our
+      // container already matches the visible viewport, any such scroll
+      // is pure garbage and visually "flies" the content up.
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
         window.scrollTo(0, 0)
       }
     }
@@ -1085,6 +1091,30 @@ export default function App() {
     )
   }
 
+  /**
+   * Landing 必須脫離 AnimatePresence 的 transform 容器。
+   * iOS Safari／PWA 偶爾會讓 100dvh 保留已消失的工具列高度；直接固定於
+   * viewport 四邊可避免頁尾露出 body 白底，且不影響其他正常捲動頁面。
+   */
+  if (screen === 'landing') {
+    return (
+      <>
+        {stagingBanner}
+        <div className="fixed inset-0 overflow-hidden bg-[#f8f3ed]">
+          <LandingScreen
+            authNotice={
+              paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
+                ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
+                : authCallbackError
+            }
+            onStart={() => go('auth')}
+            onOpenPaymentInfo={() => go('membership-payment-info')}
+          />
+        </div>
+      </>
+    )
+  }
+
   // Main screen is rendered OUTSIDE AnimatePresence/motion.div so it is not
   // inside any transformed containing block. `position: fixed; inset: 0`
   // pins it to the visual viewport edges — guaranteed no bottom gap on iOS
@@ -1107,24 +1137,6 @@ export default function App() {
             onRequireMembership={() => go('membership-paywall')}
           />
         </div>
-      </>
-    )
-  }
-
-  if (screen === 'landing') {
-    return (
-      <>
-        {stagingBanner}
-        {connectivityToast}
-        <LandingScreen
-          authNotice={
-            paymentReturnRecoveryExhausted && hasPendingPaymentReturn()
-              ? '付款已完成。若仍無法自動登入，請關閉此頁並從主畫面圖示重新開啟 tsMedia。'
-              : authCallbackError
-          }
-          onStart={() => go('auth')}
-          onOpenPaymentInfo={() => go('membership-payment-info')}
-        />
       </>
     )
   }

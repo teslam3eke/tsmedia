@@ -35,14 +35,8 @@ const FEATURES = [
 
 export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }: Props) {
   return (
-    <div
-      className="fixed inset-0 z-0 flex justify-center overflow-hidden bg-[#f8f3ed]"
-      style={{
-        height: 'var(--app-height, 100dvh)',
-        minHeight: '100svh',
-      }}
-    >
-      <div className="relative h-full min-h-0 w-full max-w-[576px] overflow-hidden bg-[#f8f3ed]">
+    <div className="flex h-full min-h-full justify-center bg-[#f8f3ed]">
+      <div className="relative h-full w-full max-w-[576px] overflow-hidden bg-[#f8f3ed]">
         {authNotice ? (
           <div
             role="alert"
@@ -91,16 +85,15 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
 
         {/* 人像左右較深，先用柔和米白霧層托住特色文字。 */}
         <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[5]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 top-[69.5%] z-[5]"
           style={{
-            height: 'min(42%, calc(env(safe-area-inset-bottom, 0px) + 22rem))',
             background:
               'linear-gradient(180deg, transparent 0%, rgba(248,243,237,0.58) 22%, rgba(248,243,237,0.9) 46%, #f8f3ed 66%, #f8f3ed 100%)',
           }}
           aria-hidden
         />
 
-        <section className="absolute inset-x-[4%] bottom-[calc(env(safe-area-inset-bottom,0px)+7.75rem)] z-10 grid grid-cols-4 gap-[2%]">
+        <section className="absolute inset-x-[4%] top-[74.2%] z-10 grid grid-cols-4 gap-[2%]">
           {FEATURES.map(({ icon: Icon, title, desc }) => (
             <div key={title} className="flex min-w-0 flex-col items-center text-center">
               <Icon
@@ -124,7 +117,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
         <button
           type="button"
           onClick={onStart}
-          className="absolute left-[14.2%] bottom-[calc(env(safe-area-inset-bottom,0px)+3.35rem)] z-10 flex h-[clamp(3rem,5.9vh,3.75rem)] w-[71.6%] items-center rounded-[clamp(0.75rem,3vw,1rem)] px-[5%] text-white shadow-[0_12px_32px_rgba(151,107,50,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8f6c38]"
+          className="absolute left-[14.2%] top-[88.05%] z-10 flex h-[5.9%] w-[71.6%] items-center rounded-[clamp(0.75rem,3vw,1rem)] px-[5%] text-white shadow-[0_12px_32px_rgba(151,107,50,0.25)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8f6c38]"
           style={{ background: 'linear-gradient(135deg, #bd9865 0%, #a77d3f 100%)' }}
           aria-label="新規申請或會員登入"
         >
@@ -136,7 +129,7 @@ export default function LandingScreen({ onStart, onOpenPaymentInfo, authNotice }
 
         <div className="absolute inset-x-0 bottom-[max(0.65rem,env(safe-area-inset-bottom))] z-10 flex items-center justify-center gap-[1.5%] text-[clamp(0.48rem,1.9vw,0.66rem)] text-[#8a7d70]">
           <Lock className="h-[clamp(0.7rem,2.6vw,0.9rem)] w-[clamp(0.7rem,2.6vw,0.9rem)]" />
-          <span>我們承諾保護您的隱私與資料安全</span>
+          <span>我們承諾保護你的隱私與資料安全</span>
         </div>
 
         {/* 金流查核入口保留給鍵盤與輔助技術使用。 */}
