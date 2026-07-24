@@ -697,22 +697,41 @@ function NotificationModal({
     supported ? Notification.permission : 'unsupported'
   )
 
-  /** 裝置實際運行的 SW 版本；舊版 SW 不回覆 → timeout 判定為舊版（診斷 iOS SW 更新延遲） */
+  /**
+   * 裝置實際運行的 SW 版本。
+   * 注意：iOS PWA 頁面常「不受控制」（controller 為 null）但 SW 與推播照常運作，
+   * 因此一律對 registration.active 查詢，勿以 controller 判斷。
+   * 舊版 SW 不回覆版本查詢 → timeout 判定為舊版。
+   */
   const [swVersion, setSwVersion] = useState<string | null>(null)
+  const [pushSubState, setPushSubState] = useState<string | null>(null)
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
       setSwVersion('不支援')
+      setPushSubState('不支援')
       return
     }
     let cancelled = false
     void (async () => {
       try {
         const reg = await navigator.serviceWorker.getRegistration()
+        if (!reg) {
+          if (!cancelled) setSwVersion('未註冊')
+          return
+        }
         /** 順手觸發更新檢查，加速 iOS 換到新版 SW */
-        void reg?.update().catch(() => undefined)
-        const ctrl = navigator.serviceWorker.controller
-        if (!ctrl) {
-          if (!cancelled) setSwVersion('未接管（請關閉 App 重開）')
+        void reg.update().catch(() => undefined)
+        const worker = reg.active
+        if (!worker) {
+          if (!cancelled) {
+            setSwVersion(
+              reg.installing
+                ? '安裝中…（首次需下載快取，請稍候再開此頁）'
+                : reg.waiting
+                  ? '新版等待接管（請完全關閉 App 重開）'
+                  : '未啟用',
+            )
+          }
           return
         }
         const ch = new MessageChannel()
@@ -724,9 +743,16 @@ function NotificationModal({
           const v = (e.data as { version?: string } | undefined)?.version
           if (!cancelled) setSwVersion(v ? `新版 ${v}` : '未知')
         }
-        ctrl.postMessage({ type: 'TM_SW_VERSION' }, [ch.port2])
+        worker.postMessage({ type: 'TM_SW_VERSION' }, [ch.port2])
       } catch {
         if (!cancelled) setSwVersion('未知')
+      }
+      try {
+        const reg = await navigator.serviceWorker.getRegistration()
+        const sub = await reg?.pushManager.getSubscription()
+        if (!cancelled) setPushSubState(sub ? '已訂閱' : '未訂閱')
+      } catch {
+        if (!cancelled) setPushSubState('未知')
       }
     })()
     return () => {
@@ -891,6 +917,15 @@ function NotificationModal({
               swVersion?.startsWith('新版') ? 'text-emerald-600' : 'text-amber-600',
             )}>
               {swVersion ?? '偵測中…'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">本機推播訂閱</span>
+            <span className={cn(
+              'text-xs font-medium text-right',
+              pushSubState === '已訂閱' ? 'text-emerald-600' : 'text-amber-600',
+            )}>
+              {pushSubState ?? '偵測中…'}
             </span>
           </div>
           <button
