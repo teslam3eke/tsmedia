@@ -11,6 +11,10 @@ import {
   encryptTradeInfo,
 } from './_utils/newebpayCrypto'
 import { makeMerchantOrderNo, readNewebPayConfig } from './_utils/newebpayConfig'
+import {
+  fetchPublicPaymentPricing,
+  membershipAmountFromPricing,
+} from './_utils/pricingResolver.js'
 
 const PACKS: Record<string, { amount: number; details: string }> = {
   super_like_5: { amount: 199, details: 'tsMedia 加購：超級喜歡 x5' },
@@ -54,6 +58,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const admin = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey)
 
+  let pricing
+  try {
+    pricing = await fetchPublicPaymentPricing(admin)
+  } catch (e) {
+    console.error('[newebpay-create-order] pricing', e)
+    return res.status(500).json({ ok: false, error: '無法取得商品價格，請稍後再試。' })
+  }
+
   let amount: number
   let itemDesc: string
   let packKeyToStore: string | null = null
@@ -69,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
     }
 
-    amount = profile.gender === 'male' ? 399 : 299
+    amount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
     itemDesc = `tsMedia VIP 月卡 30 天`
   } else if (productType === 'credit_pack') {
     const pack = PACKS[packKey]

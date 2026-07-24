@@ -1,5 +1,5 @@
 /** 正式原價（特價由 DB payment_promo_campaigns 解析，須與 migration 115 _payment_list_price_ntd 一致） */
-export const MEMBERSHIP_LIST_PRICE_NTD = { male: 399, female: 299 } as const
+export const MEMBERSHIP_LIST_PRICE_NTD = { male: 599, female: 499 } as const
 
 export const PACK_LIST_PRICE_NTD = {
   heart_5: 149,
