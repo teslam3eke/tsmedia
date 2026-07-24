@@ -155,7 +155,11 @@ import AdminScreen from '@/screens/AdminScreen'
 import FeedbackScreen from '@/screens/FeedbackScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
-import { requestRemotePushSelfTest, subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import {
+  ensureServiceWorkerRegistration,
+  requestRemotePushSelfTest,
+  subscribeWebPushForCurrentUser,
+} from '@/lib/webPush'
 import {
   readNotificationSettings as readNotifSettings,
   writeNotificationSettings as writeNotifSettings,
@@ -712,11 +716,15 @@ function NotificationModal({
       return
     }
     let cancelled = false
-    void (async () => {
+    let versionReplyTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+    const detect = async () => {
       try {
-        const reg = await navigator.serviceWorker.getRegistration()
+        const reg = await ensureServiceWorkerRegistration(8_000)
         if (!reg) {
-          if (!cancelled) setSwVersion('未註冊')
+          if (!cancelled) {
+            setSwVersion('註冊失敗')
+            setPushSubState('無法偵測')
+          }
           return
         }
         /** 順手觸發更新檢查，加速 iOS 換到新版 SW */
@@ -735,11 +743,12 @@ function NotificationModal({
           return
         }
         const ch = new MessageChannel()
-        const timer = globalThis.setTimeout(() => {
+        if (versionReplyTimer != null) globalThis.clearTimeout(versionReplyTimer)
+        versionReplyTimer = globalThis.setTimeout(() => {
           if (!cancelled) setSwVersion('舊版（請完全關閉 App 再重開更新）')
         }, 1500)
         ch.port1.onmessage = (e: MessageEvent) => {
-          globalThis.clearTimeout(timer)
+          if (versionReplyTimer != null) globalThis.clearTimeout(versionReplyTimer)
           const v = (e.data as { version?: string } | undefined)?.version
           if (!cancelled) setSwVersion(v ? `新版 ${v}` : '未知')
         }
@@ -748,17 +757,25 @@ function NotificationModal({
         if (!cancelled) setSwVersion('未知')
       }
       try {
-        const reg = await navigator.serviceWorker.getRegistration()
+        if (Notification.permission === 'granted' && userId) {
+          await subscribeWebPushForCurrentUser(userId)
+        }
+        const reg = await ensureServiceWorkerRegistration(8_000)
         const sub = await reg?.pushManager.getSubscription()
         if (!cancelled) setPushSubState(sub ? '已訂閱' : '未訂閱')
       } catch {
         if (!cancelled) setPushSubState('未知')
       }
-    })()
+    }
+    void detect()
+    /** iOS 首次註冊／安裝 SW 可能需數秒；持續重試，避免畫面永遠停在第一次結果。 */
+    const retryTimer = globalThis.setInterval(() => void detect(), 3_000)
     return () => {
       cancelled = true
+      globalThis.clearInterval(retryTimer)
+      if (versionReplyTimer != null) globalThis.clearTimeout(versionReplyTimer)
     }
-  }, [])
+  }, [userId])
 
   const [pushTestBusy, setPushTestBusy] = useState(false)
   const [pushTestResult, setPushTestResult] = useState<{ ok: boolean; text: string } | null>(null)

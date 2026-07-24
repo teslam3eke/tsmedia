@@ -19,16 +19,31 @@ export async function hasActiveWebPushSubscription(): Promise<boolean> {
     return false
   }
   try {
-    const reg = await navigator.serviceWorker.ready
+    const reg = await ensureServiceWorkerRegistration()
+    if (!reg) return false
     return (await reg.pushManager.getSubscription()) != null
   } catch {
     return false
   }
 }
 
-async function serviceWorkerReadyWithTimeout(ms = 12_000): Promise<ServiceWorkerRegistration | null> {
-  if (!('serviceWorker' in navigator)) return null
+/**
+ * 取得可用的 Service Worker；若 vite-pwa 的自動註冊在 iOS 上漏跑，直接補註冊。
+ * iOS 主畫面 PWA 偶爾不會讓頁面受 SW 控制，因此以 registration.active 為準。
+ */
+export async function ensureServiceWorkerRegistration(
+  ms = 12_000,
+): Promise<ServiceWorkerRegistration | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null
   try {
+    let reg = await navigator.serviceWorker.getRegistration()
+    if (!reg) {
+      reg = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/',
+        updateViaCache: 'none',
+      })
+    }
+    if (reg.active) return reg
     return await Promise.race([
       navigator.serviceWorker.ready,
       new Promise<null>((resolve) => globalThis.setTimeout(() => resolve(null), ms)),
@@ -46,7 +61,7 @@ export async function subscribeWebPushForCurrentUser(userId: string): Promise<bo
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false
 
   try {
-    const reg = await serviceWorkerReadyWithTimeout()
+    const reg = await ensureServiceWorkerRegistration()
     if (!reg) {
       console.warn('[webPush] serviceWorker.ready timeout')
       return false
@@ -155,7 +170,7 @@ export async function requestRemotePushSelfTest(): Promise<{
 
 export async function unsubscribeWebPushOnSignOut(): Promise<void> {
   try {
-    const reg = await serviceWorkerReadyWithTimeout(2500)
+    const reg = await navigator.serviceWorker.getRegistration()
     if (!reg) return
     const sub = await reg.pushManager.getSubscription()
     if (sub) {
