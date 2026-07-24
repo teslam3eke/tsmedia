@@ -294,13 +294,17 @@ export default function MembershipPaywallScreen({
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[#f8f2e9] text-[#302b27]"
+      className="relative flex h-full min-h-0 w-full max-w-full flex-col overflow-hidden bg-[#f8f2e9] text-[#302b27]"
     >
       <div
-        className="relative z-10 flex-1 min-h-0 overflow-y-auto"
-        style={{ WebkitOverflowScrolling: 'touch' }}
+        className="relative z-10 flex-1 min-h-0 w-full max-w-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none"
+        style={{
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehaviorX: 'none',
+          touchAction: 'pan-y',
+        }}
       >
-        <div className="relative mx-auto w-full max-w-[430px] bg-[#f6ecdc] pb-[calc(env(safe-area-inset-bottom,0px)+20px)]">
+        <div className="relative mx-auto w-full min-w-0 max-w-[430px] overflow-x-clip bg-[#f6ecdc] pb-[calc(env(safe-area-inset-bottom,0px)+20px)]">
           {/* 意見反映：相對置中內容欄右上，桌機不會跑到視窗最右 */}
           <header className="absolute right-3 top-[calc(env(safe-area-inset-top,0px)+10px)] z-30 flex items-start">
             <div className="relative" ref={menuRef}>
@@ -468,10 +472,10 @@ export default function MembershipPaywallScreen({
                   draggable={false}
                 />
                 <div className="min-w-0 flex-1 pr-1">
-                  <p className="text-[13px] font-bold leading-[1.5] tracking-[0.02em] text-[#302a24]">
+                  <p className="text-[15px] font-bold leading-[1.45] tracking-[0.015em] text-[#302a24]">
                     {title}
                   </p>
-                  <p className="mt-1 whitespace-pre-line text-[11px] font-medium leading-[1.65] tracking-[0.01em] text-[#544c44]">
+                  <p className="mt-1.5 whitespace-pre-line text-[11.5px] font-medium leading-[1.65] tracking-[0.01em] text-[#544c44]">
                     {text}
                   </p>
                 </div>

@@ -509,8 +509,8 @@ export default function MembershipManagementScreen({
                   : '女性 VIP · 單次購買，到期需再購買'}
             </p>
 
-            <div className="mt-3.5 flex items-end gap-3">
-              <ul className="min-w-0 flex-1 space-y-3">
+            <div className="mt-4">
+              <ul className="space-y-2.5">
                 {[
                   '每次購買即贈 5 顆愛心 + 3 次超級喜歡',
                   '每次購買即贈 20 次解除拼圖模糊',
@@ -527,10 +527,14 @@ export default function MembershipManagementScreen({
                 ))}
               </ul>
 
-              <div className="flex w-[128px] shrink-0 flex-col items-end">
-                <p className="whitespace-nowrap text-right leading-none">
+              <div className="mt-5 border-t border-[#eadfce] pt-4">
+                <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+                  <p className="text-[11px] font-semibold tracking-[0.08em] text-[#8c8176]">
+                    30 天會員方案
+                  </p>
+                  <p className="flex flex-wrap items-baseline justify-end gap-x-1 whitespace-nowrap text-right leading-none">
                   {isPromoPriceActive(monthlyListPrice, monthlyPrice) && (
-                    <span className="mr-1 text-[10px] font-semibold text-[#a3968a] line-through">
+                    <span className="mr-1 text-[11px] font-semibold text-[#a3968a] line-through">
                       NT$ {monthlyListPrice}
                     </span>
                   )}
@@ -542,14 +546,15 @@ export default function MembershipManagementScreen({
                     {monthlyPrice}
                   </span>
                   <span className="ml-1 text-[12px] font-semibold text-[#4c443b]">/ 30 天</span>
-                </p>
+                  </p>
+                </div>
 
                 <button
                   type="button"
                   disabled={subscribeDisabled}
                   onClick={handleSubscribe}
                   className={cn(
-                    'mt-4 flex w-full items-center justify-center gap-1 rounded-full py-3 text-[14px] font-bold tracking-[0.14em] text-white transition active:scale-[0.98]',
+                    'mt-3 flex w-full min-h-12 items-center justify-center gap-1 rounded-full px-5 py-3 text-[14px] font-bold tracking-[0.14em] text-white transition active:scale-[0.98]',
                     subscribeDisabled
                       ? 'bg-[#c4b8a8]'
                       : 'bg-gradient-to-b from-[#d3b077] via-[#bd9257] to-[#a37b3f] shadow-[0_6px_14px_rgba(140,102,52,0.4),inset_0_1px_0_rgba(255,240,210,0.8)]',
@@ -624,25 +629,25 @@ export default function MembershipManagementScreen({
               return (
                 <div
                   key={pack.key}
-                  className="flex min-h-[96px] items-center gap-3.5 rounded-[16px] border border-[#ece1d0] bg-[#fffefb] px-4 py-3.5 shadow-[0_8px_20px_rgba(96,70,40,0.08)]"
+                  className="grid grid-cols-[58px_minmax(0,1fr)] gap-x-3 rounded-[16px] border border-[#ece1d0] bg-[#fffefb] px-4 py-4 shadow-[0_8px_20px_rgba(96,70,40,0.08)]"
                 >
-                  <div className="flex h-[68px] w-[68px] shrink-0 items-center justify-center">
+                  <div className="flex h-[58px] w-[58px] items-center justify-center">
                     <CreditPackIcon packKey={pack.key} />
                   </div>
-                  <div className="min-w-0 flex-1 self-start pt-0.5">
+                  <div className="min-w-0 pt-0.5">
                     <p className="text-[17px] font-bold tracking-[0.06em] text-[#2b2620]">{pack.title}</p>
                     <p className="mt-1.5 text-[11px] font-medium leading-[1.6] tracking-[0.02em] text-[#7c7165]">
                       {pack.subtitle}
                     </p>
                   </div>
-                  <div className="flex shrink-0 flex-col items-end justify-between gap-3 self-stretch py-0.5">
+                  <div className="col-span-2 mt-3 flex items-center justify-between gap-3 border-t border-[#eee5d8] pt-3">
                     <ProductPriceLine listPriceNtd={listPriceNtd} priceNtd={priceNtd} />
                     <button
                       type="button"
                       disabled={packBusy}
                       onClick={() => void buyPack(pack.key, pack.creditLabel)}
                       className={cn(
-                        'flex min-w-[86px] items-center justify-center gap-1.5 rounded-full px-4 py-2 text-[12px] font-bold tracking-[0.16em] transition active:scale-[0.98]',
+                        'flex min-h-10 min-w-[108px] items-center justify-center gap-1.5 rounded-full px-5 py-2 text-[12px] font-bold tracking-[0.16em] transition active:scale-[0.98]',
                         packBusy
                           ? 'bg-[#ede4d8] text-[#b8a898]'
                           : 'bg-[#fffdf8] text-[#8a6a35] ring-1 ring-[#bd9a63] shadow-[0_2px_6px_rgba(140,102,52,0.14)]',
@@ -657,16 +662,16 @@ export default function MembershipManagementScreen({
             })}
 
             {gender === 'male' && (
-              <div className="flex min-h-[96px] items-center gap-3.5 rounded-[16px] border border-[#ece1d0] bg-[#fffefb] px-4 py-3.5 shadow-[0_8px_20px_rgba(96,70,40,0.08)]">
-                <div className="flex h-[68px] w-[68px] shrink-0 items-center justify-center">
+              <div className="grid grid-cols-[58px_minmax(0,1fr)] gap-x-3 rounded-[16px] border border-[#ece1d0] bg-[#fffefb] px-4 py-4 shadow-[0_8px_20px_rgba(96,70,40,0.08)]">
+                <div className="flex h-[58px] w-[58px] items-center justify-center">
                   <img
                     src="/assets/images/gold-crown-badge-v3.png"
                     alt=""
                     draggable={false}
-                    className="h-[66px] w-[66px] object-contain drop-shadow-[0_5px_4px_rgba(88,57,24,0.22)]"
+                    className="h-[58px] w-[58px] object-contain drop-shadow-[0_5px_4px_rgba(88,57,24,0.22)]"
                   />
                 </div>
-                <div className="min-w-0 flex-1 self-start pt-0.5">
+                <div className="min-w-0 pt-0.5">
                   <p className="text-[17px] font-bold tracking-[0.06em] text-[#2b2620]">{CROWN_EFFECT_PRODUCT.title}</p>
                   <p className="mt-1.5 text-[11px] font-medium leading-[1.6] tracking-[0.02em] text-[#7c7165]">
                     {CROWN_EFFECT_PRODUCT.subtitle}
@@ -675,7 +680,7 @@ export default function MembershipManagementScreen({
                     {CROWN_EFFECT_PRODUCT.usageNote}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-col items-end justify-between gap-3 self-stretch py-0.5">
+                <div className="col-span-2 mt-3 flex items-center justify-between gap-3 border-t border-[#eee5d8] pt-3">
                   <ProductPriceLine
                     listPriceNtd={
                       pricing?.packs.crown_effect?.listPriceNtd ?? CROWN_EFFECT_PRODUCT.listPriceNtd
@@ -696,7 +701,7 @@ export default function MembershipManagementScreen({
                       }
                       onClick={() => void buyCrownEffect()}
                       className={cn(
-                        'flex min-w-[86px] items-center justify-center gap-1.5 rounded-full px-4 py-2 text-[12px] font-bold tracking-[0.16em] transition active:scale-[0.98]',
+                        'flex min-h-10 min-w-[108px] items-center justify-center gap-1.5 rounded-full px-5 py-2 text-[12px] font-bold tracking-[0.16em] transition active:scale-[0.98]',
                         busy
                           ? 'bg-[#ede4d8] text-[#b8a898]'
                           : 'bg-[#fffdf8] text-[#8a6a35] ring-1 ring-[#bd9a63] shadow-[0_2px_6px_rgba(140,102,52,0.14)]',
