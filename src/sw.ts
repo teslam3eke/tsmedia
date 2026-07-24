@@ -5,6 +5,9 @@ import { NetworkOnly } from 'workbox-strategies'
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: string | string[] }
 
+/** 供通知設定畫面查詢裝置實際運行的 SW 版本（診斷 iOS 舊 SW 未更新）；改推播邏輯時記得遞增 */
+const SW_VERSION = '2026-07-24.3'
+
 precacheAndRoute(self.__WB_MANIFEST)
 
 registerRoute(({ url }) => url.pathname === '/api/git-sha' || url.pathname.endsWith('/api/git-sha'), new NetworkOnly())
@@ -35,6 +38,11 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
     const d = event.data as { type?: string; matchId?: string | null; count?: number } | undefined
     if (d?.type === 'TM_BADGE_SYNC' && typeof d.count === 'number') {
       event.waitUntil(syncBadgeFromClient(Math.max(0, Math.min(BADGE_MAX, Math.floor(d.count)))))
+      return
+    }
+    if (d?.type === 'TM_SW_VERSION') {
+      /** 舊 SW 不認得此訊息不會回覆 → 前端 timeout 即可判定裝置仍在跑舊版 */
+      event.ports[0]?.postMessage({ type: 'TM_SW_VERSION', version: SW_VERSION })
       return
     }
   } catch {
@@ -123,39 +131,6 @@ function isClientClearlyForeground(c: WindowClient): boolean {
   return c.visibilityState === 'visible' || c.focused === true
 }
 
-async function pingClientsPushOpenQuiet(openUrl: string): Promise<void> {
-  const target = openUrl.startsWith('http')
-    ? openUrl
-    : new URL(openUrl, self.location.origin).href
-  const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-  let focused = false
-  for (const x of clients) {
-    if (!(x instanceof WindowClient)) continue
-    if (!x.url.startsWith(self.location.origin)) continue
-    if (!focused) {
-      try {
-        await x.focus()
-      } catch {
-        /* ignore */
-      }
-      focused = true
-      /** iOS PWA：navigate 寫入 URL 作為 postMessage 漏送時的備援 */
-      try {
-        if (typeof x.navigate === 'function') {
-          await x.navigate(target)
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    try {
-      x.postMessage({ type: 'TM_PUSH_OPEN', url: target })
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 function hasForegroundOriginClient(clients: readonly Client[]): boolean {
   return clients.some(
     (x) =>
@@ -186,9 +161,7 @@ self.addEventListener('push', (event: PushEvent) => {
       let body = ''
       let tag = 'tsmedia'
       let openUrl = '/'
-      let payloadRefMatchId: string | null = null
       let payloadBadgeCount: number | null = null
-      let payloadKind: string | null = null
       try {
         if (event.data) {
           const j = event.data.json() as {
@@ -205,14 +178,7 @@ self.addEventListener('push', (event: PushEvent) => {
           if (j.title) title = j.title
           if (typeof j.body === 'string') body = j.body
           if (j.tag) tag = j.tag
-          if (typeof j.kind === 'string') payloadKind = j.kind
           if (typeof j.url === 'string') openUrl = j.url
-          if (typeof j.refMatchId === 'string' && j.refMatchId.trim()) {
-            payloadRefMatchId = j.refMatchId.trim()
-          }
-          if (typeof j.matchId === 'string' && j.matchId.trim()) {
-            if (!payloadRefMatchId) payloadRefMatchId = j.matchId.trim()
-          }
           if (typeof j.badgeCount === 'number' && Number.isFinite(j.badgeCount)) {
             payloadBadgeCount = clampBadgeCount(j.badgeCount)
           }
@@ -227,30 +193,15 @@ self.addEventListener('push', (event: PushEvent) => {
       }
 
       const isDiscoverDeckTag = tag.startsWith('tsm-discover-deck-day-')
-      const isInstantMatchPairedTag =
-        tag === 'app-notif-instant_match_paired' || payloadKind === 'instant_match_paired'
-      const isAppNotifTag =
-        tag.startsWith('app-notif-') || (tag.includes('app-notif') && !tag.includes('discover'))
       const isMessageReceivedTag =
         tag === 'app-notif-message_received' || (tag.includes('app-notif') && tag.includes('message_received'))
-      const isVerificationReviewTag =
-        payloadKind === 'verification_approved' ||
-        payloadKind === 'verification_rejected' ||
-        tag === 'app-notif-verification_approved' ||
-        tag === 'app-notif-verification_rejected'
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
-      /** 次要站內事件前景可靜默處理；審核結果與訊息屬關鍵通知，前景也必須顯示。 */
-      if (
-        !isInstantMatchPairedTag &&
-        !isVerificationReviewTag &&
-        isAppNotifTag &&
-        !isMessageReceivedTag &&
-        hasForegroundOriginClient(clients)
-      ) {
-        await pingClientsPushOpenQuiet(openUrl)
-        return
-      }
+      /**
+       * Apple 硬性要求：每次 push 事件都必須 showNotification，
+       * 靜默處理（只更新角標／postMessage）會被 iOS 記為 silent push，
+       * 累積數次後整個站的推播會被停權 —— 因此不再依前景狀態略過任何通知。
+       */
 
       /** 10 點探索換日：不論前景背景一律 showNotification（若同 tag 已由準點本地通知顯示則略過） */
       if (isDiscoverDeckTag) {

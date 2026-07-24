@@ -155,7 +155,7 @@ import AdminScreen from '@/screens/AdminScreen'
 import FeedbackScreen from '@/screens/FeedbackScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
-import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
+import { requestRemotePushSelfTest, subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import {
   readNotificationSettings as readNotifSettings,
   writeNotificationSettings as writeNotifSettings,
@@ -697,6 +697,57 @@ function NotificationModal({
     supported ? Notification.permission : 'unsupported'
   )
 
+  /** 裝置實際運行的 SW 版本；舊版 SW 不回覆 → timeout 判定為舊版（診斷 iOS SW 更新延遲） */
+  const [swVersion, setSwVersion] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      setSwVersion('不支援')
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration()
+        /** 順手觸發更新檢查，加速 iOS 換到新版 SW */
+        void reg?.update().catch(() => undefined)
+        const ctrl = navigator.serviceWorker.controller
+        if (!ctrl) {
+          if (!cancelled) setSwVersion('未接管（請關閉 App 重開）')
+          return
+        }
+        const ch = new MessageChannel()
+        const timer = globalThis.setTimeout(() => {
+          if (!cancelled) setSwVersion('舊版（請完全關閉 App 再重開更新）')
+        }, 1500)
+        ch.port1.onmessage = (e: MessageEvent) => {
+          globalThis.clearTimeout(timer)
+          const v = (e.data as { version?: string } | undefined)?.version
+          if (!cancelled) setSwVersion(v ? `新版 ${v}` : '未知')
+        }
+        ctrl.postMessage({ type: 'TM_SW_VERSION' }, [ch.port2])
+      } catch {
+        if (!cancelled) setSwVersion('未知')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const [pushTestBusy, setPushTestBusy] = useState(false)
+  const [pushTestResult, setPushTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const runPushSelfTest = async () => {
+    setPushTestBusy(true)
+    setPushTestResult(null)
+    const r = await requestRemotePushSelfTest()
+    setPushTestResult(
+      r.ok
+        ? { ok: true, text: `已送出（成功 ${r.sent ?? 0} 則）。請鎖定螢幕或切到主畫面，數秒內應跳出「遠端推播測試」通知；沒跳出即為 iOS 端未顯示。` }
+        : { ok: false, text: r.error ?? '送出失敗' },
+    )
+    setPushTestBusy(false)
+  }
+
   // Detect iOS Safari (not PWA) — Notification API exists only when installed to Home Screen on iOS
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : ''
   const isIOS = /iphone|ipad|ipod/.test(ua)
@@ -829,6 +880,39 @@ function NotificationModal({
               </button>
             </div>
           ))}
+        </div>
+
+        {/* 推播診斷：SW 版本 + 端到端自測 */}
+        <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 space-y-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">推播元件版本</span>
+            <span className={cn(
+              'text-xs font-medium text-right',
+              swVersion?.startsWith('新版') ? 'text-emerald-600' : 'text-amber-600',
+            )}>
+              {swVersion ?? '偵測中…'}
+            </span>
+          </div>
+          <button
+            onClick={() => void runPushSelfTest()}
+            disabled={pushTestBusy || permission !== 'granted'}
+            className={cn(
+              'w-full h-10 rounded-xl text-sm font-semibold transition-colors',
+              permission === 'granted'
+                ? 'bg-slate-900 text-white active:bg-slate-700 disabled:opacity-60'
+                : 'bg-slate-200 text-slate-400',
+            )}
+          >
+            {pushTestBusy ? '送出中…' : '發送遠端推播測試'}
+          </button>
+          {pushTestResult && (
+            <p className={cn(
+              'text-[11px] leading-relaxed',
+              pushTestResult.ok ? 'text-emerald-700' : 'text-red-600',
+            )}>
+              {pushTestResult.text}
+            </p>
+          )}
         </div>
 
         {/* Note */}
