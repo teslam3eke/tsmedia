@@ -147,6 +147,18 @@ export type SendWebPushFilter = {
   clientKey?: string
 }
 
+function compactMatchId(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const t = raw.trim().toLowerCase().replace(/-/g, '')
+  return t.length > 0 ? t : null
+}
+
+/**
+ * 聊天室每 15 秒更新一次心跳；45 秒內才視為仍在前景。
+ * 視窗被強制關閉、pagehide 未送達時也會快速失效，避免殘留 presence 長時間吞推播。
+ */
+const CHAT_PRESENCE_TTL_MS = 45_000
+
 /** 與前端 app presence 心跳（15s）對齊；逾時視為 stale 仍發推播 */
 const APP_PRESENCE_TTL_MS = 90_000
 
@@ -172,6 +184,39 @@ async function resolveAppPresenceSkipClientKeys(
     if (!key) continue
     const updatedAt = row.updated_at ? Date.parse(String(row.updated_at)) : NaN
     if (Number.isFinite(updatedAt) && now - updatedAt > APP_PRESENCE_TTL_MS) continue
+    skip.add(key)
+  }
+  return skip
+}
+
+/** 僅略過「此裝置目前正在看同一聊天室」的推播；事件不會送到 APNs，因此不構成 iOS silent push。 */
+async function resolveChatPresenceSkipClientKeys(
+  supabase: ReturnType<typeof adminSupabase>,
+  userId: string,
+  matchId: string | null | undefined,
+): Promise<Set<string>> {
+  const target = compactMatchId(matchId)
+  if (!target) return new Set()
+
+  const { data, error } = await supabase
+    .from('user_chat_presence')
+    .select('client_key, active_match_id, updated_at')
+    .eq('user_id', userId)
+    .eq('visibility', 'visible')
+
+  if (error) {
+    console.warn('[pushSend] user_chat_presence query', error.message)
+    return new Set()
+  }
+
+  const now = Date.now()
+  const skip = new Set<string>()
+  for (const row of data ?? []) {
+    const key = typeof row.client_key === 'string' ? row.client_key.trim() : ''
+    if (!key || compactMatchId(String(row.active_match_id ?? '')) !== target) continue
+    const updatedAt = row.updated_at ? Date.parse(String(row.updated_at)) : NaN
+    /** 無效或過期的時間一律不略過，安全側選擇仍發推播。 */
+    if (!Number.isFinite(updatedAt) || now - updatedAt > CHAT_PRESENCE_TTL_MS) continue
     skip.add(key)
   }
   return skip
@@ -245,13 +290,15 @@ export async function sendWebPushVerificationApprovedToUser(
   return { sent, failed, skipped }
 }
 
-/** 聊天／訊息類：所有訂閱皆送出，避免 presence 殘留讓應顯示的推播被略過。 */
+/** 聊天訊息：同裝置正在看同一聊天室時不送；其他聊天室、背景與其他裝置照常推播。 */
 export async function sendWebPushMessageToUser(
   userId: string,
   payload: WebPushPayload,
 ): Promise<{ sent: number; failed: number; skipped: number }> {
   configureWebPush()
   const supabase = adminSupabase()
+  const matchRaw = payload.matchId ?? payload.refMatchId
+  const skipClientKeys = await resolveChatPresenceSkipClientKeys(supabase, userId, matchRaw)
 
   const { data: rows, error } = await supabase
     .from('push_subscriptions')
@@ -267,12 +314,18 @@ export async function sendWebPushMessageToUser(
 
   let sent = 0
   let failed = 0
+  let skipped = 0
   for (const r of rows as PushSubscriptionRow[]) {
+    const ck = typeof r.client_key === 'string' ? r.client_key.trim() : ''
+    if (ck && skipClientKeys.has(ck)) {
+      skipped++
+      continue
+    }
     const out = await sendToSubscription(supabase, r, payloadText, options)
     if (out === 'ok') sent++
     else failed++
   }
-  return { sent, failed, skipped: 0 }
+  return { sent, failed, skipped }
 }
 
 /** 每晚換日廣播：依 endpoint 逐筆送出（同一使用者多裝置各自一則）。 */
