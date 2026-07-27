@@ -49,6 +49,7 @@ import {
   clearPasswordResetFlowStarted,
   isOnPasswordRecoveryRoute,
 } from '@/lib/auth'
+import { isOnJoinRoute } from '@/lib/marketingRoutes'
 import {
   hasPendingPaymentReturn,
   tryAlternateOriginForPaymentReturn,
@@ -854,6 +855,20 @@ export default function App() {
     }
     go('landing')
   }, [authReady, screen, go, routeToPasswordRecovery, user?.id, paymentReturnRecoveryExhausted, routeSignedInUser]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** `/join` 廣告落地頁：維持 landing 畫面，僅調整分頁標題與 canonical（審核用）。 */
+  useEffect(() => {
+    if (!isOnJoinRoute()) return
+    const prevTitle = document.title
+    document.title = '加入 tsMedia｜AI 認證精英交友'
+    const canonical = document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null
+    const prevCanonical = canonical?.href
+    if (canonical) canonical.href = 'https://www.tsmedia.tw/join'
+    return () => {
+      document.title = prevTitle
+      if (canonical && prevCanonical) canonical.href = prevCanonical
+    }
+  }, [])
 
   /** 付款返回：僅在尚未登入的 guest 畫面還原 session（勿干擾 security-check／onboarding） */
   useEffect(() => {
