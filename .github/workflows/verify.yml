@@ -10,6 +10,11 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CI: true
+      VITE_IGNORE_SITE_MAINTENANCE: '1'
+      VITE_SUPABASE_URL: https://placeholder.supabase.co
+      VITE_SUPABASE_ANON_KEY: placeholder-anon-key
     steps:
       - uses: actions/checkout@v4
 

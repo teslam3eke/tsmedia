@@ -20,9 +20,11 @@ export default defineConfig({
   webServer: process.env.E2E_SKIP_WEBSERVER
     ? undefined
     : {
-        command: `npm run dev -- --port ${PORT} --strictPort`,
+        command: process.env.CI
+          ? `npm run dev:vite -- --port ${PORT} --strictPort`
+          : `npm run dev -- --port ${PORT} --strictPort`,
         url: baseURL,
         reuseExistingServer: !process.env.CI,
-        timeout: 120_000,
+        timeout: process.env.CI ? 180_000 : 120_000,
       },
 })
