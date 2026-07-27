@@ -115,7 +115,6 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
           />
           <div>
             <h1 className="text-white font-bold text-lg leading-none">tsMedia</h1>
-            <p className="text-white/40 text-[10px] tracking-widest uppercase mt-0.5">Silicon Hearts</p>
           </div>
         </motion.div>
 

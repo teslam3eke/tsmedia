@@ -186,7 +186,7 @@ export default function MembershipPaymentDisclosureScreen({ onBack }: Props) {
 
           <section className="rounded-2xl bg-white px-4 py-4 ring-1 ring-slate-100">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">營運資訊</p>
-            <p className="mt-2 text-sm font-semibold text-slate-800">tsMedia（Silicon Hearts）</p>
+            <p className="mt-2 text-sm font-semibold text-slate-800">tsMedia</p>
             <p className="mt-1 text-xs text-slate-500">網址：https://www.tsmedia.tw</p>
           </section>
 

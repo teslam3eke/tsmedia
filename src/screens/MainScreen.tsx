@@ -8370,9 +8370,8 @@ export default function MainScreen({
               frameClassName="rounded-lg bg-slate-900 p-1.5"
             />
             <span className="font-bold text-slate-900 tracking-tight text-lg leading-none shrink-0">tsMedia</span>
-            <span className="text-[11px] text-slate-400 leading-none shrink-0">Silicon Hearts</span>
             <span
-              className="ml-auto min-w-0 truncate text-[10px] font-mono tabular-nums text-slate-400 max-w-[9rem] text-right"
+              className="ml-auto min-w-0 truncate text-[8px] font-mono tabular-nums text-slate-400/90 max-w-[9rem] text-right"
               title={`Build ${__APP_BUILD_ID__}`}
             >
               {__APP_BUILD_ID__}
