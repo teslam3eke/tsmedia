@@ -5882,7 +5882,7 @@ function CompanyVerifyScreen({
             <ShieldCheck className="w-6 h-6 text-emerald-500 flex-shrink-0" />
             <div>
               <p className="text-sm font-bold text-emerald-800">會員審核已通過</p>
-              <p className="text-xs text-emerald-600 mt-0.5">你的身分與任職資料已完成人工審核</p>
+              <p className="text-xs text-emerald-600 mt-0.5">你的會員資料已完成人工審核</p>
             </div>
           </div>
         ) : isSubmitted || submitted ? (

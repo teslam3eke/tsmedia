@@ -207,7 +207,7 @@ export default function ProfileSetupScreen({
         <h1 className="text-2xl font-extrabold text-slate-900" style={{ letterSpacing: '-0.03em' }}>
           讓對方認識你
         </h1>
-        <p className="text-sm text-slate-400 mt-1">真實姓名只用於認證；探索頁會顯示暱稱</p>
+        <p className="text-sm text-slate-400 mt-1">姓名只用於會員資料審核；探索頁會顯示暱稱</p>
       </div>
 
       {/* Form — single scrollable page */}
@@ -216,16 +216,16 @@ export default function ProfileSetupScreen({
         {/* Name */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
           <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">
-            真實姓名 <span className="text-red-400">*</span>
+            姓名 <span className="text-red-400">*</span>
           </label>
           <input
             value={form.name}
             onChange={(e) => set('name', e.target.value)}
-            placeholder="僅用於認證，不會公開顯示"
+            placeholder="僅供會員資料審核，不會公開顯示"
             className="w-full bg-white rounded-2xl px-4 py-3.5 text-sm text-slate-900 placeholder:text-slate-300 shadow-sm ring-1 ring-slate-100 focus:ring-slate-300 outline-none transition-all"
           />
           <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
-            名字必須與政府核發的證件完全相同，否則不予以通過。
+            請填寫本人姓名；此欄位不會顯示於探索頁。
           </p>
         </motion.div>
 

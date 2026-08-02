@@ -821,7 +821,6 @@ export async function submitVerificationApplication(
 ): Promise<{ ok: boolean; error?: string }> {
   const company = declaredCompany.trim()
   if (!company) return { ok: false, error: '請先在個人資料填寫任職公司。' }
-  if (docs.length === 0) return { ok: false, error: '請上傳至少一項驗證文件。' }
 
   const { data: pending } = await supabase
     .from('verification_applications')
@@ -857,12 +856,15 @@ export async function submitVerificationApplication(
     claimed_income_tier: d.kind === 'income' ? (d.claimedIncomeTier ?? null) : null,
   }))
 
-  const { error: docsError } = await supabase.from('verification_docs').insert(rows)
-  if (docsError) {
-    console.error('[db] submitVerificationApplication docs error:', docsError.message)
-    await deleteProofDocsFromStorage(docs.map((d) => d.path))
-    await supabase.from('verification_applications').delete().eq('id', application.id)
-    return { ok: false, error: docsError.message }
+  // 新流程允許不附證件直接送出會員審核；空陣列不可呼叫 PostgREST insert。
+  if (rows.length > 0) {
+    const { error: docsError } = await supabase.from('verification_docs').insert(rows)
+    if (docsError) {
+      console.error('[db] submitVerificationApplication docs error:', docsError.message)
+      await deleteProofDocsFromStorage(docs.map((d) => d.path))
+      await supabase.from('verification_applications').delete().eq('id', application.id)
+      return { ok: false, error: docsError.message }
+    }
   }
 
   const { error: profileError } = await supabase
@@ -962,7 +964,7 @@ export async function approveVerificationApplication(
     .filter((d) => d.verification_kind !== 'income')
     .map((d) => d.id)
   const incomeDocIds = incomeDocs.map((d) => d.id)
-  const incomeSkipNote = '收入皇冠認證未通過；會員身分與任職已通過。'
+  const incomeSkipNote = '收入皇冠認證未通過；會員審核已通過。'
 
   const { error: appError } = await supabase
     .from('verification_applications')
@@ -970,7 +972,7 @@ export async function approveVerificationApplication(
       status: 'approved',
       reviewed_at: reviewedAt,
       reviewer_note: skipIncome && incomeDocIds.length > 0
-        ? (reviewerNote ?? '身分通過；收入皇冠未核可')
+        ? (reviewerNote ?? '會員審核通過；收入皇冠未核可')
         : reviewerNote,
     })
     .eq('id', applicationId)
@@ -1046,7 +1048,7 @@ export async function approveVerificationApplication(
       .eq('application_id', applicationId)
   }
 
-  const bodyParts = ['你的身分與任職認證已通過。']
+  const bodyParts = ['你的會員審核已通過。']
   if (skipIncome && incomeDocIds.length > 0) {
     bodyParts.push('收入皇冠認證未通過；若日後有合適文件，可重新申請皇冠。')
   } else if (incomeDoc?.claimed_income_tier) {

@@ -42,8 +42,6 @@ import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 
 interface Props {
   userId?: string
-  claimedName?: string | null
-  gender?: 'male' | 'female'
   onComplete: () => void
   onEditProfile?: () => void
   onEditQuestionnaire?: () => void
@@ -69,7 +67,7 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-const STEPS = ['生活照上傳', '身分與任職認證']
+const STEPS = ['生活照上傳', '會員資料確認']
 
 const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
   { tier: 'silver', range: '200萬+', desc: '銀皇冠標章' },
@@ -80,6 +78,7 @@ const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
 type VerifyDraftSnapshot = {
   step: number
   selectedTier: IncomeTier | null
+  /** 舊流程草稿相容：保留但不再要求或送出政府證件，避免升級後覆寫既有草稿。 */
   identityDoc?: { name: string; type: string; dataUrl: string }
   bonusDoc?: { name: string; type: string; dataUrl: string }
   taxDoc?: { name: string; type: string; dataUrl: string }
@@ -166,8 +165,6 @@ function ProofPreview({
 
 export default function IdentityVerifyScreen({
   userId,
-  claimedName,
-  gender = 'male',
   onComplete,
   onEditProfile,
   onEditQuestionnaire,
@@ -193,7 +190,6 @@ export default function IdentityVerifyScreen({
   const [rejectionNote, setRejectionNote] = useState<string | null>(null)
   const [reviewNotificationCutoff, setReviewNotificationCutoff] = useState<string | null>(null)
 
-  const identityInputRef = useRef<HTMLInputElement>(null)
   const bonusInputRef = useRef<HTMLInputElement>(null)
   const taxInputRef = useRef<HTMLInputElement>(null)
 
@@ -360,8 +356,6 @@ export default function IdentityVerifyScreen({
   const photosReady = photos.length >= PROFILE_PHOTO_MIN
     && photos.every((p) => Boolean(p.storagePath))
 
-  const identityReady = Boolean(identityDoc)
-  const bonusReady = gender === 'male' ? Boolean(bonusDoc) : true
   const taxReady = !selectedTier || Boolean(taxDoc)
   const companyReady = declaredCompany.trim().length >= 2
 
@@ -370,8 +364,8 @@ export default function IdentityVerifyScreen({
 
   const canAdvance = (() => {
     if (stepLabel === '生活照上傳') return photosReady
-    if (stepLabel === '身分與任職認證') {
-      return identityReady && bonusReady && taxReady && companyReady
+    if (stepLabel === '會員資料確認') {
+      return taxReady && companyReady
         && (dailyCount === null || dailyCount < VERIFICATION_DAILY_SUBMIT_LIMIT)
     }
     return false
@@ -379,18 +373,10 @@ export default function IdentityVerifyScreen({
 
   const buildSubmitDocs = async (): Promise<VerificationApplicationDocInput[] | { error: string }> => {
     if (!userId) return { error: '請先登入。' }
-    if (!identityDoc) return { error: '請上傳政府證件。' }
-    if (gender === 'male' && !bonusDoc) {
-      return { error: '男性須至少上傳一項任職加分或其他對您有利的證明。' }
-    }
     if (selectedTier && !taxDoc) return { error: '選擇收入皇冠時須上傳扣繳憑單。' }
     if (!companyReady) return { error: '請先在個人資料填寫任職公司。' }
 
     const docs: VerificationApplicationDocInput[] = []
-
-    const idUpload = await uploadProofDoc(userId, identityDoc.file)
-    if (!idUpload.ok) return { error: idUpload.error ?? '身分證件上傳失敗。' }
-    docs.push({ kind: 'identity', docType: 'other', path: idUpload.path })
 
     if (bonusDoc) {
       const bonusUpload = await uploadProofDoc(userId, bonusDoc.file)
@@ -469,7 +455,7 @@ export default function IdentityVerifyScreen({
             最長等待時間約 {VERIFICATION_MANUAL_SLA_HOURS} 小時，通過後會通知你。
           </p>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            證件與加分文件僅供審核使用；<strong className="text-slate-500">審核通過後檔案即刪除</strong>，不留存於伺服器。
+            選填的加分與收入文件僅供審核使用；<strong className="text-slate-500">審核通過後檔案即刪除</strong>，不留存於伺服器。
           </p>
           <VerifyWaitActions
             onEditProfile={onEditProfile}
@@ -570,20 +556,15 @@ export default function IdentityVerifyScreen({
                 </p>
               </>
             )}
-            {stepLabel === '身分與任職認證' && (
+            {stepLabel === '會員資料確認' && (
               <>
                 <div className="flex items-center gap-2 mb-1">
                   <FileText className="w-4 h-4 text-slate-400" />
-                  <h2 className="text-xl font-bold text-slate-900">身分與任職認證</h2>
+                  <h2 className="text-xl font-bold text-slate-900">會員資料確認</h2>
                 </div>
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  全人工審核，最長約 {VERIFICATION_MANUAL_SLA_HOURS} 小時。審核通過後檔案即刪除。
+                  不需上傳身分證件。送出後由人工審核，最長約 {VERIFICATION_MANUAL_SLA_HOURS} 小時。
                 </p>
-                {claimedName && (
-                  <p className="text-[11px] text-slate-500 mt-2">
-                    證件姓名須與個人資料一致：<span className="font-semibold text-slate-700">{claimedName}</span>
-                  </p>
-                )}
               </>
             )}
           </motion.div>
@@ -600,7 +581,7 @@ export default function IdentityVerifyScreen({
           />
         )}
 
-        {stepLabel === '身分與任職認證' && (
+        {stepLabel === '會員資料確認' && (
           <div className="space-y-4">
             {!companyReady && (
               <div className="rounded-2xl bg-amber-50 px-4 py-3 text-xs text-amber-800 leading-relaxed">
@@ -619,33 +600,10 @@ export default function IdentityVerifyScreen({
               </div>
             )}
 
-            {/* Identity */}
+            {/* 任職加分為男女皆選填；保留既有草稿內容，不因流程放寬而清除。 */}
             <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3">
               <p className="text-xs font-semibold text-slate-800">
-                身分認證（政府證件） <span className="text-red-400">*</span>
-              </p>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                可上傳身分證、護照、駕照等政府核發證件（照片或 PDF）。
-              </p>
-              <input ref={identityInputRef} type="file" accept="image/*,.pdf" className="hidden"
-                onChange={(e) => pickProof(e.target.files, setIdentityDoc, identityDoc)} />
-              {!identityDoc ? (
-                <button
-                  type="button"
-                  onClick={() => clickFileInputWithGrace(identityInputRef.current)}
-                  className="w-full py-3 rounded-xl bg-slate-100 text-sm font-bold text-slate-700 flex items-center justify-center gap-2"
-                >
-                  <Upload className="w-4 h-4" /> 上傳證件
-                </button>
-              ) : (
-                <ProofPreview item={identityDoc} label="已選證件" onRemove={() => { URL.revokeObjectURL(identityDoc.previewUrl); setIdentityDoc(null) }} />
-              )}
-            </div>
-
-            {/* Bonus — male required */}
-            <div className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-slate-100 space-y-3">
-              <p className="text-xs font-semibold text-slate-800">
-                任職加分或其他對您有利的證明 {gender === 'male' ? <span className="text-red-400">*（至少一項）</span> : <span className="text-slate-400 font-normal">（選填）</span>}
+                任職加分或其他對您有利的證明 <span className="text-slate-400 font-normal">（選填）</span>
               </p>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 例如員工證、識別證、在職證明、名片等能佐證任職或身分的文件。
@@ -713,7 +671,7 @@ export default function IdentityVerifyScreen({
             <div className="rounded-2xl bg-slate-50 p-4 flex items-start gap-2">
               <ShieldCheck className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                證件資料僅供真人審核；<strong className="text-slate-700">審核通過後檔案即刪除</strong>，不留存於資料庫。傳輸採加密，不用於商業目的。
+                選填文件僅供人工審核；<strong className="text-slate-700">審核通過後檔案即刪除</strong>，不留存於資料庫。未上傳文件也可送出會員審核。
               </p>
             </div>
 
@@ -782,7 +740,7 @@ export default function IdentityVerifyScreen({
                 <p className="text-sm text-slate-500 leading-relaxed">
                   目前採<strong className="text-slate-700">全人工審核</strong>，最長等待約 {VERIFICATION_MANUAL_SLA_HOURS} 小時。
                   <br />
-                  審核通過後證件檔案即刪除。
+                  如有上傳選填文件，審核通過後即刪除。
                 </p>
                 <div className="flex gap-3">
                   <button

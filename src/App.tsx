@@ -150,7 +150,6 @@ export default function App() {
   const [, setQuestionnaireEntries] = useState<QuestionnaireEntry[]>([])
   const [, setProfileSetupData] = useState<ProfileSetupData | null>(null)
   const [userGender, setUserGender] = useState<'male' | 'female'>('male')
-  const [currentProfileName, setCurrentProfileName] = useState<string | null>(null)
   const [termsBusy, setTermsBusy] = useState(false)
   const [termsError, setTermsError] = useState<string | undefined>()
   /** Supabase／iOS 連線自助修復訊息（見 `ensureConnection`） */
@@ -306,7 +305,6 @@ export default function App() {
       return go('terms-consent')
     }
     if (!profile?.name) return go('profile-setup')
-    setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
     if (!profileHasMbti(profile)) {
@@ -320,7 +318,6 @@ export default function App() {
   const routeByProfile = (profile: import('@/lib/types').ProfileRow | null, userId: string) => {
     if (needsIosSafariBrowserGate()) return
     if (profile?.gender) setUserGender(profile.gender)
-    if (profile?.name) setCurrentProfileName(profile.name)
     if (needsPwaEncapsulationGate()) {
       go('security-check')
       return
@@ -334,7 +331,6 @@ export default function App() {
 
   const routeAfterTermsConsent = (profile: import('@/lib/types').ProfileRow | null) => {
     if (!profile?.name) return go('profile-setup')
-    setCurrentProfileName(profile.name)
     if (profile.gender) setUserGender(profile.gender)
     if (!profile.questionnaire || (profile.questionnaire as unknown[]).length === 0) return go('questionnaire')
     if (!profileHasMbti(profile)) {
@@ -980,7 +976,6 @@ export default function App() {
   // ── ProfileSetup complete → save basic profile ───────────────
   const handleProfileSetupComplete = async (data: ProfileSetupData) => {
     setProfileSetupData(data)
-    setCurrentProfileName(data.name)
     setUserGender(data.gender)
     const activeUser = await getActiveUser()
     if (activeUser) {
@@ -1327,8 +1322,6 @@ export default function App() {
         {screen === 'identity-verify' && (
           <IdentityVerifyScreen
             userId={user?.id}
-            claimedName={currentProfileName}
-            gender={userGender}
             onComplete={async () => {
               setGateRevisit(null)
               const u = await getActiveUser()

@@ -173,7 +173,7 @@ export function useVerificationReviewNotifications(opts: {
         kind,
         title: approved ? '會員審核已通過' : '會員審核未通過',
         body: approved
-          ? '你的身分與任職認證已通過。'
+          ? '你的會員審核已通過。'
           : formatVerificationApplicationRejectionAlertBody(opts?.reviewerNote),
         ref_match_id: null,
         read_at: null,
