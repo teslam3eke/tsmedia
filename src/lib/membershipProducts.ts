@@ -1,4 +1,4 @@
-export const MEMBERSHIP_LIST_PRICE_NTD = { male: 599, female: 499 } as const
+export const MEMBERSHIP_LIST_PRICE_NTD = { male: 599, female: 299 } as const
 
 export const PACK_LIST_PRICE_NTD = {
   heart_5: 149,
