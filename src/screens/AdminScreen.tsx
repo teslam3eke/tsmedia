@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { userFeedbackCategoryLabel } from '@/lib/userFeedback'
+import { supabase } from '@/lib/supabase'
 import {
   getAllVerificationApplications, approveVerificationApplication,
   rejectVerificationApplication, getDocSignedUrl, resolvePhotoUrls, getAdminProfileReports,
@@ -27,6 +28,64 @@ import {
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all'
 type AdminTab = 'verifications' | 'reports' | 'feedback' | 'pricing'
+type RejectPreset = (typeof ADMIN_VERIFICATION_REJECT_PRESETS)[number]
+
+/** 僅供管理後台勸退不適合目前會員池的申請者，不影響前台或既有退件理由。 */
+const PLATFORM_FIT_REJECT_PRESETS: RejectPreset[] = [
+  {
+    id: 'fit_member_pool',
+    category: '平台適配度',
+    label: '目前會員池配對度不足',
+    message:
+      '依您目前提供的資料與配對條件，現階段平台會員組成較難提供合適的配對。為避免您開通後獲得不佳體驗，本次暫不開放會員資格。',
+  },
+  {
+    id: 'fit_age_group',
+    category: '平台適配度',
+    label: '年齡層配對資源不足',
+    message:
+      '依您目前的年齡與配對條件，平台現階段可提供的合適對象較少。為避免開通後配對體驗不如預期，本次暫不開放會員資格。',
+  },
+  {
+    id: 'fit_region',
+    category: '平台適配度',
+    label: '所在地配對資源不足',
+    message:
+      '依您目前所在地及希望配對的地區，平台現階段可提供的合適對象較少，本次暫不開放會員資格。',
+  },
+  {
+    id: 'fit_expectation',
+    category: '平台適配度',
+    label: '交友期待與平台定位不符',
+    message:
+      '依您提供的資料與問卷內容，目前的交友期待與平台主要服務定位不完全相符，本次暫不開放會員資格。',
+  },
+  {
+    id: 'fit_lifestyle',
+    category: '平台適配度',
+    label: '生活圈與會員池適配度不足',
+    message:
+      '依您目前的生活型態、工作地區及配對條件，現階段較難提供合適推薦。為避免影響使用體驗，本次暫不開放會員資格。',
+  },
+]
+
+const ADMIN_REJECT_PRESETS: RejectPreset[] = [
+  ...ADMIN_VERIFICATION_REJECT_PRESETS,
+  ...PLATFORM_FIT_REJECT_PRESETS,
+]
+
+function buildAdminRejectNote(
+  presetId: string | null,
+  extraNote: string,
+): ReturnType<typeof buildAdminVerificationRejectNote> {
+  const fitPreset = PLATFORM_FIT_REJECT_PRESETS.find((preset) => preset.id === presetId)
+  if (!fitPreset) return buildAdminVerificationRejectNote(presetId, extraNote)
+  const extra = extraNote.trim()
+  return {
+    ok: true,
+    note: extra ? `${fitPreset.message}（補充：${extra}）` : fitPreset.message,
+  }
+}
 
 interface Props {
   onBack: () => void
@@ -54,6 +113,7 @@ export default function AdminScreen({ onBack }: Props) {
   const [filter, setFilter]     = useState<Filter>('pending')
   const [applications, setApplications] = useState<VerificationApplicationWithProfile[]>([])
   const [photoPreviewMap, setPhotoPreviewMap] = useState<Record<string, string[]>>({})
+  const [ageMap, setAgeMap] = useState<Record<string, number | null>>({})
   const [profileReports, setProfileReports] = useState<ProfileReportRow[]>([])
   const [messageReports, setMessageReports] = useState<MessageReportRow[]>([])
   const [feedbackItems, setFeedbackItems] = useState<UserFeedbackWithProfile[]>([])
@@ -67,8 +127,8 @@ export default function AdminScreen({ onBack }: Props) {
   const [rejectTarget, setRejectTarget] = useState<VerificationApplicationWithProfile | null>(null)
 
   const rejectPresetsByCategory = useMemo(() => {
-    const map = new Map<string, typeof ADMIN_VERIFICATION_REJECT_PRESETS>()
-    for (const preset of ADMIN_VERIFICATION_REJECT_PRESETS) {
+    const map = new Map<string, RejectPreset[]>()
+    for (const preset of ADMIN_REJECT_PRESETS) {
       const list = map.get(preset.category) ?? []
       list.push(preset)
       map.set(preset.category, list)
@@ -77,7 +137,7 @@ export default function AdminScreen({ onBack }: Props) {
   }, [])
 
   const selectedRejectPreset = useMemo(
-    () => ADMIN_VERIFICATION_REJECT_PRESETS.find((p) => p.id === rejectPresetId) ?? null,
+    () => ADMIN_REJECT_PRESETS.find((p) => p.id === rejectPresetId) ?? null,
     [rejectPresetId],
   )
 
@@ -94,6 +154,19 @@ export default function AdminScreen({ onBack }: Props) {
       const data = await getAllVerificationApplications(filter === 'all' ? 'all' : filter)
       setApplications(data)
       const userIds = [...new Set(data.map((a) => a.user_id))]
+      if (userIds.length > 0) {
+        const { data: ageRows } = await supabase
+          .from('profiles')
+          .select('id, age')
+          .in('id', userIds)
+        setAgeMap(
+          Object.fromEntries(
+            (ageRows ?? []).map((row) => [row.id, typeof row.age === 'number' ? row.age : null]),
+          ),
+        )
+      } else {
+        setAgeMap({})
+      }
       const entries = await Promise.all(
         userIds.map(async (uid) => {
           const app = data.find((a) => a.user_id === uid)
@@ -154,7 +227,7 @@ export default function AdminScreen({ onBack }: Props) {
 
   const handleReject = async () => {
     if (!rejectTarget) return
-    const built = buildAdminVerificationRejectNote(rejectPresetId, rejectExtraNote)
+    const built = buildAdminRejectNote(rejectPresetId, rejectExtraNote)
     if (!built.ok) {
       setRejectError(built.error)
       return
@@ -288,6 +361,7 @@ export default function AdminScreen({ onBack }: Props) {
               <ApplicationCard
                 key={app.id}
                 app={app}
+                age={ageMap[app.user_id] ?? null}
                 photoUrls={photoPreviewMap[app.user_id] ?? []}
                 acting={acting === app.id}
                 onApprove={() => handleApprove(app)}
@@ -515,6 +589,7 @@ function slaLabel(submittedAt: string): string {
 
 interface ApplicationCardProps {
   app: VerificationApplicationWithProfile
+  age: number | null
   photoUrls: string[]
   acting: boolean
   onApprove: () => void
@@ -523,7 +598,7 @@ interface ApplicationCardProps {
   onViewDoc: (doc: VerificationDocRow) => void
 }
 
-function ApplicationCard({ app, photoUrls, acting, onApprove, onApproveWithoutIncome, onReject, onViewDoc }: ApplicationCardProps) {
+function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWithoutIncome, onReject, onViewDoc }: ApplicationCardProps) {
   const p = app.profiles
   const name = p?.name ?? '未知用戶'
   const isPending = app.status === 'pending'
@@ -543,6 +618,9 @@ function ApplicationCard({ app, photoUrls, acting, onApprove, onApproveWithoutIn
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-bold text-slate-900">{name}</span>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{genderLabel}</span>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+              {age != null ? `${age} 歲` : '年齡未填'}
+            </span>
             <span className={cn(
               'text-[10px] font-semibold px-2 py-0.5 rounded-full',
               isPending ? 'bg-amber-100 text-amber-700' : isApproved ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700',
