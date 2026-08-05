@@ -1,9 +1,9 @@
-/** 正式營運使用 22:00–01:00；僅本機明確設定環境變數時才全天開放。 */
+/** 正式營運使用 22:00–23:00；僅本機明確設定環境變數時才全天開放。 */
 const TEMPORARILY_ALWAYS_OPEN = false
 
 export const INSTANT_MATCH_HOURS_LABEL = TEMPORARILY_ALWAYS_OPEN
   ? '測試期間全天開放'
-  : '每晚 22:00 至隔日 01:00（台灣時間）'
+  : '每晚 22:00 至 23:00（台灣時間）'
 
 export const INSTANT_MATCH_CLOSED_HINT =
   `即時配對僅在${INSTANT_MATCH_HOURS_LABEL}開放。`
@@ -29,7 +29,7 @@ export function instantMatchAlwaysOpenForTesting(): boolean {
 export function isInstantMatchOpenNow(date = new Date()): boolean {
   if (instantMatchAlwaysOpenForTesting()) return true
   const { hour } = taipeiHourMinute(date)
-  return hour >= 22 || hour < 1
+  return hour === 22
 }
 
 export function msUntilInstantMatchOpens(now = new Date(), capMs = 24 * 60 * 60 * 1000): number {

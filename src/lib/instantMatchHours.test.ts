@@ -22,13 +22,14 @@ describe('isInstantMatchOpenNow', () => {
     vi.unstubAllEnvs()
   })
 
-  it('正式時段僅於台北 22:00 至隔日 01:00 開放', () => {
+  it('正式時段僅於台北 22:00 至 23:00 開放', () => {
+    expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(0, 15))).toBe(false)
     expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(1, 0))).toBe(false)
     expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(12, 0))).toBe(false)
     expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(21, 59))).toBe(false)
     expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(22, 0))).toBe(true)
-    expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(23, 30))).toBe(true)
-    expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(0, 15))).toBe(true)
+    expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(22, 59))).toBe(true)
+    expect(isInstantMatchOpenNow(taipeiWallAsUtcDate(23, 0))).toBe(false)
   })
 })
 
