@@ -121,6 +121,7 @@ export default function AdminScreen({ onBack }: Props) {
   const [acting, setActing]     = useState<string | null>(null)
   const [viewUrl, setViewUrl]   = useState<string | null>(null)
   const [viewKind, setViewKind] = useState<'image' | 'pdf' | null>(null)
+  const [viewLabel, setViewLabel] = useState('驗證文件')
   const [rejectPresetId, setRejectPresetId] = useState<string | null>(null)
   const [rejectExtraNote, setRejectExtraNote] = useState('')
   const [rejectError, setRejectError] = useState('')
@@ -253,12 +254,20 @@ export default function AdminScreen({ onBack }: Props) {
       return
     }
     setViewKind(isPdf ? 'pdf' : 'image')
+    setViewLabel('驗證文件')
+    setViewUrl(url)
+  }
+
+  const handleViewPhoto = (url: string) => {
+    setViewKind('image')
+    setViewLabel('生活照')
     setViewUrl(url)
   }
 
   const closeViewer = () => {
     setViewUrl(null)
     setViewKind(null)
+    setViewLabel('驗證文件')
   }
 
   const pendingCount = applications.filter(a => filter === 'all' && a.status === 'pending').length
@@ -368,6 +377,7 @@ export default function AdminScreen({ onBack }: Props) {
                 onApproveWithoutIncome={() => handleApproveWithoutIncome(app)}
                 onReject={() => setRejectTarget(app)}
                 onViewDoc={(doc) => void handleViewDoc(doc)}
+                onViewPhoto={handleViewPhoto}
               />
             ))}
           </>
@@ -428,7 +438,7 @@ export default function AdminScreen({ onBack }: Props) {
           >
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-[2] h-28 bg-gradient-to-b from-black/80 to-transparent">
               <p className="absolute left-5 top-16 text-white text-sm font-semibold">
-                驗證文件{viewKind === 'pdf' ? '（PDF）' : ''}
+                {viewLabel}{viewKind === 'pdf' ? '（PDF）' : ''}
               </p>
               <button
                 type="button"
@@ -451,7 +461,7 @@ export default function AdminScreen({ onBack }: Props) {
               ) : (
                 <img
                   src={viewUrl}
-                  alt="驗證文件"
+                  alt={viewLabel}
                   className="max-h-[72dvh] max-w-[92vw] rounded-2xl bg-white object-contain shadow-2xl"
                 />
               )}
@@ -596,9 +606,10 @@ interface ApplicationCardProps {
   onApproveWithoutIncome: () => void
   onReject: () => void
   onViewDoc: (doc: VerificationDocRow) => void
+  onViewPhoto: (url: string) => void
 }
 
-function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWithoutIncome, onReject, onViewDoc }: ApplicationCardProps) {
+function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWithoutIncome, onReject, onViewDoc, onViewPhoto }: ApplicationCardProps) {
   const p = app.profiles
   const name = p?.name ?? '未知用戶'
   const isPending = app.status === 'pending'
@@ -641,7 +652,15 @@ function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWith
       {photoUrls.length > 0 && (
         <div className="flex gap-2 overflow-x-auto pb-1">
           {photoUrls.map((url) => (
-            <img key={url} src={url} alt="生活照" className="w-16 h-16 rounded-xl object-cover flex-shrink-0 bg-slate-100" />
+            <button
+              key={url}
+              type="button"
+              aria-label="放大生活照"
+              onClick={() => onViewPhoto(url)}
+              className="h-16 w-16 flex-shrink-0 cursor-zoom-in overflow-hidden rounded-xl bg-slate-100"
+            >
+              <img src={url} alt="生活照" className="h-full w-full object-cover" />
+            </button>
           ))}
         </div>
       )}
