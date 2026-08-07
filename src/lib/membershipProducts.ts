@@ -1,5 +1,11 @@
 export const MEMBERSHIP_LIST_PRICE_NTD = { male: 599, female: 299 } as const
 
+/**
+ * 保留完整付費牆與路由；改回 true 即恢復「未付費不可進主畫面」。
+ * false 時，審核通過者可瀏覽探索，但付費互動仍由前後端會員資格閘門保護。
+ */
+export const REQUIRE_ACTIVE_MEMBERSHIP_BEFORE_MAIN = false
+
 export const PACK_LIST_PRICE_NTD = {
   heart_5: 149,
   super_like_5: 199,

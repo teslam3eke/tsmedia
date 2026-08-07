@@ -19,7 +19,10 @@ import MaintenanceScreen from '@/screens/MaintenanceScreen'
 import StagingEnvBanner from '@/components/StagingEnvBanner'
 import { BrandMark } from '@/components/BrandMark'
 import { isStagingAppEnv } from '@/lib/appEnv'
-import { isMembershipActive } from '@/lib/membershipProducts'
+import {
+  isMembershipActive,
+  REQUIRE_ACTIVE_MEMBERSHIP_BEFORE_MAIN,
+} from '@/lib/membershipProducts'
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
@@ -201,9 +204,13 @@ export default function App() {
       && (!profileHasMinPhotos(profile) || profile.verification_status !== 'approved'),
     )
 
-  /** 審核通過後須有效 VIP（subscription_expires_at）才可進主殼／探索 */
+  /** 保留完整付費牆；營運旗標開啟時才在進入主殼前強制顯示。 */
   const needsMembershipPaywall = (profile: import('@/lib/types').ProfileRow | null) =>
-    Boolean(profile && !isMembershipActive(profile.subscription_expires_at))
+    Boolean(
+      REQUIRE_ACTIVE_MEMBERSHIP_BEFORE_MAIN
+      && profile
+      && !isMembershipActive(profile.subscription_expires_at),
+    )
 
   const profileHasMinPhotos = (profile: import('@/lib/types').ProfileRow | null) =>
     (profile?.photo_urls ?? []).filter(Boolean).length >= PROFILE_PHOTO_MIN

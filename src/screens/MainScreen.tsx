@@ -85,7 +85,7 @@ import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
 } from '@/screens/MembershipManagementScreen'
-import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased, isMembershipActive, showIncomeBorderFromDiscoverRpc } from '@/lib/membershipProducts'
+import { CREDIT_PACK_PRODUCTS, canEnableCrownEffect, effectiveShowIncomeBorder, formatMembershipExpiryZhTw, isCrownEffectPurchased, isMembershipActive, REQUIRE_ACTIVE_MEMBERSHIP_BEFORE_MAIN, showIncomeBorderFromDiscoverRpc } from '@/lib/membershipProducts'
 import {
   clearPaymentReturnQuery,
   hardReloadOnceAfterPaymentReturn,
@@ -1516,6 +1516,7 @@ function DiscoverTab({
   preferredRegion,
   contentScrollRef,
   creditBalance,
+  onRequireActiveMembership,
   onOpenSubscription,
   refreshCredits,
   onCreditAction,
@@ -1535,6 +1536,7 @@ function DiscoverTab({
   preferredRegion: import('@/lib/types').Region | null
   contentScrollRef?: React.RefObject<HTMLDivElement | null>
   creditBalance: CreditBalance
+  onRequireActiveMembership: () => Promise<boolean>
   onOpenSubscription: () => void
   refreshCredits: () => void
   /** 成功送出愛心／超級喜歡後（扣款成功），供全螢幕獎勵動畫。 */
@@ -2054,6 +2056,7 @@ function DiscoverTab({
       goNext()
       return
     }
+    if (action !== 'pass' && !(await onRequireActiveMembership())) return
     if (action === 'like' && creditBalance.heart <= 0) {
       onOpenSubscription()
       return
@@ -2072,6 +2075,7 @@ function DiscoverTab({
       if (
         result.error.includes('INSUFFICIENT_HEART')
         || result.error.includes('INSUFFICIENT_SUPER_LIKE')
+        || result.error.includes('MEMBERSHIP_REQUIRED')
       ) {
         onOpenSubscription()
         return
@@ -2118,13 +2122,14 @@ function DiscoverTab({
     }
   }
 
-  const openLikeConfirm = () => {
+  const openLikeConfirm = async () => {
     if (!profile) return
     if (heartLocked) return
     if (!userId) {
       goNext()
       return
     }
+    if (!(await onRequireActiveMembership())) return
     if (creditBalance.heart <= 0) {
       onOpenSubscription()
       return
@@ -2132,13 +2137,14 @@ function DiscoverTab({
     setConfirmIntent('like')
   }
 
-  const openSuperLikeConfirm = () => {
+  const openSuperLikeConfirm = async () => {
     if (!profile) return
     if (superLocked) return
     if (!userId) {
       goNext()
       return
     }
+    if (!(await onRequireActiveMembership())) return
     if (creditBalance.super_like <= 0) {
       onOpenSubscription()
       return
@@ -2146,8 +2152,8 @@ function DiscoverTab({
     setConfirmIntent('super_like')
   }
 
-  const handleLike = () => openLikeConfirm()
-  const handleSuperLike = () => openSuperLikeConfirm()
+  const handleLike = () => void openLikeConfirm()
+  const handleSuperLike = () => void openSuperLikeConfirm()
   const handlePass = () => executeInteraction('pass')
   const handleBlockedCurrent = () => {
     if (!profile) return
@@ -7024,6 +7030,7 @@ export default function MainScreen({
   const [discoverDeckRolloverTick, setDiscoverDeckRolloverTick] = useState(0)
   const contentScrollRef = useRef<HTMLDivElement>(null)
   const [showSubscription, setShowSubscription] = useState(false)
+  const [membershipActive, setMembershipActive] = useState<boolean | null>(null)
   const [creditBalance, setCreditBalance] = useState<CreditBalance>({ heart: 0, super_like: 0, blur_unlock: 0, point: 0 })
   const preSubscriptionCreditsRef = useRef<CreditBalance | null>(null)
   const [rewardFlash, setRewardFlash] = useState<null | {
@@ -7341,6 +7348,19 @@ export default function MainScreen({
     setShowSubscription(true)
   }, [creditBalance])
 
+  const requireActiveMembership = useCallback(async (): Promise<boolean> => {
+    if (membershipActive === true) return true
+    if (membershipActive === false || !user?.id) {
+      openSubscriptionModal()
+      return false
+    }
+    const currentProfile = await getProfile(user.id)
+    const active = isMembershipActive(currentProfile?.subscription_expires_at)
+    setMembershipActive(active)
+    if (!active) openSubscriptionModal()
+    return active
+  }, [membershipActive, openSubscriptionModal, user?.id])
+
   const recordDemoPuzzleSlot = useCallback((profileId: number, slot: number) => {
     setDemoPuzzleClearedByProfile((prev) => {
       const merged = new Set([...(prev[profileId] ?? []), slot])
@@ -7499,6 +7519,7 @@ export default function MainScreen({
 
   const handleFatedPairAccept = useCallback(async () => {
     if (!fatedPairKind || !fatedPairSlot) return
+    if (!(await requireActiveMembership())) return
     const cost = fatedPairKind === 'heaven' ? 3 : 1
     if (creditBalance.heart < cost) {
       setShowSubscription(true)
@@ -7526,7 +7547,7 @@ export default function MainScreen({
       setMatchSplash({ matchId: result.matchId, peerUserId: fatedPairSlot.partner_user_id })
     }
     void syncFatedPairPoll()
-  }, [fatedPairKind, fatedPairSlot, creditBalance.heart, refreshCredits, syncFatedPairPoll])
+  }, [fatedPairKind, fatedPairSlot, creditBalance.heart, refreshCredits, requireActiveMembership, syncFatedPairPoll])
 
   const refreshInstantFriendQuota = useCallback(async () => {
     if (!user?.id) return
@@ -8096,6 +8117,7 @@ export default function MainScreen({
     if (!user?.id) {
       setSelfPhotoOk(true)
       setSelfMbtiOk(true)
+      setMembershipActive(null)
       return
     }
     let cancelled = false
@@ -8109,6 +8131,7 @@ export default function MainScreen({
       const n = (profile.photo_urls ?? []).filter(Boolean).length
       setSelfPhotoOk(n >= PROFILE_PHOTO_MIN)
       setSelfMbtiOk(profileHasMbti(profile))
+      setMembershipActive(isMembershipActive(profile.subscription_expires_at))
     })
     return () => {
       cancelled = true
@@ -8144,9 +8167,9 @@ export default function MainScreen({
     onRequireMbtiQuiz?.()
   }, [user?.id, selfMbtiOk, activeTab, onRequireMbtiQuiz])
 
-  /** 全收費制：無有效 VIP 不可留在主殼（付款返回先 sync 再判定） */
+  /** 保留可恢復的全頁付費牆：營運旗標開啟時才把未付費者退出主殼。 */
   useEffect(() => {
-    if (!user?.id || !onRequireMembership) return
+    if (!REQUIRE_ACTIVE_MEMBERSHIP_BEFORE_MAIN || !user?.id || !onRequireMembership) return
     let cancelled = false
     void (async () => {
       if (hasPendingPaymentReturn()) {
@@ -8209,6 +8232,7 @@ export default function MainScreen({
         preferredRegion={currentUserPreferredRegion}
         contentScrollRef={contentScrollRef}
         creditBalance={creditBalance}
+        onRequireActiveMembership={requireActiveMembership}
         onOpenSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
         onDiscoverMatch={({ peerUserId, matchId }) => {
@@ -8430,6 +8454,14 @@ export default function MainScreen({
                 onClick={() => {
                   const targetTab = tab
                   if (blockInstantNavIfBusy(targetTab)) return
+                  if (targetTab === 'instant' && membershipActive !== true) {
+                    void requireActiveMembership().then((active) => {
+                      if (!active) return
+                      prevTab.current = activeTab
+                      setActiveTab(targetTab)
+                    })
+                    return
+                  }
                   if (user?.id && targetTab === 'discover') {
                     if (!selfMbtiOk) {
                       setMbtiGateToast(true)
@@ -8439,7 +8471,10 @@ export default function MainScreen({
                     // 不要用 await 擋住切 tab：iOS 回前景後 fetch 可能長時間掛住，底欄會像整排失效。
                     void getProfile(user.id).then((profile) => {
                       if (!profile) return
-                      if (!isMembershipActive(profile.subscription_expires_at)) {
+                      if (
+                        REQUIRE_ACTIVE_MEMBERSHIP_BEFORE_MAIN
+                        && !isMembershipActive(profile.subscription_expires_at)
+                      ) {
                         onRequireMembership?.()
                         return
                       }
@@ -8579,6 +8614,7 @@ export default function MainScreen({
                 setShowSubscription(false)
                 await refreshCredits()
                 if (event.type === 'membership') {
+                  setMembershipActive(true)
                   const beforeSnap = preSubscriptionCreditsRef.current
                   preSubscriptionCreditsRef.current = null
                   if (!user?.id) return
