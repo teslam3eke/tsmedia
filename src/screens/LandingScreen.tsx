@@ -28,7 +28,7 @@ const FEATURES = [
   },
   {
     icon: CreditCard,
-    title: '全會員付費制度',
+    title: '會員品質把關',
     desc: '降低詐騙與殭屍帳號\n打造真誠交友空間',
   },
 ] as const
