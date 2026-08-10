@@ -156,7 +156,11 @@ import {
 import AdminScreen from '@/screens/AdminScreen'
 import FeedbackScreen from '@/screens/FeedbackScreen'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
-import { clickFileInputWithGrace, isWithinMediaPickerGracePeriod } from '@/lib/resumeHardReload'
+import {
+  clickFileInputWithGrace,
+  isWithinMediaPickerGracePeriod,
+  triggerResumeStylePageReload,
+} from '@/lib/resumeHardReload'
 import {
   ensureServiceWorkerRegistration,
   getServiceWorkerRegistrationError,
@@ -7060,6 +7064,8 @@ export default function MainScreen({
   const lastFgScheduleAtRef = useRef(0)
   /** 付費返回：道具提示關閉後才 hard reload；避免被 pageshow 前景流程清掉 flash */
   const postPaymentRewardReloadOrderRef = useRef<string | null>(null)
+  /** 女性折扣碼兌換：比照付費完成，確認提示後整頁重開以刷新所有會員權益。 */
+  const membershipRewardReloadPendingRef = useRef(false)
 
   /** 未開系統通知時：每次切換主分頁可再次顯示開啟提醒（Safari 分頁改由安全檢測頁引導）。 */
   useEffect(() => {
@@ -7151,7 +7157,12 @@ export default function MainScreen({
         debounceTimer = null
         void ensureConnection().finally(() => {
           // 全螢幕 portal／獎勵層在 iOS  thaw 後偶仍吃掉觸控；前景換發 JWT 後一併關閉。
-          if (!postPaymentRewardReloadOrderRef.current) setRewardFlash(null)
+          if (
+            !postPaymentRewardReloadOrderRef.current
+            && !membershipRewardReloadPendingRef.current
+          ) {
+            setRewardFlash(null)
+          }
           setShowDiscoverPuzzleIntro(false)
           void queryClient.invalidateQueries()
           setForegroundReloadNonce((n) => n + 1)
@@ -7333,7 +7344,12 @@ export default function MainScreen({
   const clearRewardFlash = useCallback(() => {
     setRewardFlash(null)
     const orderNo = postPaymentRewardReloadOrderRef.current
-    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) return
+    const restartMembership = membershipRewardReloadPendingRef.current
+    membershipRewardReloadPendingRef.current = false
+    if (!orderNo || !paymentReturnHardReloadPending(orderNo)) {
+      if (restartMembership) triggerResumeStylePageReload()
+      return
+    }
     postPaymentRewardReloadOrderRef.current = null
     void queryClient.invalidateQueries()
     setForegroundReloadNonce((n) => n + 1)
@@ -8604,6 +8620,8 @@ export default function MainScreen({
                 setShowSubscription(false)
                 await refreshCredits()
                 if (event.type === 'membership') {
+                  membershipRewardReloadPendingRef.current =
+                    event.restartAfterConfirm === true
                   setMembershipActive(true)
                   const beforeSnap = preSubscriptionCreditsRef.current
                   preSubscriptionCreditsRef.current = null
@@ -8653,7 +8671,10 @@ export default function MainScreen({
         title={rewardFlash?.title ?? ''}
         subtitle={rewardFlash?.subtitle}
         onDismiss={clearRewardFlash}
-        requireConfirm={postPaymentRewardReloadOrderRef.current != null}
+        requireConfirm={
+          postPaymentRewardReloadOrderRef.current != null
+          || membershipRewardReloadPendingRef.current
+        }
         confirmLabel="確認並重新啟動"
       />
 

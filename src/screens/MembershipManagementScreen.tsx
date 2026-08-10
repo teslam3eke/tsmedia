@@ -46,7 +46,7 @@ import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export type MembershipUpdateEvent =
-  | { type: 'membership' }
+  | { type: 'membership'; restartAfterConfirm?: boolean }
   | { type: 'pack'; subtitle: string }
   | { type: 'crown_effect' }
 
@@ -271,7 +271,7 @@ export default function MembershipManagementScreen({
         setDiscountCode(normalizedCode)
         setDiscountMessage('兌換成功，會員效期已免費延長 30 天。')
         await reloadProfile()
-        onUpdated({ type: 'membership' })
+        onUpdated({ type: 'membership', restartAfterConfirm: true })
         return
       }
 
