@@ -1574,6 +1574,71 @@ export async function completeMonthlyMembership(): Promise<{
   }
 }
 
+export type MembershipDiscountCodeResult = {
+  ok: boolean
+  reason?: string
+  benefit?: 'male_discount' | 'female_free'
+  code?: string
+  discountNtd?: number
+  basePriceNtd?: number
+  finalPriceNtd?: number
+  freeDays?: number
+  availableAt?: string
+  subscriptionExpiresAt?: string
+  error?: string
+}
+
+function mapMembershipDiscountCodeResult(
+  data: unknown,
+  error?: { message: string } | null,
+): MembershipDiscountCodeResult {
+  if (error) return { ok: false, error: error.message }
+  const row = data as {
+    ok?: boolean
+    reason?: string
+    benefit?: 'male_discount' | 'female_free'
+    code?: string
+    discount_ntd?: number
+    base_price_ntd?: number
+    final_price_ntd?: number
+    free_days?: number
+    available_at?: string
+    subscription_expires_at?: string
+  } | null
+  return {
+    ok: row?.ok === true,
+    reason: row?.reason,
+    benefit: row?.benefit,
+    code: row?.code,
+    discountNtd: row?.discount_ntd,
+    basePriceNtd: row?.base_price_ntd,
+    finalPriceNtd: row?.final_price_ntd,
+    freeDays: row?.free_days,
+    availableAt: row?.available_at,
+    subscriptionExpiresAt: row?.subscription_expires_at,
+  }
+}
+
+export async function previewMembershipDiscountCode(
+  code: string,
+): Promise<MembershipDiscountCodeResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('preview_membership_discount_code', {
+    p_code: code,
+  })
+  return mapMembershipDiscountCodeResult(data, error)
+}
+
+export async function redeemFemaleMembershipDiscountCode(
+  code: string,
+): Promise<MembershipDiscountCodeResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).rpc('redeem_female_membership_discount_code', {
+    p_code: code,
+  })
+  return mapMembershipDiscountCodeResult(data, error)
+}
+
 export async function cancelMembershipSubscription(): Promise<{ ok: boolean; reason?: string; error?: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('cancel_membership_subscription')

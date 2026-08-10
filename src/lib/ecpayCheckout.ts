@@ -6,6 +6,7 @@ export type EcpayCheckoutParams = {
   productType: 'membership' | 'credit_pack'
   packKey?: string
   email?: string
+  membershipDiscountCode?: string
 }
 
 export type EcpayOrderStatus = {

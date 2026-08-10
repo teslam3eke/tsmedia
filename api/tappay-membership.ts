@@ -9,6 +9,10 @@ import {
   fetchPublicPaymentPricing,
   membershipAmountFromPricing,
 } from './_utils/pricingResolver.js'
+import {
+  normalizeMembershipDiscountCode,
+  resolveMaleMembershipDiscount,
+} from './_utils/membershipDiscount.js'
 
 type Cardholder = {
   phone_number: string
@@ -22,6 +26,7 @@ type Cardholder = {
 type TapPayPrimeBody = {
   prime?: string
   cardholder?: Cardholder
+  membershipDiscountCode?: string
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -89,7 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { data: profile, error: profileErr } = await admin
     .from('profiles')
-    .select('gender')
+    .select('gender, verification_status, account_status')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -97,7 +102,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
   }
 
-  const amount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
+  const baseAmount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
+  const requestedCode = normalizeMembershipDiscountCode(body.membershipDiscountCode)
+  let amount = baseAmount
+  if (requestedCode) {
+    if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
+      return res.status(400).json({ ok: false, error: '目前帳號不符合折扣碼使用資格。' })
+    }
+    if (profile.gender !== 'male') {
+      return res.status(400).json({ ok: false, error: '女性免費試用請直接在會員管理頁兌換。' })
+    }
+    try {
+      const discount = await resolveMaleMembershipDiscount(admin, requestedCode, baseAmount)
+      amount = discount?.finalPriceNtd ?? baseAmount
+    } catch (e) {
+      if (e instanceof Error && e.message === 'INVALID_MEMBERSHIP_DISCOUNT_CODE') {
+        return res.status(400).json({ ok: false, error: '折扣碼無效或已停止使用。' })
+      }
+      console.error('[tappay-membership] membership discount', e)
+      return res.status(500).json({ ok: false, error: '暫時無法套用折扣碼，請稍後再試。' })
+    }
+  }
 
   const payUrl = sandbox
     ? 'https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime'

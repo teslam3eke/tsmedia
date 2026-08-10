@@ -32,6 +32,7 @@ import {
   useOnboardingForegroundRepair,
 } from '@/lib/onboardingDraft'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
+import { MembershipDiscountGuide } from '@/components/MembershipDiscountGuide'
 import {
   VERIFICATION_DAILY_SUBMIT_LIMIT,
   VERIFICATION_APPLICATION_REJECTION_FOOTER,
@@ -177,6 +178,7 @@ export default function IdentityVerifyScreen({
   const [selectedTier, setSelectedTier] = useState<IncomeTier | null>(null)
   const [taxDoc, setTaxDoc] = useState<ProofItem | null>(null)
   const [declaredCompany, setDeclaredCompany] = useState('')
+  const [applicantGender, setApplicantGender] = useState<'male' | 'female' | null>(null)
 
   const [submitting, setSubmitting] = useState(false)
   const [draftHydrated, setDraftHydrated] = useState(false)
@@ -225,6 +227,7 @@ export default function IdentityVerifyScreen({
       const p = await getProfile(userId)
       if (cancelled) return
       setDeclaredCompany(p?.company?.trim() ?? '')
+      setApplicantGender(p?.gender === 'male' || p?.gender === 'female' ? p.gender : null)
       const st = p?.verification_status ?? 'pending'
       setVerifyGate(st)
       if (st === 'submitted') setReviewPendingHold(true)
@@ -443,8 +446,8 @@ export default function IdentityVerifyScreen({
   if (waitingForReview) {
     return (
       <>
-      <div className="min-h-dvh max-w-md mx-auto flex flex-col items-center justify-center bg-[#fafafa] px-6 text-center">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-4">
+      <div className="min-h-dvh max-w-md mx-auto flex flex-col items-center overflow-y-auto bg-[#fafafa] px-6 pb-[calc(env(safe-area-inset-bottom,0px)+32px)] pt-[calc(env(safe-area-inset-top,0px)+32px)] text-center">
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="my-auto w-full space-y-4">
           <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
             <Clock className="w-8 h-8 text-amber-600" />
           </div>
@@ -454,9 +457,19 @@ export default function IdentityVerifyScreen({
             <br />
             最長等待時間約 {VERIFICATION_MANUAL_SLA_HOURS} 小時，通過後會通知你。
           </p>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            選填的加分與收入文件僅供審核使用；<strong className="text-slate-500">審核通過後檔案即刪除</strong>，不留存於伺服器。
+          <p className="text-[11px] text-slate-400 leading-[1.7]">
+            選填的加分與收入文件僅供審核使用
+            <br />
+            <strong className="text-slate-500">審核通過後，檔案即刪除</strong>
+            <br />
+            不留存於伺服器
           </p>
+          {applicantGender && (
+            <MembershipDiscountGuide
+              gender={applicantGender}
+              className="mx-auto w-full max-w-[340px]"
+            />
+          )}
           <VerifyWaitActions
             onEditProfile={onEditProfile}
             onEditQuestionnaire={onEditQuestionnaire}

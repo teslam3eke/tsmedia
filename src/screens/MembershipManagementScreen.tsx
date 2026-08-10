@@ -8,12 +8,15 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
+import { MembershipDiscountGuide } from '@/components/MembershipDiscountGuide'
 import { cn } from '@/lib/utils'
 import {
   completeMonthlyMembership,
   getProfile,
+  previewMembershipDiscountCode,
   purchaseCreditPackMock,
   purchaseCrownEffectMock,
+  redeemFemaleMembershipDiscountCode,
 } from '@/lib/db'
 import { supabase } from '@/lib/supabase'
 import {
@@ -129,6 +132,12 @@ export default function MembershipManagementScreen({
   const [crownEffectPurchasedAt, setCrownEffectPurchasedAt] = useState<string | null>(null)
   const [termsOpen, setTermsOpen] = useState(false)
   const [pricing, setPricing] = useState<PublicPaymentPricing | null>(null)
+  const [discountCode, setDiscountCode] = useState('')
+  const [appliedDiscountCode, setAppliedDiscountCode] = useState<string | null>(null)
+  const [discountedPriceNtd, setDiscountedPriceNtd] = useState<number | null>(null)
+  const [discountBusy, setDiscountBusy] = useState(false)
+  const [discountMessage, setDiscountMessage] = useState<string | null>(null)
+  const [discountError, setDiscountError] = useState<string | null>(null)
 
   const { mode: paymentMode, loading: paymentLoading } = usePaymentProvider()
 
@@ -142,6 +151,10 @@ export default function MembershipManagementScreen({
 
   const monthlyListPrice = MEMBERSHIP_LIST_PRICE_NTD[gender]
   const monthlyPrice = pricing?.membership[gender].priceNtd ?? monthlyListPrice
+  const displayedMonthlyPrice =
+    gender === 'male' && appliedDiscountCode && discountedPriceNtd != null
+      ? discountedPriceNtd
+      : monthlyPrice
   const memberActive = isMembershipActive(subscriptionExpiresAt)
   const crownEffectOwned = isCrownEffectPurchased(crownEffectPurchasedAt)
 
@@ -229,6 +242,62 @@ export default function MembershipManagementScreen({
       return false
     }
     return true
+  }
+
+  const applyDiscountCode = async () => {
+    const normalizedCode = discountCode.trim().toUpperCase()
+    if (!normalizedCode) {
+      setDiscountError('請輸入折扣碼。')
+      return
+    }
+
+    setDiscountBusy(true)
+    setDiscountError(null)
+    setDiscountMessage(null)
+    try {
+      if (gender === 'female') {
+        const result = await redeemFemaleMembershipDiscountCode(normalizedCode)
+        if (!result.ok) {
+          if (result.reason === 'too_early' && result.availableAt) {
+            const availableDate = new Date(result.availableAt).toLocaleDateString('zh-TW')
+            setDiscountError(`目前會員效期仍超過 3 天，可於 ${availableDate} 起再次兌換。`)
+          } else if (result.reason === 'invalid_code') {
+            setDiscountError('折扣碼無效或已停止使用。')
+          } else {
+            setDiscountError(result.error ?? '目前無法兌換免費試用。')
+          }
+          return
+        }
+        setDiscountCode(normalizedCode)
+        setDiscountMessage('兌換成功，會員效期已免費延長 30 天。')
+        await reloadProfile()
+        onUpdated({ type: 'membership' })
+        return
+      }
+
+      const result = await previewMembershipDiscountCode(normalizedCode)
+      if (
+        !result.ok
+        || result.benefit !== 'male_discount'
+        || result.finalPriceNtd == null
+        || result.discountNtd == null
+      ) {
+        setAppliedDiscountCode(null)
+        setDiscountedPriceNtd(null)
+        setDiscountError(
+          result.reason === 'invalid_code'
+            ? '折扣碼無效或已停止使用。'
+            : result.error ?? '此折扣碼不適用目前方案。',
+        )
+        return
+      }
+      setDiscountCode(result.code ?? normalizedCode)
+      setAppliedDiscountCode(result.code ?? normalizedCode)
+      setDiscountedPriceNtd(result.finalPriceNtd)
+      setDiscountMessage(`已套用折扣碼，活動價再折 NT$ ${result.discountNtd}。`)
+    } finally {
+      setDiscountBusy(false)
+    }
   }
 
   const buyPack = async (packKey: CreditPackKey, creditLabel: string) => {
@@ -365,6 +434,7 @@ export default function MembershipManagementScreen({
       await startEcpayCheckout({
         productType: 'membership',
         email: userEmail,
+        membershipDiscountCode: gender === 'male' ? appliedDiscountCode ?? undefined : undefined,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : '無法前往付款')
@@ -394,6 +464,7 @@ export default function MembershipManagementScreen({
         body: JSON.stringify({
           prime,
           cardholder: cardholderPayload(),
+          membershipDiscountCode: gender === 'male' ? appliedDiscountCode ?? undefined : undefined,
         }),
       })
       const json = (await res.json()) as { ok?: boolean; error?: string }
@@ -418,6 +489,7 @@ export default function MembershipManagementScreen({
 
   const subscribeDisabled =
     busy ||
+    discountBusy ||
     paymentLoading ||
     (paymentMode === 'tappay' && (!tapReady || Boolean(tapInitError)))
 
@@ -528,14 +600,63 @@ export default function MembershipManagementScreen({
               </ul>
 
               <div className="mt-5 border-t border-[#eadfce] pt-4">
+                <div className="mb-4">
+                  <MembershipDiscountGuide gender={gender} />
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="text"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      value={discountCode}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setDiscountCode(value)
+                        setDiscountMessage(null)
+                        setDiscountError(null)
+                        if (value.trim().toUpperCase() !== appliedDiscountCode) {
+                          setAppliedDiscountCode(null)
+                          setDiscountedPriceNtd(null)
+                        }
+                      }}
+                      placeholder="請輸入折扣碼"
+                      aria-label="30 天會員折扣碼"
+                      className="min-w-0 flex-1 rounded-xl bg-white px-3 py-2.5 text-sm font-bold uppercase tracking-[0.08em] text-[#4b4033] outline-none ring-1 ring-[#ddc9aa] placeholder:normal-case placeholder:font-medium placeholder:tracking-normal placeholder:text-[#aa9b89] focus:ring-2 focus:ring-[#bd945a]"
+                    />
+                    <button
+                      type="button"
+                      disabled={discountBusy || busy}
+                      onClick={() => void applyDiscountCode()}
+                      className={cn(
+                        'min-w-[82px] rounded-xl px-3 py-2.5 text-xs font-bold transition active:scale-[0.98]',
+                        discountBusy || busy
+                          ? 'bg-[#d8ccbc] text-white'
+                          : 'bg-[#9e7945] text-white shadow-sm',
+                      )}
+                    >
+                      {discountBusy ? '確認中⋯' : gender === 'female' ? '立即兌換' : '套用'}
+                    </button>
+                  </div>
+                  {discountMessage && (
+                    <p className="mt-2 text-[11px] font-bold leading-relaxed text-emerald-700">
+                      {discountMessage}
+                    </p>
+                  )}
+                  {discountError && (
+                    <p className="mt-2 text-[11px] font-bold leading-relaxed text-red-600">
+                      {discountError}
+                    </p>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
                   <p className="text-[11px] font-semibold tracking-[0.08em] text-[#8c8176]">
                     30 天會員方案
                   </p>
                   <p className="flex flex-wrap items-baseline justify-end gap-x-1 whitespace-nowrap text-right leading-none">
-                  {isPromoPriceActive(monthlyListPrice, monthlyPrice) && (
+                  {(isPromoPriceActive(monthlyListPrice, monthlyPrice) || appliedDiscountCode) && (
                     <span className="mr-1 text-[11px] font-semibold text-[#a3968a] line-through">
-                      NT$ {monthlyListPrice}
+                      NT$ {appliedDiscountCode ? monthlyPrice : monthlyListPrice}
                     </span>
                   )}
                   <span className="text-[11px] font-bold tracking-[0.02em] text-[#5b5045]">NT$ </span>
@@ -543,7 +664,7 @@ export default function MembershipManagementScreen({
                     className="text-[34px] font-medium tabular-nums"
                     style={{ color: GOLD, fontFamily: SERIF }}
                   >
-                    {monthlyPrice}
+                    {displayedMonthlyPrice}
                   </span>
                   <span className="ml-1 text-[12px] font-semibold text-[#4c443b]">/ 30 天</span>
                   </p>
