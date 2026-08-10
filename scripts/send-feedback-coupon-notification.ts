@@ -49,6 +49,7 @@ async function findUserId(
 async function main() {
   loadEnv()
   const targetEmail = process.argv[2]?.trim()
+  const allowActiveTest = process.argv.includes('--allow-active-test')
   const supabaseUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL
   const serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY
@@ -79,7 +80,10 @@ async function main() {
     profile.subscription_expires_at
     && new Date(profile.subscription_expires_at).getTime() > Date.now()
   ) {
-    throw new Error('目標帳號目前已有有效會員，已停止發送。')
+    if (!allowActiveTest) {
+      throw new Error('目標帳號目前已有有效會員，已停止發送。')
+    }
+    console.warn('測試例外：目標帳號已有有效會員，但仍依指定發送。')
   }
 
   const { data: notification, error: notificationError } = await admin
