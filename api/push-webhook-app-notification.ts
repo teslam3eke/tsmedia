@@ -39,7 +39,8 @@ function buildOpenUrlForAppNotification(record: {
   } else if (
     kind === 'verification_approved' ||
     kind === 'verification_rejected' ||
-    kind === 'verification_submitted'
+    kind === 'verification_submitted' ||
+    kind === 'feedback_coupon_offer'
   ) {
     p.set('tab', 'profile')
   } else {
@@ -91,7 +92,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const requiresUniqueTag =
       record.kind === 'message_received' ||
       record.kind === 'verification_approved' ||
-      record.kind === 'verification_rejected'
+      record.kind === 'verification_rejected' ||
+      record.kind === 'feedback_coupon_offer'
     const tag =
       requiresUniqueTag && record.id
         ? `${baseTag}-${record.id}`

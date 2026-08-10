@@ -24,6 +24,7 @@ export type AppNotificationKind =
   | 'match_created'
   | 'message_received'
   | 'instant_match_paired'
+  | 'feedback_coupon_offer'
 export type ReviewMode = 'manual' | 'ai_auto'
 export type ProfileInteractionAction = 'pass' | 'like' | 'super_like'
 export type ReportReason = 'fake_profile' | 'married_or_not_single' | 'harassment' | 'scam_or_sales' | 'inappropriate_content' | 'privacy_violation' | 'other'

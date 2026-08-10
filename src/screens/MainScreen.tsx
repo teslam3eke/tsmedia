@@ -8,6 +8,7 @@ import {
   Cpu, Zap, LogOut, MessageSquare, Check, Pencil,
   BellRing, AlertCircle, Gem,
   FileText, Upload, ShieldCheck, ChevronRight, Flag, Ban, Eye, Star, UserMinus, Trash2,
+  ExternalLink, TicketPercent,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -6103,7 +6104,70 @@ function appNotificationModalMeta(kind: AppNotificationKind) {
         bodyClass: 'text-violet-800',
         Icon: Zap,
       }
+    case 'feedback_coupon_offer':
+      return {
+        ring: 'ring-amber-200',
+        bg: 'bg-[#fffaf2]',
+        titleClass: 'text-[#684719]',
+        bodyClass: 'text-[#745a35]',
+        Icon: TicketPercent,
+      }
   }
+}
+
+function FeedbackCouponOfferBody() {
+  const steps = [
+    {
+      title: '前往 Instagram',
+      detail: (
+        <a
+          href="https://www.instagram.com/tsmedia_tw?utm_source=qr"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 font-black text-[#916528] underline underline-offset-2"
+        >
+          @tsmedia_tw
+          <ExternalLink className="h-3 w-3" aria-hidden />
+        </a>
+      ),
+    },
+    { title: '點擊「追蹤」', detail: <span>掌握最新活動消息</span> },
+    { title: '私訊真實意見', detail: <span>告訴我們可以改進的地方</span> },
+    { title: '私訊「已填寫問卷」', detail: <span>領取 NT$300 會員折扣碼</span> },
+  ]
+
+  return (
+    <div className="mt-3 text-left text-[11px] leading-relaxed text-[#745a35]">
+      <p>這封訊息，只給已通過審核、尚未開通正式會員的您。</p>
+      <p className="mt-2">很遺憾您花費時間完成申請，最後卻沒有成為正式會員。</p>
+      <p className="mt-3 border-t border-amber-200 pt-3 font-bold text-[#684719]">
+        為了補償您的時間，我們準備了 NT$300 會員折扣碼：
+      </p>
+      <ol className="relative mt-3 space-y-2.5">
+        {steps.map((step, index) => (
+          <li key={step.title} className="relative flex items-center gap-3">
+            {index < steps.length - 1 && (
+              <span
+                className="absolute left-[13px] top-7 h-[calc(100%+10px)] w-px bg-gradient-to-b from-[#c7a46e] to-[#eadcc5]"
+                aria-hidden
+              />
+            )}
+            <span className="relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#c6a264] to-[#9d7740] text-xs font-black text-white shadow-sm ring-2 ring-[#fff7e9]">
+              {index + 1}
+            </span>
+            <div className="min-w-0">
+              <p className="font-black text-[#57452e]">{step.title}</p>
+              <p className="text-[10px] text-[#8b7455]">{step.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-3 rounded-xl border border-amber-200 bg-white/70 px-3 py-2.5 text-center">
+        <p className="font-bold text-[#684719]">不用客氣，一句真實的意見就好。</p>
+        <p className="mt-0.5 text-[10px] text-[#8b7455]">您的回饋，會讓我們變得更好。</p>
+      </div>
+    </div>
+  )
 }
 
 function AppNotificationAlertPortal({
@@ -6130,15 +6194,23 @@ function AppNotificationAlertPortal({
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
-        className={cn('w-full max-w-sm rounded-2xl p-5 shadow-xl ring-1', meta.bg, meta.ring)}
+        className={cn(
+          'max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl p-5 shadow-xl ring-1',
+          meta.bg,
+          meta.ring,
+        )}
       >
         <div className="flex gap-3">
           <Icon className="mt-0.5 h-6 w-6 shrink-0 opacity-90" aria-hidden />
           <div className="min-w-0 flex-1">
             <p id="app-notif-alert-title" className={cn('text-sm font-bold leading-snug', meta.titleClass)}>
-              {notification.title}
+              {notification.kind === 'feedback_coupon_offer'
+                ? '我們想聽您的真實意見'
+                : notification.title}
             </p>
-            {notification.kind === 'verification_rejected' && rejectionReason ? (
+            {notification.kind === 'feedback_coupon_offer' ? (
+              <FeedbackCouponOfferBody />
+            ) : notification.kind === 'verification_rejected' && rejectionReason ? (
               <div className="mt-2 space-y-2">
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
@@ -7263,6 +7335,7 @@ export default function MainScreen({
     'verification_submitted',
     'super_like_received',
     'match_created',
+    'feedback_coupon_offer',
   ])
 
   const ingestUnreadAppNotifications = useCallback(
