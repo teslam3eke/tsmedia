@@ -8618,10 +8618,18 @@ export default function MainScreen({
               onBack={() => setShowSubscription(false)}
               onUpdated={async (event: MembershipUpdateEvent) => {
                 setShowSubscription(false)
+                if (event.type === 'membership' && event.restartAfterConfirm) {
+                  membershipRewardReloadPendingRef.current = true
+                  setMembershipActive(true)
+                  setRewardFlash({
+                    variant: 'grant',
+                    title: '兌換成功',
+                    subtitle: '會員權益已啟用',
+                  })
+                  return
+                }
                 await refreshCredits()
                 if (event.type === 'membership') {
-                  membershipRewardReloadPendingRef.current =
-                    event.restartAfterConfirm === true
                   setMembershipActive(true)
                   const beforeSnap = preSubscriptionCreditsRef.current
                   preSubscriptionCreditsRef.current = null
