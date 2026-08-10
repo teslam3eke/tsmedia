@@ -6118,6 +6118,7 @@ function appNotificationModalMeta(kind: AppNotificationKind) {
 function FeedbackCouponOfferBody() {
   const steps = [
     {
+      key: 'instagram',
       title: '前往 Instagram',
       detail: (
         <a
@@ -6131,9 +6132,21 @@ function FeedbackCouponOfferBody() {
         </a>
       ),
     },
-    { title: '點擊「追蹤」', detail: <span>掌握最新活動消息</span> },
-    { title: '私訊真實意見', detail: <span>告訴我們可以改進的地方</span> },
-    { title: '私訊「已填寫問卷」', detail: <span>領取 NT$300 會員折扣碼</span> },
+    {
+      key: 'follow',
+      title: <>點擊 <strong className="font-black text-red-600">「追蹤」</strong></>,
+      detail: <span>掌握最新活動消息</span>,
+    },
+    {
+      key: 'feedback',
+      title: <>私訊 <strong className="font-black text-red-600">真實意見</strong></>,
+      detail: <span>告訴我們可以改進的地方</span>,
+    },
+    {
+      key: 'completed',
+      title: <>私訊 <strong className="font-black text-red-600">「已填寫問卷」</strong></>,
+      detail: <span>領取 NT$300 會員折扣碼</span>,
+    },
   ]
 
   return (
@@ -6145,7 +6158,7 @@ function FeedbackCouponOfferBody() {
       </p>
       <ol className="relative mt-3 space-y-2.5">
         {steps.map((step, index) => (
-          <li key={step.title} className="relative flex items-center gap-3">
+          <li key={step.key} className="relative flex items-center gap-3">
             {index < steps.length - 1 && (
               <span
                 className="absolute left-[13px] top-7 h-[calc(100%+10px)] w-px bg-gradient-to-b from-[#c7a46e] to-[#eadcc5]"
