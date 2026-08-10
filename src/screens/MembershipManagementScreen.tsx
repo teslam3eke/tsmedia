@@ -43,10 +43,11 @@ import {
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
+import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export type MembershipUpdateEvent =
-  | { type: 'membership'; restartAfterConfirm?: boolean }
+  | { type: 'membership' }
   | { type: 'pack'; subtitle: string }
   | { type: 'crown_effect' }
 
@@ -270,8 +271,8 @@ export default function MembershipManagementScreen({
         }
         setDiscountCode(normalizedCode)
         setDiscountMessage('兌換成功，會員效期已免費延長 30 天。')
-        await reloadProfile()
-        onUpdated({ type: 'membership', restartAfterConfirm: true })
+        markSkipInstantMatchLeaveOnNextFullUnload()
+        window.location.reload()
         return
       }
 
