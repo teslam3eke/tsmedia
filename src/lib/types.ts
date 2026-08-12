@@ -78,6 +78,8 @@ export interface ProfileRow {
   work_region: Region | null                   // 工作地點
   home_region: Region | null                   // 戶籍地
   preferred_region: Region | null              // 配對期望對方所在地（對方 work 或 home 任一符合即可）
+  preferred_age_min?: number | null             // 每日探索偏好最低年齡；null 時依本人年齡 ±5
+  preferred_age_max?: number | null             // 每日探索偏好最高年齡；範圍至少 10 歲
   is_verified: boolean
   verification_status: VerificationStatus
   income_tier: IncomeTier | null               // 審核通過的收入等級（null = 未認證）

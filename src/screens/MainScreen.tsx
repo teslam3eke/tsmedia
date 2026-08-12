@@ -4605,6 +4605,25 @@ function EditRegionGrid({
   )
 }
 
+const DISCOVER_AGE_MIN = 18
+const DISCOVER_AGE_MAX = 80
+const DISCOVER_AGE_MIN_SPAN = 10
+const DISCOVER_AGE_OPTIONS = Array.from(
+  { length: DISCOVER_AGE_MAX - DISCOVER_AGE_MIN + 1 },
+  (_, index) => DISCOVER_AGE_MIN + index,
+)
+
+function defaultDiscoverAgeRange(age: number | null): { min: number; max: number } {
+  if (age == null || !Number.isFinite(age)) {
+    return { min: DISCOVER_AGE_MIN, max: DISCOVER_AGE_MAX }
+  }
+  const min = Math.max(
+    DISCOVER_AGE_MIN,
+    Math.min(DISCOVER_AGE_MAX - DISCOVER_AGE_MIN_SPAN, Math.round(age) - 5),
+  )
+  return { min, max: min + DISCOVER_AGE_MIN_SPAN }
+}
+
 function EditProfileScreen({
   profile,
   userId,
@@ -4626,6 +4645,13 @@ function EditProfileScreen({
   const [workRegion,      setWorkRegion]      = useState<import('@/lib/types').Region | ''>(profile.work_region ?? '')
   const [homeRegion,      setHomeRegion]      = useState<import('@/lib/types').Region | ''>(profile.home_region ?? '')
   const [preferredRegion, setPreferredRegion] = useState<import('@/lib/types').Region | ''>(profile.preferred_region ?? '')
+  const defaultAgeRange = defaultDiscoverAgeRange(profile.age)
+  const [preferredAgeMin, setPreferredAgeMin] = useState(
+    profile.preferred_age_min ?? defaultAgeRange.min,
+  )
+  const [preferredAgeMax, setPreferredAgeMax] = useState(
+    profile.preferred_age_max ?? defaultAgeRange.max,
+  )
   const [mbtiType, setMbtiType] = useState<string>(() =>
     isValidMbtiType(profile.mbti_type) ? profile.mbti_type : '',
   )
@@ -5001,6 +5027,13 @@ function EditProfileScreen({
       }
       return false
     }
+    if (preferredAgeMax - preferredAgeMin < DISCOVER_AGE_MIN_SPAN) {
+      if (!opts?.silent) {
+        setSaveMsg(`年齡範圍至少需相差 ${DISCOVER_AGE_MIN_SPAN} 歲`)
+        setTimeout(() => setSaveMsg(''), 3200)
+      }
+      return false
+    }
     setSaving(true)
     if (!opts?.silent) setSaveMsg('')
 
@@ -5020,6 +5053,8 @@ function EditProfileScreen({
       workRegion:      workRegion      === '' ? null : workRegion,
       homeRegion:      homeRegion      === '' ? null : homeRegion,
       preferredRegion: preferredRegion === '' ? null : preferredRegion,
+      preferredAgeMin,
+      preferredAgeMax,
       showIncomeBorder: borderToSave,
       mbtiType,
     })
@@ -5048,6 +5083,8 @@ function EditProfileScreen({
       work_region:      workRegion      === '' ? null : workRegion,
       home_region:      homeRegion      === '' ? null : homeRegion,
       preferred_region: preferredRegion === '' ? null : preferredRegion,
+      preferred_age_min: preferredAgeMin,
+      preferred_age_max: preferredAgeMax,
       show_income_border: borderToSave,
       mbti_type: mbtiType,
     }
@@ -5220,6 +5257,57 @@ function EditProfileScreen({
                 對方的工作地或戶籍地其中一個符合就會出現在探索頁
               </p>
             </div>
+          </div>
+        </section>
+
+        {/* ── 每日配對偏好 ───────────────────────────────── */}
+        <section>
+          <SectionHeading label="每日配對" hint="年齡偏好" />
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-3">
+              <label className="block">
+                <span className="field-label">最低年齡</span>
+                <select
+                  value={preferredAgeMin}
+                  onChange={(event) => {
+                    const nextMin = Number(event.target.value)
+                    setPreferredAgeMin(nextMin)
+                    if (preferredAgeMax - nextMin < DISCOVER_AGE_MIN_SPAN) {
+                      setPreferredAgeMax(Math.min(DISCOVER_AGE_MAX, nextMin + DISCOVER_AGE_MIN_SPAN))
+                    }
+                  }}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:border-slate-400"
+                >
+                  {DISCOVER_AGE_OPTIONS
+                    .filter((age) => age <= preferredAgeMax - DISCOVER_AGE_MIN_SPAN)
+                    .map((age) => <option key={age} value={age}>{age} 歲</option>)}
+                </select>
+              </label>
+              <span className="pb-3 text-sm font-bold text-slate-300">～</span>
+              <label className="block">
+                <span className="field-label">最高年齡</span>
+                <select
+                  value={preferredAgeMax}
+                  onChange={(event) => {
+                    const nextMax = Number(event.target.value)
+                    setPreferredAgeMax(nextMax)
+                    if (nextMax - preferredAgeMin < DISCOVER_AGE_MIN_SPAN) {
+                      setPreferredAgeMin(Math.max(DISCOVER_AGE_MIN, nextMax - DISCOVER_AGE_MIN_SPAN))
+                    }
+                  }}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-800 outline-none focus:border-slate-400"
+                >
+                  {DISCOVER_AGE_OPTIONS
+                    .filter((age) => age >= preferredAgeMin + DISCOVER_AGE_MIN_SPAN)
+                    .map((age) => <option key={age} value={age}>{age} 歲</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+              年齡範圍至少相差 {DISCOVER_AGE_MIN_SPAN} 歲；偏好將於下一次配對生效。
+              <br />
+              若符合條件的人數不足，系統可能適度放寬年齡範圍。
+            </p>
           </div>
         </section>
 

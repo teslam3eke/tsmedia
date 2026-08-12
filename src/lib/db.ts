@@ -134,12 +134,25 @@ export interface UpsertProfilePayload {
   workRegion?: Region | null
   homeRegion?: Region | null
   preferredRegion?: Region | null
+  preferredAgeMin?: number | null
+  preferredAgeMax?: number | null
   showIncomeBorder?: boolean
   mbtiType?: string | null
 }
 
 export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok: boolean; error?: string }> {
-  const { userId, jobTitle, photoUrls, workRegion, homeRegion, preferredRegion, showIncomeBorder, ...rest } = payload
+  const {
+    userId,
+    jobTitle,
+    photoUrls,
+    workRegion,
+    homeRegion,
+    preferredRegion,
+    preferredAgeMin,
+    preferredAgeMax,
+    showIncomeBorder,
+    ...rest
+  } = payload
 
   // Build patch — always include id so upsert can match/insert the row
   const patch: Record<string, unknown> = { id: userId }
@@ -158,6 +171,8 @@ export async function upsertProfile(payload: UpsertProfilePayload): Promise<{ ok
   if (workRegion         !== undefined) patch.work_region      = workRegion
   if (homeRegion         !== undefined) patch.home_region      = homeRegion
   if (preferredRegion    !== undefined) patch.preferred_region = preferredRegion
+  if (preferredAgeMin    !== undefined) patch.preferred_age_min = preferredAgeMin
+  if (preferredAgeMax    !== undefined) patch.preferred_age_max = preferredAgeMax
   if (showIncomeBorder   !== undefined) patch.show_income_border = showIncomeBorder
   if (rest.mbtiType      !== undefined) patch.mbti_type         = rest.mbtiType
 
