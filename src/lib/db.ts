@@ -3341,6 +3341,21 @@ export async function updateUserFeedbackStatus(
   return { ok: true }
 }
 
+export async function deleteUserFeedback(
+  feedbackId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase
+    .from('user_feedback')
+    .delete()
+    .eq('id', feedbackId)
+
+  if (error) {
+    console.error('[db] deleteUserFeedback error:', error.message)
+    return { ok: false, error: error.message }
+  }
+  return { ok: true }
+}
+
 export type PaymentPromoCampaignRow = {
   id: string
   label: string

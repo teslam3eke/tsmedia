@@ -12,7 +12,7 @@ import {
   getAllVerificationApplications, approveVerificationApplication,
   rejectVerificationApplication, getDocSignedUrl, resolvePhotoUrls, getAdminProfileReports,
   getAdminMessageReports, updateProfileReportStatus, updateMessageReportStatus,
-  getAdminUserFeedback, updateUserFeedbackStatus,
+  getAdminUserFeedback, updateUserFeedbackStatus, deleteUserFeedback,
   blockProfile,
 } from '@/lib/db'
 import AdminPricingTab from '@/screens/AdminPricingTab'
@@ -420,6 +420,17 @@ export default function AdminScreen({ onBack }: Props) {
               setActing(item.id)
               await updateUserFeedbackStatus(item.id, status)
               setActing(null)
+              load()
+            }}
+            onDelete={async (item) => {
+              if (!window.confirm('確定要刪除此意見反映？刪除後無法復原。')) return
+              setActing(item.id)
+              const result = await deleteUserFeedback(item.id)
+              setActing(null)
+              if (!result.ok) {
+                window.alert(result.error ?? '刪除失敗，請稍後再試。')
+                return
+              }
               load()
             }}
           />
@@ -953,10 +964,12 @@ function FeedbackAdminList({
   items,
   acting,
   onResolve,
+  onDelete,
 }: {
   items: UserFeedbackWithProfile[]
   acting: string | null
   onResolve: (item: UserFeedbackWithProfile, status: 'resolved' | 'dismissed') => void
+  onDelete: (item: UserFeedbackWithProfile) => void
 }) {
   if (items.length === 0) {
     return (
@@ -1007,21 +1020,44 @@ function FeedbackAdminList({
               </div>
             )}
 
-            {isOpen && (
-              <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+            {isOpen ? (
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onResolve(item, 'dismissed')}
+                    disabled={acting === item.id}
+                    className="rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-500 disabled:opacity-60"
+                  >
+                    駁回
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onResolve(item, 'resolved')}
+                    disabled={acting === item.id}
+                    className="rounded-xl bg-emerald-500 py-2.5 text-xs font-bold text-white disabled:opacity-60"
+                  >
+                    標記處理
+                  </button>
+                </div>
                 <button
-                  onClick={() => onResolve(item, 'dismissed')}
+                  type="button"
+                  onClick={() => onDelete(item)}
                   disabled={acting === item.id}
-                  className="rounded-xl bg-slate-100 py-2.5 text-xs font-bold text-slate-500 disabled:opacity-60"
+                  className="w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-500 disabled:opacity-60"
                 >
-                  駁回
+                  刪除
                 </button>
+              </div>
+            ) : (
+              <div className="border-t border-slate-100 pt-3">
                 <button
-                  onClick={() => onResolve(item, 'resolved')}
+                  type="button"
+                  onClick={() => onDelete(item)}
                   disabled={acting === item.id}
-                  className="rounded-xl bg-emerald-500 py-2.5 text-xs font-bold text-white disabled:opacity-60"
+                  className="w-full rounded-xl bg-red-50 py-2.5 text-xs font-bold text-red-500 disabled:opacity-60"
                 >
-                  標記處理
+                  刪除
                 </button>
               </div>
             )}
