@@ -17,6 +17,7 @@ import { motion } from 'framer-motion'
 import { createPortal } from 'react-dom'
 import { Heart, Send, Timer, Users, DoorOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useIosChatKeyboardInset } from '@/lib/iosChatKeyboardInset'
 import type { ProfileRow, CreditBalance } from '@/lib/types'
 import {
   instantMatchPoll,
@@ -496,7 +497,6 @@ export default function InstantMatchTab({
   const [snapshot, setSnapshot] = useState<InstantMatchPollResult | null>(null)
   const [peer, setPeer] = useState<ProfileRow | null>(null)
   const [resolvedPeerPhotoUrls, setResolvedPeerPhotoUrls] = useState<string[]>([])
-  const [instantPuzzleKeyboardOpen, setInstantPuzzleKeyboardOpen] = useState(false)
   const [messages, setMessages] = useState<UiMsg[]>([])
   const [input, setInput] = useState('')
   const [nowTick, setNowTick] = useState(() => Date.now())
@@ -512,10 +512,18 @@ export default function InstantMatchTab({
 
   const instantInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  /** 即時房聊天區：鍵盤頂起（範圍僅本分頁，與 MainScreen ChatRoomView 一致） */
-  const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
-  const lastInsetCommitRef = useRef<number | null>(null)
-  const lastKbOpenCommitRef = useRef<boolean | null>(null)
+  const { keyboardInsetBottom, isKeyboardOpen: instantPuzzleKeyboardOpen } = useIosChatKeyboardInset(
+    instantInputRef,
+    {
+      scrollToBottom: () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+        window.setTimeout(
+          () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+          200,
+        )
+      },
+    },
+  )
 
   const doneHoldRef = useRef(false)
   /** 使用者已對該場次按「我知道了」——後續 poll 仍會帶舊 done，過濾成 idle */
@@ -887,66 +895,6 @@ export default function InstantMatchTab({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, keyboardInsetBottom])
-
-  useEffect(() => {
-    const vv = window.visualViewport
-    let raf = 0
-    const scrollBottomOnceSoon = () => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-      window.setTimeout(
-        () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
-        200,
-      )
-    }
-    const updateKeyboardState = () => {
-      if (raf) cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        const layoutH = window.innerHeight
-        const vvH = vv?.height ?? layoutH
-        const vvTop = vv?.offsetTop ?? 0
-        const rawInset = vv ? Math.max(0, layoutH - vvH - vvTop) : 0
-        const roundedInset = Math.max(0, Math.round(rawInset))
-        const inputFocused = document.activeElement === instantInputRef.current
-        const viewportShrunk = vv ? vvH < layoutH - 110 : false
-        const ghostInset =
-          roundedInset <= 36 && roundedInset > 0 && !inputFocused && !viewportShrunk
-
-        const nextInset = ghostInset ? 0 : roundedInset
-        const nextOpen = inputFocused || viewportShrunk
-
-        const prevI = lastInsetCommitRef.current
-        const prevO = lastKbOpenCommitRef.current
-        const insetChanged =
-          prevI === null ||
-          (nextInset !== prevI &&
-            (Math.abs(nextInset - prevI) >= 12 || nextInset === 0 || prevI === 0))
-        const openChanged = prevO === null || prevO !== nextOpen
-
-        if (insetChanged) {
-          lastInsetCommitRef.current = nextInset
-          setKeyboardInsetBottom(nextInset)
-        }
-        if (openChanged) {
-          lastKbOpenCommitRef.current = nextOpen
-          setInstantPuzzleKeyboardOpen(nextOpen)
-        }
-        if (insetChanged || openChanged) scrollBottomOnceSoon()
-      })
-    }
-    updateKeyboardState()
-    vv?.addEventListener('resize', updateKeyboardState)
-    window.addEventListener('resize', updateKeyboardState)
-    document.addEventListener('focusin', updateKeyboardState)
-    document.addEventListener('focusout', updateKeyboardState)
-    return () => {
-      if (raf) cancelAnimationFrame(raf)
-      vv?.removeEventListener('resize', updateKeyboardState)
-      window.removeEventListener('resize', updateKeyboardState)
-      document.removeEventListener('focusin', updateKeyboardState)
-      document.removeEventListener('focusout', updateKeyboardState)
-    }
-  }, [])
 
   useEffect(() => {
     if (!sessionId || snapshot?.status !== 'in_session') return

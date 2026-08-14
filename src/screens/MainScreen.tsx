@@ -80,6 +80,7 @@ import {
   type FatedPairSlotState,
 } from '@/lib/db'
 import { readInstantEnqueueIntent, clearInstantEnqueueIntent } from '@/lib/instantMatchEnqueueIntent'
+import { useIosChatKeyboardInset } from '@/lib/iosChatKeyboardInset'
 import { getAppDayKey, msUntilNextAppDayKeyChange, msUntilNextTaipei2200, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
@@ -3540,19 +3541,23 @@ function ChatRoomView({
     return urls.filter(isDisplayablePhotoUrl)[0] ?? null
   })
   const [chatAvatarBroken, setChatAvatarBroken] = useState(false)
-  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false)
-  /** Pushes composer + scroll area above the on-screen keyboard — chat shell only. */
-  const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const inputRef  = useRef<HTMLInputElement>(null)
+  const { keyboardInsetBottom, isKeyboardOpen } = useIosChatKeyboardInset(inputRef, {
+    scrollToBottom: () => {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      window.setTimeout(
+        () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+        200,
+      )
+    },
+  })
   const sendInFlightRef = useRef(false)
   const messagesRef = useRef(messages)
   messagesRef.current = messages
-  /** 避免因 sub-pixel vv 數值無限 setState → 捲動 → visualViewport 抖動／地震 */
-  const lastInsetCommitRef = useRef<number | null>(null)
-  const lastKbOpenCommitRef = useRef<boolean | null>(null)
+  /** 避免因 sub-pixel vv 數值無限 setState → 捲動 → visualViewport 抖動／地震（見 iosChatKeyboardInset） */
   const chatEnteredAtRef = useRef(Date.now())
   const chatAssistSessionRef = useRef<ChatAssistSessionRow | null>(null)
   const chatAssistCanStartNewRef = useRef(true)
@@ -3957,71 +3962,6 @@ function ChatRoomView({
     if (!shouldStickToBottomRef.current) return
     bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
   }, [messages, chatAssistRevealedSessions, keyboardInsetBottom])
-
-  // When the keyboard opens/closes the viewport resizes — make sure the
-  // latest message stays in view rather than getting hidden behind the composer.
-  useEffect(() => {
-    const vv = window.visualViewport
-    let raf = 0
-    const scrollBottomOnceSoon = () => {
-      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-      window.setTimeout(
-        () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
-        200,
-      )
-    }
-    const updateKeyboardState = () => {
-      if (raf) cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        const layoutH = window.innerHeight
-        const vvH = vv?.height ?? layoutH
-        const vvTop = vv?.offsetTop ?? 0
-        /** 勿訂閱 visualViewport.scroll — 與 scrollIntoView 互觸發會整頁上下震 */
-        const rawInset = vv ? Math.max(0, layoutH - vvH - vvTop) : 0
-        const roundedInset = Math.max(0, Math.round(rawInset))
-        const inputFocused = document.activeElement === inputRef.current
-        const viewportShrunk = vv ? vvH < layoutH - 110 : false
-        /** 進房時瀏覽列／視窗細微調整易被算成小 inset；非鍵盤情境歸零，避免 padding 抖動 */
-        const ghostInset =
-          roundedInset <= 36 && roundedInset > 0 && !inputFocused && !viewportShrunk
-
-        const nextInset = ghostInset ? 0 : roundedInset
-        const nextOpen = inputFocused || viewportShrunk
-
-        const prevI = lastInsetCommitRef.current
-        const prevO = lastKbOpenCommitRef.current
-        /** 門檻內視為同值，免得 sub-pixel vv 無限 rerender／捲動 */
-        const insetChanged =
-          prevI === null ||
-          (nextInset !== prevI &&
-            (Math.abs(nextInset - prevI) >= 12 || nextInset === 0 || prevI === 0))
-        const openChanged = prevO === null || prevO !== nextOpen
-
-        if (insetChanged) {
-          lastInsetCommitRef.current = nextInset
-          setKeyboardInsetBottom(nextInset)
-        }
-        if (openChanged) {
-          lastKbOpenCommitRef.current = nextOpen
-          setIsKeyboardOpen(nextOpen)
-        }
-        if (insetChanged || openChanged) scrollBottomOnceSoon()
-      })
-    }
-    updateKeyboardState()
-    vv?.addEventListener('resize', updateKeyboardState)
-    window.addEventListener('resize', updateKeyboardState)
-    document.addEventListener('focusin', updateKeyboardState)
-    document.addEventListener('focusout', updateKeyboardState)
-    return () => {
-      if (raf) cancelAnimationFrame(raf)
-      vv?.removeEventListener('resize', updateKeyboardState)
-      window.removeEventListener('resize', updateKeyboardState)
-      document.removeEventListener('focusin', updateKeyboardState)
-      document.removeEventListener('focusout', updateKeyboardState)
-    }
-  }, [])
 
   const send = async () => {
     const text = input.trim()
