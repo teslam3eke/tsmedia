@@ -1,34 +1,34 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { iosOrIpadosLikely, standaloneDisplayModeLikely } from '@/lib/resumeHardReload'
+import { setChatComposerKeyboardCapture } from '@/lib/chatComposerKeyboardBridge'
 
-/** 鍵盤關閉時 vv.height 相對基準線縮小超過此值，視為主殼已跟著縮高（勿再 pad 聊天室）。 */
+/** 鍵盤關閉時 vv.height 相對基準線縮小超過此值，視為 viewport 已因鍵盤縮短。 */
 const VV_SHRINK_THRESHOLD_PX = 80
 
-/** layout viewport 高度；iOS 26 鍵盤開啟時比 innerHeight 可靠。 */
+/** 小於此值的 inset 視為 0，避免 sub-pixel 抖動。 */
+const INSET_COMMIT_THRESHOLD_PX = 36
+
+/** layout viewport 高度。 */
 export function layoutViewportHeight(): number {
   if (typeof document === 'undefined') return 0
   return document.documentElement.clientHeight || window.innerHeight
 }
 
-/** 依 visualViewport 與 layout viewport 重疊計算鍵盤 inset（供測試／診斷）。 */
-export function computeKeyboardInsetFromVisualViewport(vv: VisualViewport | null): number {
-  if (!vv) return 0
-  const layoutH = layoutViewportHeight()
-  const raw = Math.max(0, layoutH - vv.height - vv.offsetTop)
-  return Math.max(0, Math.round(raw))
+/** 主殼 --app-height 是否已跟 visualViewport 同步（避免雙重補償）。 */
+export function shellFollowsVisualViewport(vv: VisualViewport | null): boolean {
+  if (!vv || typeof document === 'undefined') return false
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--app-height').trim()
+  if (!raw) return false
+  const shellH = Number.parseFloat(raw)
+  if (!Number.isFinite(shellH)) return false
+  return Math.abs(shellH - vv.height) < 48
 }
 
-/** iOS standalone PWA 在 vv 完全不縮時的保守鍵盤估算。 */
 export function estimateIosKeyboardFallbackInset(restVvHeight?: number): number {
   const layoutH = restVvHeight ?? layoutViewportHeight()
   return Math.min(380, Math.max(260, Math.round(layoutH * 0.42)))
 }
 
-export function isIosStandalonePwaLikely(): boolean {
-  return iosOrIpadosLikely() && standaloneDisplayModeLikely()
-}
-
-/** 相對鍵盤關閉時的 vv 基準線，是否已明顯縮小。 */
 export function visualViewportShrunkFromRest(
   vv: VisualViewport | null,
   restVvHeight: number | null,
@@ -37,16 +37,58 @@ export function visualViewportShrunkFromRest(
   return vv.height < restVvHeight - VV_SHRINK_THRESHOLD_PX
 }
 
+export type ChatKeyboardInsetInput = {
+  vv: VisualViewport | null
+  inputEl: HTMLElement | null
+  restVvHeight: number | null
+  focusedForMs: number
+  standalonePwa: boolean
+}
+
+/**
+ * 三信號取 max（Jarela / WebKit 社群慣例，但避開舊版單一 innerHeight 算法）：
+ * 1. 輸入框 bottom 超出 visual viewport 可見底部
+ * 2. scrollY + offsetTop（PWA 不縮 vv 時 iOS 常改 pan）
+ * 3. layout gap（僅在主殼尚未跟 vv 同步時）
+ * 最後：standalone PWA 且三信號皆無 → 延遲 fallback 估算
+ */
+export function computeChatKeyboardInset(params: ChatKeyboardInsetInput): number {
+  const { vv, inputEl, restVvHeight, focusedForMs, standalonePwa } = params
+  if (!vv || !inputEl) return 0
+
+  const visibleBottom = vv.offsetTop + vv.height
+  const inputBottom = inputEl.getBoundingClientRect().bottom
+  const composerOverlap = Math.max(0, Math.round(inputBottom - visibleBottom))
+  const scrollPanProxy = Math.max(0, Math.round((window.scrollY || 0) + vv.offsetTop))
+
+  const layoutGap = shellFollowsVisualViewport(vv)
+    ? 0
+    : Math.max(0, Math.round(layoutViewportHeight() - vv.height - vv.offsetTop))
+
+  let inset = Math.max(composerOverlap, scrollPanProxy, layoutGap)
+
+  if (inset <= INSET_COMMIT_THRESHOLD_PX && standalonePwa) {
+    const vvUnchanged = !visualViewportShrunkFromRest(vv, restVvHeight)
+    const shellSynced = shellFollowsVisualViewport(vv)
+    if (vvUnchanged && !shellSynced && focusedForMs >= 280) {
+      inset = estimateIosKeyboardFallbackInset(restVvHeight ?? undefined)
+    }
+  }
+
+  return inset <= INSET_COMMIT_THRESHOLD_PX ? 0 : inset
+}
+
+export function isIosStandalonePwaLikely(): boolean {
+  return iosOrIpadosLikely() && standaloneDisplayModeLikely()
+}
+
 type UseIosChatKeyboardInsetOptions = {
   /** 鍵盤狀態變更後是否補捲到底（vv scroll 事件會關閉以避免震動）。 */
   scrollToBottom?: () => void
 }
 
 /**
- * 配對／即時聊天輸入框：iOS 鍵盤避讓。
- *
- * - Safari／PWA 若 visualViewport 已縮小 → 主殼 --app-height 已處理，聊天室 inset = 0。
- * - 僅 standalone PWA 且 vv 完全不縮 → fallback padding，避免鍵盤直接蓋住輸入框。
+ * 配對／即時聊天輸入框：iOS 鍵盤避讓（三信號 + 條件 fallback，非舊版單一 vv 差值）。
  */
 export function useIosChatKeyboardInset(
   inputRef: RefObject<HTMLInputElement | null>,
@@ -58,6 +100,7 @@ export function useIosChatKeyboardInset(
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
   const focusTimersRef = useRef<number[]>([])
   const restVvHeightRef = useRef<number | null>(null)
+  const focusStartedAtRef = useRef<number | null>(null)
   const scrollToBottomRef = useRef(options?.scrollToBottom)
   scrollToBottomRef.current = options?.scrollToBottom
 
@@ -79,25 +122,21 @@ export function useIosChatKeyboardInset(
 
     const resolveInset = (): number => {
       const focused = inputFocused()
-
       if (!focused) {
         captureRestBaseline()
         return 0
       }
 
-      const shrunk = visualViewportShrunkFromRest(vv, restVvHeightRef.current)
+      const focusedForMs =
+        focusStartedAtRef.current == null ? 0 : Date.now() - focusStartedAtRef.current
 
-      // 主殼 App.tsx 已用 vv.height 更新 --app-height；勿再 pad 造成 Safari 雙重上推。
-      if (shrunk) {
-        return 0
-      }
-
-      // 僅 PWA：鍵盤開啟但 vv 不回報縮小（如 iOS 26.1）才估算 inset。
-      if (isIosStandalonePwaLikely()) {
-        return estimateIosKeyboardFallbackInset(restVvHeightRef.current ?? undefined)
-      }
-
-      return 0
+      return computeChatKeyboardInset({
+        vv: vv ?? null,
+        inputEl: inputRef.current,
+        restVvHeight: restVvHeightRef.current,
+        focusedForMs,
+        standalonePwa: isIosStandalonePwaLikely(),
+      })
     }
 
     const updateKeyboardState = (allowScroll: boolean) => {
@@ -106,8 +145,8 @@ export function useIosChatKeyboardInset(
         raf = 0
         const nextInset = resolveInset()
         const focused = inputFocused()
-        const shrunk = visualViewportShrunkFromRest(vv, restVvHeightRef.current)
-        const nextOpen = focused || shrunk || nextInset > 36
+        const shrunk = visualViewportShrunkFromRest(vv ?? null, restVvHeightRef.current)
+        const nextOpen = focused || shrunk || nextInset > INSET_COMMIT_THRESHOLD_PX
 
         const prevI = lastInsetCommitRef.current
         const prevO = lastKbOpenCommitRef.current
@@ -147,6 +186,8 @@ export function useIosChatKeyboardInset(
 
     const onFocusIn = (event: FocusEvent) => {
       if (event.target === inputRef.current) {
+        focusStartedAtRef.current = Date.now()
+        setChatComposerKeyboardCapture(true)
         scheduleFocusRemeasure()
         return
       }
@@ -156,6 +197,8 @@ export function useIosChatKeyboardInset(
     const onFocusOut = () => {
       clearFocusTimers()
       window.setTimeout(() => {
+        focusStartedAtRef.current = null
+        setChatComposerKeyboardCapture(false)
         captureRestBaseline()
         updateKeyboardState(true)
       }, 80)
@@ -179,6 +222,8 @@ export function useIosChatKeyboardInset(
     return () => {
       if (raf) cancelAnimationFrame(raf)
       clearFocusTimers()
+      focusStartedAtRef.current = null
+      setChatComposerKeyboardCapture(false)
       vv?.removeEventListener('resize', onVvResize)
       vv?.removeEventListener('scroll', onVvScroll)
       window.removeEventListener('resize', onWindowResize)

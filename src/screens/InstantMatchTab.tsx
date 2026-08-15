@@ -511,6 +511,7 @@ export default function InstantMatchTab({
   const [peerChatAvatarBroken, setPeerChatAvatarBroken] = useState(false)
 
   const instantInputRef = useRef<HTMLInputElement>(null)
+  const instantChatContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { keyboardInsetBottom, isKeyboardOpen: instantPuzzleKeyboardOpen } = useIosChatKeyboardInset(
     instantInputRef,
@@ -1368,6 +1369,7 @@ export default function InstantMatchTab({
 
   return (
     <div
+      ref={instantChatContainerRef}
       className="relative flex h-full min-h-0 flex-1 flex-col bg-white"
       style={keyboardInsetBottom > 0 ? { paddingBottom: keyboardInsetBottom } : undefined}
     >

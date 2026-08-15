@@ -3541,6 +3541,7 @@ function ChatRoomView({
     return urls.filter(isDisplayablePhotoUrl)[0] ?? null
   })
   const [chatAvatarBroken, setChatAvatarBroken] = useState(false)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
@@ -4192,6 +4193,7 @@ function ChatRoomView({
 
   return (
     <div
+      ref={chatContainerRef}
       className="relative flex flex-col h-full bg-white"
       style={
         keyboardInsetBottom > 0

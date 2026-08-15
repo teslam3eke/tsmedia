@@ -26,6 +26,7 @@ import {
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
+import { chatComposerKeyboardCaptureActive } from '@/lib/chatComposerKeyboardBridge'
 
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -438,7 +439,11 @@ export default function App() {
       // likes to scroll html/body to keep the caret on-screen — since our
       // container already matches the visible viewport, any such scroll
       // is pure garbage and visually "flies" the content up.
-      if (window.scrollY !== 0 || window.scrollX !== 0) {
+      // 聊天輸入 focus 期間保留 iOS scroll pan，供 iosChatKeyboardInset 量測。
+      if (
+        !chatComposerKeyboardCaptureActive()
+        && (window.scrollY !== 0 || window.scrollX !== 0)
+      ) {
         window.scrollTo(0, 0)
       }
     }
@@ -659,6 +664,7 @@ export default function App() {
     // Belt-and-braces: if iOS still manages to scroll the document (e.g.
     // during IME composition), snap it back instantly.
     const snapBack = () => {
+      if (chatComposerKeyboardCaptureActive()) return
       if (window.scrollY !== 0 || window.scrollX !== 0) {
         window.scrollTo(0, 0)
       }
