@@ -49,13 +49,12 @@ export type ChatKeyboardInsetInput = {
   vv: VisualViewport | null
   inputEl: HTMLElement | null
   restVvHeight: number | null
-  focusedForMs: number
   standalonePwa: boolean
 }
 
 /** Safari：overlap + scroll pan + 條件 layout gap。 */
 export function computeSafariChatKeyboardInset(params: ChatKeyboardInsetInput): number {
-  const { vv, inputEl, restVvHeight, focusedForMs, standalonePwa } = params
+  const { vv, inputEl, restVvHeight, standalonePwa } = params
   if (!vv || !inputEl || standalonePwa) return 0
 
   const visibleBottom = vv.offsetTop + vv.height
@@ -142,8 +141,8 @@ export function useIosChatKeyboardInset(
 
     if (standalonePwa) {
       let baselineInnerHeight = window.innerHeight
-      let stabilityTimer: ReturnType<typeof setTimeout> | null = null
-      let tabBarRestoreTimer: ReturnType<typeof setTimeout> | null = null
+      let stabilityTimer: number | null = null
+      let tabBarRestoreTimer: number | null = null
       let pendingKb = 0
       let dismissing = false
       const savedKbRef = { current: 0 }
@@ -225,7 +224,7 @@ export function useIosChatKeyboardInset(
         if (calculated < 30 && floor <= INSET_COMMIT_THRESHOLD_PX) return
         pendingKb = Math.max(calculated, floor)
         if (stabilityTimer) clearTimeout(stabilityTimer)
-        stabilityTimer = setTimeout(() => {
+        stabilityTimer = window.setTimeout(() => {
           stabilityTimer = null
           if (dismissing || !inputFocused()) return
           commitKbInset(pendingKb, true)
@@ -299,7 +298,6 @@ export function useIosChatKeyboardInset(
         vv: vv ?? null,
         inputEl: inputRef.current,
         restVvHeight: restVvHeightRef.current,
-        focusedForMs: 0,
         standalonePwa: false,
       })
     }
