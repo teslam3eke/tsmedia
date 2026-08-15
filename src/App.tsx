@@ -26,7 +26,7 @@ import {
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
-import { chatComposerKeyboardCaptureActive, pwaChatKeyboardShellHeightPx } from '@/lib/chatComposerKeyboardBridge'
+import { chatComposerKeyboardCaptureActive } from '@/lib/chatComposerKeyboardBridge'
 import { isIosStandalonePwaLikely } from '@/lib/iosChatKeyboardInset'
 
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
@@ -431,17 +431,6 @@ export default function App() {
     }
 
     const update = (source: 'init' | 'resize' | 'scroll' = 'init') => {
-      if (chatComposerKeyboardCaptureActive() && isIosStandalonePwaLikely()) {
-        const shrunkShell = pwaChatKeyboardShellHeightPx()
-        if (shrunkShell != null) {
-          document.documentElement.style.setProperty('--app-height', `${shrunkShell}px`)
-          if (window.scrollY !== 0 || window.scrollX !== 0) {
-            window.scrollTo(0, 0)
-          }
-          return
-        }
-      }
-
       // 切回前景瞬間 vv.height 偶為 0／極小，會把主殼壓扁且觸控區錯位。
       const raw = vv.height
       const fallback = window.innerHeight || document.documentElement.clientHeight || 600

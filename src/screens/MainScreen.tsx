@@ -3546,7 +3546,11 @@ function ChatRoomView({
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const inputRef  = useRef<HTMLInputElement>(null)
-  const { keyboardInsetBottom, isKeyboardOpen, onChatInputPointerDown, pwaShellKeyboardLift } = useIosChatKeyboardInset(inputRef, {
+  const { keyboardInsetBottom, composerLiftPx, isKeyboardOpen, onChatInputPointerDown } = useIosChatKeyboardInset(inputRef, {
+    onKeyboardChromeChange: (open) => {
+      if (open) onChatInputFocus?.()
+      else onChatInputBlur?.()
+    },
     scrollToBottom: () => {
       bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
       window.setTimeout(
@@ -3960,9 +3964,15 @@ function ChatRoomView({
   }
 
   useEffect(() => {
-    if (!shouldStickToBottomRef.current) return
+    if (!shouldStickToBottomRef.current && composerLiftPx <= 0) return
     bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-  }, [messages, chatAssistRevealedSessions])
+    if (composerLiftPx > 0) {
+      window.setTimeout(
+        () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+        120,
+      )
+    }
+  }, [messages, chatAssistRevealedSessions, composerLiftPx])
 
   const send = async () => {
     const text = input.trim()
@@ -4196,7 +4206,7 @@ function ChatRoomView({
       ref={chatContainerRef}
       className="relative flex flex-col h-full bg-white"
       style={
-        !pwaShellKeyboardLift && keyboardInsetBottom > 0
+        keyboardInsetBottom > 0
           ? { paddingBottom: keyboardInsetBottom }
           : undefined
       }
@@ -4258,7 +4268,11 @@ function ChatRoomView({
       <div
         ref={messagesScrollRef}
         className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1 bg-slate-50/70"
-        style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
+        style={{
+          WebkitOverflowScrolling: 'touch',
+          scrollPaddingBottom: composerLiftPx > 0 ? composerLiftPx + 72 : 72,
+          paddingBottom: composerLiftPx > 0 ? composerLiftPx : undefined,
+        }}
         onScroll={() => {
           const el = messagesScrollRef.current
           if (!el) return
@@ -4403,8 +4417,15 @@ function ChatRoomView({
         <div ref={bottomRef} className="h-px shrink-0" aria-hidden />
       </div>
 
-      {/* Composer */}
-      <div className="flex-shrink-0 px-2 py-1.5 bg-white border-t border-slate-200 flex items-center gap-1.5">
+      {/* Composer — PWA 用 translateY 只抬輸入列，不壓縮上方拼圖 */}
+      <div
+        className="relative z-10 flex-shrink-0 px-2 py-1.5 bg-white border-t border-slate-200 flex items-center gap-1.5"
+        style={
+          composerLiftPx > 0
+            ? { transform: `translateY(-${composerLiftPx}px)` }
+            : undefined
+        }
+      >
         {sendWarning && (
           <div className="absolute bottom-[54px] left-3 right-3 rounded-2xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-600">
             {sendWarning}

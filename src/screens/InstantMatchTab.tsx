@@ -513,9 +513,12 @@ export default function InstantMatchTab({
   const instantInputRef = useRef<HTMLInputElement>(null)
   const instantChatContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const { keyboardInsetBottom, isKeyboardOpen: instantPuzzleKeyboardOpen, onChatInputPointerDown, pwaShellKeyboardLift } = useIosChatKeyboardInset(
+  const { keyboardInsetBottom, composerLiftPx, isKeyboardOpen: instantPuzzleKeyboardOpen, onChatInputPointerDown } = useIosChatKeyboardInset(
     instantInputRef,
     {
+      onKeyboardChromeChange: (open) => {
+        onInstantComposerKeyboardOpenChange?.(open)
+      },
       scrollToBottom: () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
         window.setTimeout(
@@ -894,8 +897,17 @@ export default function InstantMatchTab({
   }, [sessionId, userId, foregroundReloadNonce, physicalChannelResubscribeNonce])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({
+      behavior: composerLiftPx > 0 ? 'auto' : 'smooth',
+      block: 'end',
+    })
+    if (composerLiftPx > 0) {
+      window.setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
+        120,
+      )
+    }
+  }, [messages, composerLiftPx])
 
   useEffect(() => {
     if (!sessionId || snapshot?.status !== 'in_session') return
@@ -1372,7 +1384,7 @@ export default function InstantMatchTab({
       ref={instantChatContainerRef}
       className="relative flex h-full min-h-0 flex-1 flex-col bg-white"
       style={
-        !pwaShellKeyboardLift && keyboardInsetBottom > 0
+        keyboardInsetBottom > 0
           ? { paddingBottom: keyboardInsetBottom }
           : undefined
       }
@@ -1429,7 +1441,11 @@ export default function InstantMatchTab({
       <div className="flex min-h-0 flex-1 flex-col">
         <div
           className="min-h-0 flex-1 space-y-1 overflow-y-auto bg-slate-50/70 px-3 py-2"
-          style={{ WebkitOverflowScrolling: 'touch', scrollPaddingBottom: 72 }}
+          style={{
+            WebkitOverflowScrolling: 'touch',
+            scrollPaddingBottom: composerLiftPx > 0 ? composerLiftPx + 72 : 72,
+            paddingBottom: composerLiftPx > 0 ? composerLiftPx : undefined,
+          }}
         >
           {messages.length === 0 && liveChat && (
             <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-[11px] leading-relaxed text-slate-500">
@@ -1506,7 +1522,14 @@ export default function InstantMatchTab({
           </p>
         ) : null}
 
-        <div className="flex shrink-0 items-center gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5">
+        <div
+          className="relative z-10 flex shrink-0 items-center gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5"
+          style={
+            composerLiftPx > 0
+              ? { transform: `translateY(-${composerLiftPx}px)` }
+              : undefined
+          }
+        >
           <input
             ref={instantInputRef}
             value={input}
