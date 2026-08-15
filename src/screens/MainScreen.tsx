@@ -3546,7 +3546,7 @@ function ChatRoomView({
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const shouldStickToBottomRef = useRef(true)
   const inputRef  = useRef<HTMLInputElement>(null)
-  const { keyboardInsetBottom, isKeyboardOpen } = useIosChatKeyboardInset(inputRef, {
+  const { keyboardInsetBottom, isKeyboardOpen, onChatInputPointerDown, pwaShellKeyboardLift } = useIosChatKeyboardInset(inputRef, {
     scrollToBottom: () => {
       bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
       window.setTimeout(
@@ -4196,7 +4196,7 @@ function ChatRoomView({
       ref={chatContainerRef}
       className="relative flex flex-col h-full bg-white"
       style={
-        keyboardInsetBottom > 0
+        !pwaShellKeyboardLift && keyboardInsetBottom > 0
           ? { paddingBottom: keyboardInsetBottom }
           : undefined
       }
@@ -4416,6 +4416,8 @@ function ChatRoomView({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void send() } }}
+            onMouseDown={(e) => onChatInputPointerDown(e)}
+            onTouchStart={(e) => onChatInputPointerDown(e)}
             onFocus={() => {
               onChatInputFocus?.()
             }}

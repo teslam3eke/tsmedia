@@ -513,7 +513,7 @@ export default function InstantMatchTab({
   const instantInputRef = useRef<HTMLInputElement>(null)
   const instantChatContainerRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const { keyboardInsetBottom, isKeyboardOpen: instantPuzzleKeyboardOpen } = useIosChatKeyboardInset(
+  const { keyboardInsetBottom, isKeyboardOpen: instantPuzzleKeyboardOpen, onChatInputPointerDown, pwaShellKeyboardLift } = useIosChatKeyboardInset(
     instantInputRef,
     {
       scrollToBottom: () => {
@@ -1372,7 +1372,7 @@ export default function InstantMatchTab({
       ref={instantChatContainerRef}
       className="relative flex h-full min-h-0 flex-1 flex-col bg-white"
       style={
-        keyboardInsetBottom > 0
+        !pwaShellKeyboardLift && keyboardInsetBottom > 0
           ? { paddingBottom: keyboardInsetBottom }
           : undefined
       }
@@ -1512,6 +1512,8 @@ export default function InstantMatchTab({
             value={input}
             disabled={sess.phase !== 'chat'}
             onChange={(e) => setInput(e.target.value)}
+            onMouseDown={(e) => onChatInputPointerDown(e)}
+            onTouchStart={(e) => onChatInputPointerDown(e)}
             onFocus={() => {
               onInstantComposerKeyboardOpenChange?.(true)
             }}

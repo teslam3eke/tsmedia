@@ -26,7 +26,7 @@ import {
 import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
-import { chatComposerKeyboardCaptureActive } from '@/lib/chatComposerKeyboardBridge'
+import { chatComposerKeyboardCaptureActive, pwaChatKeyboardShellHeightPx } from '@/lib/chatComposerKeyboardBridge'
 import { isIosStandalonePwaLikely } from '@/lib/iosChatKeyboardInset'
 
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
@@ -431,6 +431,17 @@ export default function App() {
     }
 
     const update = (source: 'init' | 'resize' | 'scroll' = 'init') => {
+      if (chatComposerKeyboardCaptureActive() && isIosStandalonePwaLikely()) {
+        const shrunkShell = pwaChatKeyboardShellHeightPx()
+        if (shrunkShell != null) {
+          document.documentElement.style.setProperty('--app-height', `${shrunkShell}px`)
+          if (window.scrollY !== 0 || window.scrollX !== 0) {
+            window.scrollTo(0, 0)
+          }
+          return
+        }
+      }
+
       // 切回前景瞬間 vv.height 偶為 0／極小，會把主殼壓扁且觸控區錯位。
       const raw = vv.height
       const fallback = window.innerHeight || document.documentElement.clientHeight || 600
@@ -461,8 +472,10 @@ export default function App() {
     update('init')
     const onVvResize = () => update('resize')
     const onVvScroll = () => update('scroll')
+    const onWindowResize = () => update('resize')
     vv.addEventListener('resize', onVvResize)
     vv.addEventListener('scroll', onVvScroll)
+    window.addEventListener('resize', onWindowResize)
 
     // iOS PWA：切到其他 App 再回來時，visualViewport / 捲動偶爾卡住，主螢幕高度與觸控區會錯位。
     const onResume = () => {
@@ -479,6 +492,7 @@ export default function App() {
     return () => {
       vv.removeEventListener('resize', onVvResize)
       vv.removeEventListener('scroll', onVvScroll)
+      window.removeEventListener('resize', onWindowResize)
       document.removeEventListener('visibilitychange', onResume)
       window.removeEventListener('pageshow', onResume)
       document.documentElement.style.removeProperty('--app-height')

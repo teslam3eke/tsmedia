@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type RefObject, type TouchEvent } from 'react'
 import { iosOrIpadosLikely, standaloneDisplayModeLikely } from '@/lib/resumeHardReload'
-import { setChatComposerKeyboardCapture } from '@/lib/chatComposerKeyboardBridge'
+import {
+  clearPwaChatKeyboardShellState,
+  getChatShellRestHeightPx,
+  readAppShellHeightPx,
+  setChatComposerKeyboardCapture,
+  setChatKeyboardInsetPx,
+  setChatShellRestHeightPx,
+} from '@/lib/chatComposerKeyboardBridge'
 
 /** 鍵盤關閉時 vv.height 相對基準線縮小超過此值，視為 viewport 已因鍵盤縮短。 */
 const VV_SHRINK_THRESHOLD_PX = 80
@@ -8,8 +15,8 @@ const VV_SHRINK_THRESHOLD_PX = 80
 /** 小於此值的 inset 視為 0，避免 sub-pixel 抖動。 */
 const INSET_COMMIT_THRESHOLD_PX = 36
 
-/** PWA 已 latch 後，僅當新值高出此門檻才再更新（避免來回跳）。 */
-const PWA_INSET_RELATCH_DELTA_PX = 48
+/** PWA vv 量測穩定後才提交（ios-pwa-keyboard-fix STABILITY_MS）。 */
+const PWA_KB_STABILITY_MS = 80
 
 /** layout viewport 高度。 */
 export function layoutViewportHeight(): number {
@@ -17,7 +24,7 @@ export function layoutViewportHeight(): number {
   return document.documentElement.clientHeight || window.innerHeight
 }
 
-/** 主殼 --app-height 是否已跟 visualViewport 同步（避免雙重補償）。 */
+/** 主殼 --app-height 是否已跟 visualViewport 同步（避免 Safari 雙重補償）。 */
 export function shellFollowsVisualViewport(vv: VisualViewport | null): boolean {
   if (!vv || typeof document === 'undefined') return false
   const raw = getComputedStyle(document.documentElement).getPropertyValue('--app-height').trim()
@@ -48,25 +55,15 @@ export type ChatKeyboardInsetInput = {
   standalonePwa: boolean
 }
 
-/**
- * Safari：overlap + scroll pan + 條件 layout gap。
- * PWA：不用 scroll pan（與允許 document pan 會互相打架）；vv 已縮則交給主殼。
- */
-export function computeChatKeyboardInset(params: ChatKeyboardInsetInput): number {
+/** Safari：overlap + scroll pan + 條件 layout gap。 */
+export function computeSafariChatKeyboardInset(params: ChatKeyboardInsetInput): number {
   const { vv, inputEl, restVvHeight, focusedForMs, standalonePwa } = params
-  if (!vv || !inputEl) return 0
-
-  if (standalonePwa && visualViewportShrunkFromRest(vv, restVvHeight)) {
-    return 0
-  }
+  if (!vv || !inputEl || standalonePwa) return 0
 
   const visibleBottom = vv.offsetTop + vv.height
   const inputBottom = inputEl.getBoundingClientRect().bottom
   const composerOverlap = Math.max(0, Math.round(inputBottom - visibleBottom))
-
-  const scrollPanProxy = standalonePwa
-    ? 0
-    : Math.max(0, Math.round((window.scrollY || 0) + vv.offsetTop))
+  const scrollPanProxy = Math.max(0, Math.round((window.scrollY || 0) + vv.offsetTop))
 
   const layoutGap = shellFollowsVisualViewport(vv)
     ? 0
@@ -74,29 +71,25 @@ export function computeChatKeyboardInset(params: ChatKeyboardInsetInput): number
 
   let inset = Math.max(composerOverlap, scrollPanProxy, layoutGap)
 
-  if (inset <= INSET_COMMIT_THRESHOLD_PX && standalonePwa) {
-    const vvUnchanged = !visualViewportShrunkFromRest(vv, restVvHeight)
-    // vv 未縮時主殼 height 仍等於 vv → shellSynced 為 true，但不代表已避讓鍵盤。
-    if (vvUnchanged && focusedForMs >= 120) {
-      inset = estimateIosKeyboardFallbackInset(restVvHeight ?? undefined)
-    }
+  if (inset <= INSET_COMMIT_THRESHOLD_PX && visualViewportShrunkFromRest(vv, restVvHeight)) {
+    inset = 0
   }
 
   return inset <= INSET_COMMIT_THRESHOLD_PX ? 0 : inset
 }
 
-/** PWA 專用：單調 latch，focus 期間不因 vv scroll 來回改 inset。 */
-export function latchPwaKeyboardInset(prev: number | null, raw: number, focused: boolean): number {
-  if (!focused) return raw
-
-  if (raw <= INSET_COMMIT_THRESHOLD_PX) {
-    if (prev != null && prev > INSET_COMMIT_THRESHOLD_PX) return prev
-    return 0
-  }
-
-  if (prev == null || prev <= INSET_COMMIT_THRESHOLD_PX) return raw
-  if (raw >= prev + PWA_INSET_RELATCH_DELTA_PX) return raw
-  return prev
+/** PWA：baseline − vv.height、offsetTop、scroll pan 取 max（Jarela #173）。 */
+export function measurePwaKeyboardHeightPx(
+  vv: VisualViewport | null,
+  baselineInnerHeight: number,
+): number {
+  if (!vv) return 0
+  return Math.max(
+    0,
+    Math.round(baselineInnerHeight - vv.height),
+    Math.round(vv.offsetTop),
+    Math.round((window.scrollY || 0) + vv.offsetTop),
+  )
 }
 
 export function isIosStandalonePwaLikely(): boolean {
@@ -104,28 +97,29 @@ export function isIosStandalonePwaLikely(): boolean {
 }
 
 type UseIosChatKeyboardInsetOptions = {
-  /** 鍵盤狀態變更後是否補捲到底（PWA 僅 focus 首輪；vv scroll 不觸發）。 */
   scrollToBottom?: () => void
 }
 
-/**
- * 配對／即時聊天輸入框：iOS 鍵盤避讓。
- * Safari 用三信號；PWA 用 latch + fallback，避免 scroll／padding 回饋狂抖。
- */
 export function useIosChatKeyboardInset(
   inputRef: RefObject<HTMLInputElement | null>,
   options?: UseIosChatKeyboardInsetOptions,
-): { keyboardInsetBottom: number; isKeyboardOpen: boolean } {
+): {
+  keyboardInsetBottom: number
+  isKeyboardOpen: boolean
+  onChatInputPointerDown: (e?: MouseEvent | TouchEvent) => void
+  pwaShellKeyboardLift: boolean
+} {
   const [keyboardInsetBottom, setKeyboardInsetBottom] = useState(0)
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false)
+  const pwaShellKeyboardLift = isIosStandalonePwaLikely()
+
   const lastInsetCommitRef = useRef<number | null>(null)
   const lastKbOpenCommitRef = useRef<boolean | null>(null)
   const focusTimersRef = useRef<number[]>([])
   const restVvHeightRef = useRef<number | null>(null)
-  const focusStartedAtRef = useRef<number | null>(null)
-  const pwaLatchedInsetRef = useRef<number | null>(null)
-  const pwaDidInitialScrollRef = useRef(false)
   const scrollToBottomRef = useRef(options?.scrollToBottom)
+  const preLiftRef = useRef<(() => void) | null>(null)
+
   scrollToBottomRef.current = options?.scrollToBottom
 
   useEffect(() => {
@@ -145,30 +139,128 @@ export function useIosChatKeyboardInset(
       scrollToBottomRef.current?.()
     }
 
+    if (standalonePwa) {
+      let baselineInnerHeight = window.innerHeight
+      let stabilityTimer: ReturnType<typeof setTimeout> | null = null
+      let pendingKb = 0
+      const savedKbRef = { current: 0 }
+
+      const commitKbInset = (px: number, open: boolean) => {
+        const h = Math.max(0, Math.round(px))
+        if (h <= INSET_COMMIT_THRESHOLD_PX) {
+          clearPwaChatKeyboardShellState()
+          savedKbRef.current = 0
+          setKeyboardInsetBottom(0)
+          lastInsetCommitRef.current = 0
+          setIsKeyboardOpen(open)
+          window.dispatchEvent(new Event('resize'))
+          return
+        }
+        setChatKeyboardInsetPx(h)
+        savedKbRef.current = h
+        setKeyboardInsetBottom(0)
+        lastInsetCommitRef.current = h
+        setIsKeyboardOpen(true)
+        window.dispatchEvent(new Event('resize'))
+      }
+
+      const triggerPreLift = () => {
+        const rest = readAppShellHeightPx() ?? window.innerHeight
+        setChatShellRestHeightPx(rest)
+        const h =
+          savedKbRef.current > INSET_COMMIT_THRESHOLD_PX
+            ? savedKbRef.current
+            : estimateIosKeyboardFallbackInset(restVvHeightRef.current ?? rest)
+        commitKbInset(h, true)
+      }
+
+      preLiftRef.current = triggerPreLift
+
+      const scheduleStableMeasure = () => {
+        if (!inputFocused() || !vv) return
+        const calculated = measurePwaKeyboardHeightPx(vv, baselineInnerHeight)
+        if (calculated < 30) return
+        pendingKb = calculated
+        if (stabilityTimer) clearTimeout(stabilityTimer)
+        stabilityTimer = setTimeout(() => {
+          if (!inputFocused()) return
+          if (getChatShellRestHeightPx() == null) {
+            setChatShellRestHeightPx(readAppShellHeightPx() ?? baselineInnerHeight)
+          }
+          commitKbInset(pendingKb, true)
+        }, PWA_KB_STABILITY_MS)
+      }
+
+      const onFocusIn = (event: FocusEvent) => {
+        if (event.target !== inputRef.current) return
+        setChatComposerKeyboardCapture(true)
+        captureRestBaseline()
+        baselineInnerHeight = window.innerHeight
+        window.setTimeout(scheduleStableMeasure, PWA_KB_STABILITY_MS)
+        window.setTimeout(scheduleStableMeasure, 180)
+        window.setTimeout(scrollBottomOnceSoon, 120)
+      }
+
+      const onFocusOut = () => {
+        if (stabilityTimer) clearTimeout(stabilityTimer)
+        window.setTimeout(() => {
+          setChatComposerKeyboardCapture(false)
+          clearPwaChatKeyboardShellState()
+          captureRestBaseline()
+          setKeyboardInsetBottom(0)
+          setIsKeyboardOpen(false)
+          window.dispatchEvent(new Event('resize'))
+        }, 80)
+      }
+
+      const onVvResize = () => {
+        if (!inputFocused()) return
+        scheduleStableMeasure()
+      }
+
+      const onOrientationChange = () => {
+        if (stabilityTimer) clearTimeout(stabilityTimer)
+        pendingKb = 0
+        savedKbRef.current = 0
+        clearPwaChatKeyboardShellState()
+        baselineInnerHeight = window.innerHeight
+        setTimeout(() => {
+          baselineInnerHeight = window.innerHeight
+        }, 200)
+      }
+
+      captureRestBaseline()
+      document.addEventListener('focusin', onFocusIn)
+      document.addEventListener('focusout', onFocusOut)
+      vv?.addEventListener('resize', onVvResize)
+      window.addEventListener('orientationchange', onOrientationChange)
+
+      return () => {
+        preLiftRef.current = null
+        if (stabilityTimer) clearTimeout(stabilityTimer)
+        setChatComposerKeyboardCapture(false)
+        clearPwaChatKeyboardShellState()
+        document.removeEventListener('focusin', onFocusIn)
+        document.removeEventListener('focusout', onFocusOut)
+        vv?.removeEventListener('resize', onVvResize)
+        window.removeEventListener('orientationchange', onOrientationChange)
+      }
+    }
+
+    preLiftRef.current = null
+
     const resolveInset = (): number => {
-      const focused = inputFocused()
-      if (!focused) {
-        pwaLatchedInsetRef.current = null
+      if (!inputFocused()) {
         captureRestBaseline()
         return 0
       }
-
-      const focusedForMs =
-        focusStartedAtRef.current == null ? 0 : Date.now() - focusStartedAtRef.current
-
-      const raw = computeChatKeyboardInset({
+      return computeSafariChatKeyboardInset({
         vv: vv ?? null,
         inputEl: inputRef.current,
         restVvHeight: restVvHeightRef.current,
-        focusedForMs,
-        standalonePwa,
+        focusedForMs: 0,
+        standalonePwa: false,
       })
-
-      if (!standalonePwa) return raw
-
-      const latched = latchPwaKeyboardInset(pwaLatchedInsetRef.current, raw, true)
-      pwaLatchedInsetRef.current = latched > INSET_COMMIT_THRESHOLD_PX ? latched : null
-      return latched
     }
 
     const updateKeyboardState = (allowScroll: boolean) => {
@@ -181,106 +273,68 @@ export function useIosChatKeyboardInset(
         const nextOpen = focused || shrunk || nextInset > INSET_COMMIT_THRESHOLD_PX
 
         const prevI = lastInsetCommitRef.current
-        const prevO = lastKbOpenCommitRef.current
         const insetChanged =
           prevI === null
           || (nextInset !== prevI
             && (Math.abs(nextInset - prevI) >= 12 || nextInset === 0 || prevI === 0))
-        const openChanged = prevO === null || prevO !== nextOpen
 
         if (insetChanged) {
           lastInsetCommitRef.current = nextInset
           setKeyboardInsetBottom(nextInset)
         }
-        if (openChanged) {
+        if (lastKbOpenCommitRef.current !== nextOpen) {
           lastKbOpenCommitRef.current = nextOpen
           setIsKeyboardOpen(nextOpen)
         }
-
-        if (!allowScroll || (!insetChanged && !openChanged)) return
-
-        if (standalonePwa) {
-          if (focused && !pwaDidInitialScrollRef.current) {
-            pwaDidInitialScrollRef.current = true
-            scrollBottomOnceSoon()
-          }
-          return
-        }
-
-        scrollBottomOnceSoon()
+        if (allowScroll && insetChanged) scrollBottomOnceSoon()
       })
-    }
-
-    const clearFocusTimers = () => {
-      for (const id of focusTimersRef.current) window.clearTimeout(id)
-      focusTimersRef.current = []
-    }
-
-    const scheduleFocusRemeasure = () => {
-      clearFocusTimers()
-      pwaDidInitialScrollRef.current = false
-      for (const delay of standalonePwa ? [0, 80, 160, 280] : [0, 120, 320]) {
-        focusTimersRef.current.push(
-          window.setTimeout(() => updateKeyboardState(true), delay),
-        )
-      }
     }
 
     const onFocusIn = (event: FocusEvent) => {
       if (event.target === inputRef.current) {
-        focusStartedAtRef.current = Date.now()
-        pwaLatchedInsetRef.current = null
         setChatComposerKeyboardCapture(true)
-        scheduleFocusRemeasure()
-        return
+        updateKeyboardState(true)
       }
-      updateKeyboardState(true)
     }
 
     const onFocusOut = () => {
-      clearFocusTimers()
       window.setTimeout(() => {
-        focusStartedAtRef.current = null
-        pwaLatchedInsetRef.current = null
-        pwaDidInitialScrollRef.current = false
         setChatComposerKeyboardCapture(false)
         captureRestBaseline()
         updateKeyboardState(true)
       }, 80)
     }
 
-    const onVvResize = () => updateKeyboardState(!standalonePwa)
-    const onVvScroll = () => {
-      if (standalonePwa) return
-      updateKeyboardState(false)
-    }
-    const onWindowResize = () => {
-      if (!inputFocused()) captureRestBaseline()
-      updateKeyboardState(!standalonePwa)
-    }
+    const onVvResizeSafari = () => updateKeyboardState(true)
+    const onVvScrollSafari = () => updateKeyboardState(false)
+    const onWindowResizeSafari = () => updateKeyboardState(true)
 
     captureRestBaseline()
-    updateKeyboardState(false)
-    vv?.addEventListener('resize', onVvResize)
-    vv?.addEventListener('scroll', onVvScroll)
-    window.addEventListener('resize', onWindowResize)
+    vv?.addEventListener('resize', onVvResizeSafari)
+    vv?.addEventListener('scroll', onVvScrollSafari)
+    window.addEventListener('resize', onWindowResizeSafari)
     document.addEventListener('focusin', onFocusIn)
     document.addEventListener('focusout', onFocusOut)
 
     return () => {
       if (raf) cancelAnimationFrame(raf)
-      clearFocusTimers()
-      focusStartedAtRef.current = null
-      pwaLatchedInsetRef.current = null
-      pwaDidInitialScrollRef.current = false
       setChatComposerKeyboardCapture(false)
-      vv?.removeEventListener('resize', onVvResize)
-      vv?.removeEventListener('scroll', onVvScroll)
-      window.removeEventListener('resize', onWindowResize)
+      vv?.removeEventListener('resize', onVvResizeSafari)
+      vv?.removeEventListener('scroll', onVvScrollSafari)
+      window.removeEventListener('resize', onWindowResizeSafari)
       document.removeEventListener('focusin', onFocusIn)
       document.removeEventListener('focusout', onFocusOut)
     }
   }, [inputRef])
 
-  return { keyboardInsetBottom, isKeyboardOpen }
+  const onChatInputPointerDown = useCallback((e?: MouseEvent | TouchEvent) => {
+    if (!isIosStandalonePwaLikely()) return
+    preLiftRef.current?.()
+    const el = inputRef.current
+    if (!el || !e) return
+    el.focus({ preventScroll: true })
+    e.preventDefault()
+  }, [inputRef])
+
+  return { keyboardInsetBottom, isKeyboardOpen, onChatInputPointerDown, pwaShellKeyboardLift }
 }
