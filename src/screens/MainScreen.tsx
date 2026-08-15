@@ -4195,6 +4195,11 @@ function ChatRoomView({
     <div
       ref={chatContainerRef}
       className="relative flex flex-col h-full bg-white"
+      style={
+        keyboardInsetBottom > 0
+          ? { paddingBottom: keyboardInsetBottom }
+          : undefined
+      }
     >
       <div
         className="flex-shrink-0 border-b border-slate-100 bg-white"
@@ -4399,14 +4404,7 @@ function ChatRoomView({
       </div>
 
       {/* Composer */}
-      <div
-        className="flex-shrink-0 px-2 py-1.5 bg-white border-t border-slate-200 flex items-center gap-1.5"
-        style={
-          keyboardInsetBottom > 0
-            ? { paddingBottom: keyboardInsetBottom }
-            : undefined
-        }
-      >
+      <div className="flex-shrink-0 px-2 py-1.5 bg-white border-t border-slate-200 flex items-center gap-1.5">
         {sendWarning && (
           <div className="absolute bottom-[54px] left-3 right-3 rounded-2xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-600">
             {sendWarning}

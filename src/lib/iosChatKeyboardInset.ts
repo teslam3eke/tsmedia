@@ -76,8 +76,8 @@ export function computeChatKeyboardInset(params: ChatKeyboardInsetInput): number
 
   if (inset <= INSET_COMMIT_THRESHOLD_PX && standalonePwa) {
     const vvUnchanged = !visualViewportShrunkFromRest(vv, restVvHeight)
-    const shellSynced = shellFollowsVisualViewport(vv)
-    if (vvUnchanged && !shellSynced && focusedForMs >= 280) {
+    // vv 未縮時主殼 height 仍等於 vv → shellSynced 為 true，但不代表已避讓鍵盤。
+    if (vvUnchanged && focusedForMs >= 120) {
       inset = estimateIosKeyboardFallbackInset(restVvHeight ?? undefined)
     }
   }
@@ -219,7 +219,7 @@ export function useIosChatKeyboardInset(
     const scheduleFocusRemeasure = () => {
       clearFocusTimers()
       pwaDidInitialScrollRef.current = false
-      for (const delay of [0, 120, 320]) {
+      for (const delay of standalonePwa ? [0, 80, 160, 280] : [0, 120, 320]) {
         focusTimersRef.current.push(
           window.setTimeout(() => updateKeyboardState(true), delay),
         )

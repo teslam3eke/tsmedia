@@ -1371,6 +1371,11 @@ export default function InstantMatchTab({
     <div
       ref={instantChatContainerRef}
       className="relative flex h-full min-h-0 flex-1 flex-col bg-white"
+      style={
+        keyboardInsetBottom > 0
+          ? { paddingBottom: keyboardInsetBottom }
+          : undefined
+      }
     >
       <div
         className="flex-shrink-0 border-b border-slate-100 bg-white px-2 py-1"
@@ -1501,14 +1506,7 @@ export default function InstantMatchTab({
           </p>
         ) : null}
 
-        <div
-          className="flex shrink-0 items-center gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5"
-          style={
-            keyboardInsetBottom > 0
-              ? { paddingBottom: keyboardInsetBottom }
-              : undefined
-          }
-        >
+        <div className="flex shrink-0 items-center gap-1.5 border-t border-slate-200 bg-white px-2 py-1.5">
           <input
             ref={instantInputRef}
             value={input}
