@@ -27,6 +27,7 @@ import { needsIosSafariBrowserGate } from '@/lib/authBrowser'
 import { useAppPresenceHeartbeat } from '@/lib/appPresence'
 import { useSiteMaintenance } from '@/hooks/useSiteMaintenance'
 import { chatComposerKeyboardCaptureActive } from '@/lib/chatComposerKeyboardBridge'
+import { isIosStandalonePwaLikely } from '@/lib/iosChatKeyboardInset'
 
 import { supabase, ensureConnectionWithBudget, repairAuthAfterResume, CONNECTION_REPAIR_EVENT, type ConnectionRepairDetail } from '@/lib/supabase'
 import {
@@ -429,34 +430,46 @@ export default function App() {
       return
     }
 
-    const update = () => {
+    const update = (source: 'init' | 'resize' | 'scroll' = 'init') => {
       // 切回前景瞬間 vv.height 偶為 0／極小，會把主殼壓扁且觸控區錯位。
       const raw = vv.height
       const fallback = window.innerHeight || document.documentElement.clientHeight || 600
       const h = raw > 96 ? raw : fallback
+
+      if (chatComposerKeyboardCaptureActive()) {
+        // PWA 聊天鍵盤：vv scroll 常只改 offsetTop，更新 --app-height 會與 composer padding 對打造成狂抖。
+        if (source === 'scroll') return
+        if (source === 'resize' && isIosStandalonePwaLikely()) {
+          const shellRaw = getComputedStyle(document.documentElement)
+            .getPropertyValue('--app-height')
+            .trim()
+          const shellH = Number.parseFloat(shellRaw)
+          if (Number.isFinite(shellH) && Math.abs(h - shellH) < 48) return
+        }
+      }
+
       document.documentElement.style.setProperty('--app-height', `${h}px`)
       // Additionally, forcibly un-scroll the document. While typing, iOS
       // likes to scroll html/body to keep the caret on-screen — since our
       // container already matches the visible viewport, any such scroll
       // is pure garbage and visually "flies" the content up.
-      // 聊天輸入 focus 期間保留 iOS scroll pan，供 iosChatKeyboardInset 量測。
-      if (
-        !chatComposerKeyboardCaptureActive()
-        && (window.scrollY !== 0 || window.scrollX !== 0)
-      ) {
+      // 聊天輸入 focus 期間仍 snap document scroll；PWA inset 已改 latch，不再依 scroll pan 量測。
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
         window.scrollTo(0, 0)
       }
     }
-    update()
-    vv.addEventListener('resize', update)
-    vv.addEventListener('scroll', update)
+    update('init')
+    const onVvResize = () => update('resize')
+    const onVvScroll = () => update('scroll')
+    vv.addEventListener('resize', onVvResize)
+    vv.addEventListener('scroll', onVvScroll)
 
     // iOS PWA：切到其他 App 再回來時，visualViewport / 捲動偶爾卡住，主螢幕高度與觸控區會錯位。
     const onResume = () => {
       if (document.visibilityState !== 'visible') return
-      update()
+      update('init')
       requestAnimationFrame(() => {
-        update()
+        update('init')
         window.dispatchEvent(new Event('resize'))
       })
     }
@@ -464,8 +477,8 @@ export default function App() {
     window.addEventListener('pageshow', onResume)
 
     return () => {
-      vv.removeEventListener('resize', update)
-      vv.removeEventListener('scroll', update)
+      vv.removeEventListener('resize', onVvResize)
+      vv.removeEventListener('scroll', onVvScroll)
       document.removeEventListener('visibilitychange', onResume)
       window.removeEventListener('pageshow', onResume)
       document.documentElement.style.removeProperty('--app-height')
@@ -664,7 +677,6 @@ export default function App() {
     // Belt-and-braces: if iOS still manages to scroll the document (e.g.
     // during IME composition), snap it back instantly.
     const snapBack = () => {
-      if (chatComposerKeyboardCaptureActive()) return
       if (window.scrollY !== 0 || window.scrollX !== 0) {
         window.scrollTo(0, 0)
       }

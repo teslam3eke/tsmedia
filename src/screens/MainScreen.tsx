@@ -3962,7 +3962,7 @@ function ChatRoomView({
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return
     bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-  }, [messages, chatAssistRevealedSessions, keyboardInsetBottom])
+  }, [messages, chatAssistRevealedSessions])
 
   const send = async () => {
     const text = input.trim()
@@ -4195,11 +4195,6 @@ function ChatRoomView({
     <div
       ref={chatContainerRef}
       className="relative flex flex-col h-full bg-white"
-      style={
-        keyboardInsetBottom > 0
-          ? { paddingBottom: keyboardInsetBottom }
-          : undefined
-      }
     >
       <div
         className="flex-shrink-0 border-b border-slate-100 bg-white"
@@ -4404,7 +4399,14 @@ function ChatRoomView({
       </div>
 
       {/* Composer */}
-      <div className="flex-shrink-0 px-2 py-1.5 bg-white border-t border-slate-200 flex items-center gap-1.5">
+      <div
+        className="flex-shrink-0 px-2 py-1.5 bg-white border-t border-slate-200 flex items-center gap-1.5"
+        style={
+          keyboardInsetBottom > 0
+            ? { paddingBottom: keyboardInsetBottom }
+            : undefined
+        }
+      >
         {sendWarning && (
           <div className="absolute bottom-[54px] left-3 right-3 rounded-2xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-600">
             {sendWarning}
@@ -4417,11 +4419,6 @@ function ChatRoomView({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void send() } }}
             onFocus={() => {
-              /** 交由 focusin + visualViewport resize 統一推算；此處只做鍵盤動畫後一次補捲避免與 vv 對打 */
-              window.setTimeout(
-                () => bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' }),
-                280,
-              )
               onChatInputFocus?.()
             }}
             onBlur={() => {
