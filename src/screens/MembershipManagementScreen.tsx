@@ -43,6 +43,7 @@ import {
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
+import { trackMetaPurchaseFromTapPay } from '@/lib/metaPixel'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
@@ -342,11 +343,18 @@ export default function MembershipManagementScreen({
           cardholder: cardholderPayload(),
         }),
       })
-      const json = (await res.json()) as { ok?: boolean; error?: string }
+      const json = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        recTradeId?: string | null
+        amountNtd?: number | null
+        packKey?: string
+      }
       if (!res.ok || !json.ok) {
         setError(json.error ?? `付款失敗（${res.status}）`)
         return
       }
+      trackMetaPurchaseFromTapPay(json, 'credit_pack', packKey)
       onUpdated({ type: 'pack', subtitle: creditLabel })
     } catch (e) {
       setError(e instanceof Error ? e.message : '購買失敗')
@@ -398,11 +406,17 @@ export default function MembershipManagementScreen({
           cardholder: cardholderPayload(),
         }),
       })
-      const json = (await res.json()) as { ok?: boolean; error?: string }
+      const json = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        recTradeId?: string | null
+        amountNtd?: number | null
+      }
       if (!res.ok || !json.ok) {
         setError(json.error ?? `付款失敗（${res.status}）`)
         return
       }
+      trackMetaPurchaseFromTapPay(json, 'credit_pack', CROWN_EFFECT_PRODUCT.key)
       await reloadProfile()
       onUpdated({ type: 'crown_effect' })
     } catch (e) {
@@ -468,11 +482,17 @@ export default function MembershipManagementScreen({
           membershipDiscountCode: gender === 'male' ? appliedDiscountCode ?? undefined : undefined,
         }),
       })
-      const json = (await res.json()) as { ok?: boolean; error?: string }
+      const json = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        recTradeId?: string | null
+        amountNtd?: number | null
+      }
       if (!res.ok || !json.ok) {
         setError(json.error ?? `付款失敗（${res.status}）`)
         return
       }
+      trackMetaPurchaseFromTapPay(json, 'membership')
       await reloadProfile()
       onUpdated({ type: 'membership' })
     } catch (e) {

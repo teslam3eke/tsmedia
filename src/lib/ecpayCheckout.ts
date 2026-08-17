@@ -109,6 +109,7 @@ export type EcpaySyncPendingResult = {
   orderNo?: string
   productType?: string
   packKey?: string | null
+  amountNtd?: number
   subscriptionExpiresAt?: string | null
   reason?: string
   error?: string

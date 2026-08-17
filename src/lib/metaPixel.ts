@@ -1,5 +1,13 @@
 const META_PIXEL_ID = (import.meta.env.VITE_META_PIXEL_ID ?? '').trim()
 const REG_DEDUPE_PREFIX = 'tm_meta_reg_v1_'
+const PURCHASE_DEDUPE_PREFIX = 'tm_meta_purchase_v1_'
+
+export type MetaPurchaseInput = {
+  orderId: string
+  valueNtd: number
+  productType: 'membership' | 'credit_pack'
+  packKey?: string | null
+}
 
 type FbqStub = {
   (...args: unknown[]): void
@@ -75,4 +83,55 @@ export function trackMetaCompleteRegistration(userId?: string | null): void {
     }
   }
   trackMetaEvent('CompleteRegistration')
+}
+
+function purchaseContentName(input: MetaPurchaseInput): string {
+  if (input.productType === 'membership') return 'VIP 月卡'
+  if (input.packKey === 'crown_effect') return '皇冠特效'
+  return input.packKey ?? '道具'
+}
+
+/** 付款成功（同一 orderId 只送一次，避免返回／補同步／reload 重複計轉換）。 */
+export function trackMetaPurchase(input: MetaPurchaseInput): void {
+  if (!pixelEnabled()) return
+  const orderId = input.orderId.trim()
+  if (!orderId || input.valueNtd <= 0) return
+
+  const key = `${PURCHASE_DEDUPE_PREFIX}${orderId}`
+  try {
+    if (localStorage.getItem(key)) return
+    localStorage.setItem(key, '1')
+  } catch {
+    /* 私密模式 */
+  }
+
+  initMetaPixel()
+  fbq(
+    'track',
+    'Purchase',
+    {
+      value: input.valueNtd,
+      currency: 'TWD',
+      content_type: 'product',
+      content_ids: [input.packKey ?? input.productType],
+      content_name: purchaseContentName(input),
+    },
+    { eventID: orderId },
+  )
+}
+
+/** TapPay 成功回應 → Purchase（需 API 回傳 recTradeId、amountNtd）。 */
+export function trackMetaPurchaseFromTapPay(
+  json: { recTradeId?: string | null; amountNtd?: number | null },
+  productType: 'membership' | 'credit_pack',
+  packKey?: string | null,
+): void {
+  const orderId = json.recTradeId?.trim()
+  if (!orderId || json.amountNtd == null || json.amountNtd <= 0) return
+  trackMetaPurchase({
+    orderId,
+    valueNtd: json.amountNtd,
+    productType,
+    packKey,
+  })
 }

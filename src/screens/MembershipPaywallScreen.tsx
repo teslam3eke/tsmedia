@@ -33,6 +33,7 @@ import { usePaymentProvider } from '@/hooks/usePaymentProvider'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
+import { trackMetaPurchaseFromTapPay } from '@/lib/metaPixel'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 import FeedbackScreen from '@/screens/FeedbackScreen'
 import { deleteAccount } from '@/lib/auth'
@@ -270,11 +271,17 @@ export default function MembershipPaywallScreen({
           cardholder: cardholderPayload(),
         }),
       })
-      const json = (await res.json()) as { ok?: boolean; error?: string }
+      const json = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        recTradeId?: string | null
+        amountNtd?: number | null
+      }
       if (!res.ok || !json.ok) {
         setError(json.error ?? `付款失敗（${res.status}）`)
         return
       }
+      trackMetaPurchaseFromTapPay(json, 'membership')
       await reloadProfile()
     } catch (e) {
       setError(e instanceof Error ? e.message : '付款失敗')

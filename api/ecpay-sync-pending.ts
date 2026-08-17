@@ -99,6 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       orderNo,
       productType: order.product_type,
       packKey: order.pack_key,
+      amountNtd: order.amount_ntd,
       subscriptionExpiresAt,
     })
   }

@@ -204,5 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ok: true,
     subscriptionExpiresAt: grant?.subscription_expires_at,
     priceNtd: grant?.price_ntd,
+    amountNtd: amount,
+    recTradeId: tapJson.rec_trade_id ?? null,
   })
 }

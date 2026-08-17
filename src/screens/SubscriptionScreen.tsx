@@ -11,6 +11,7 @@ import {
   type TPDirectAPI,
 } from '@/lib/tappayClient'
 import { MEMBERSHIP_LIST_PRICE_NTD } from '@/lib/membershipProducts'
+import { trackMetaPurchaseFromTapPay } from '@/lib/metaPixel'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 
 export default function SubscriptionScreen({
@@ -129,12 +130,19 @@ export default function SubscriptionScreen({
         }),
       })
 
-      const json = (await res.json()) as { ok?: boolean; error?: string }
+      const json = (await res.json()) as {
+        ok?: boolean
+        error?: string
+        recTradeId?: string | null
+        amountNtd?: number | null
+      }
 
       if (!res.ok || !json.ok) {
         setError(json.error ?? `付款失敗（${res.status}）`)
         return
       }
+
+      trackMetaPurchaseFromTapPay(json, 'membership')
 
       setDone(true)
       window.setTimeout(() => {

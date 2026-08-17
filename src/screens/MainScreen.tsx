@@ -99,6 +99,7 @@ import {
   syncPendingEcpayOrders,
   tryClaimPaymentReturnRewardEffect,
 } from '@/lib/ecpayCheckout'
+import { trackMetaPurchase } from '@/lib/metaPixel'
 import type { ProfileRow, QuestionnaireEntry, Region, IncomeTier, AiConfidence, AppNotificationRow, AppNotificationKind, ReportReason, MessageReportReason, CreditBalance } from '@/lib/types'
 import type { DailyDiscoverRpcRow, ProfileTabStats, MatchThreadSidebarRow } from '@/lib/db'
 import { REGION_LABELS, INCOME_TIER_META, PROFILE_PHOTO_MIN, PROFILE_PHOTO_MAX, PUZZLE_MAX_PHOTO_SLOTS } from '@/lib/types'
@@ -7751,6 +7752,15 @@ export default function MainScreen({
           return
         }
 
+        if (orderNo && paid.amountNtd != null && paid.amountNtd > 0) {
+          trackMetaPurchase({
+            orderId: orderNo,
+            valueNtd: paid.amountNtd,
+            productType: paid.productType === 'credit_pack' ? 'credit_pack' : 'membership',
+            packKey: paid.packKey,
+          })
+        }
+
         if (paid.productType === 'credit_pack') {
           const pack = CREDIT_PACK_PRODUCTS.find((p) => p.key === paid.packKey)
           setRewardFlash({
@@ -7801,6 +7811,19 @@ export default function MainScreen({
     void (async () => {
       const result = await syncPendingEcpayOrders()
       if (cancelled || !result.ok || !result.synced) return
+      if (
+        result.orderNo
+        && result.amountNtd != null
+        && result.amountNtd > 0
+        && result.productType
+      ) {
+        trackMetaPurchase({
+          orderId: result.orderNo,
+          valueNtd: result.amountNtd,
+          productType: result.productType === 'credit_pack' ? 'credit_pack' : 'membership',
+          packKey: result.packKey,
+        })
+      }
       void queryClient.invalidateQueries()
       if (result.productType === 'membership') {
         const expiryLabel = formatMembershipExpiryZhTw(result.subscriptionExpiresAt ?? null)

@@ -127,5 +127,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[tappay-credit-pack] log insert', insErr)
   }
 
-  return res.status(200).json({ ok: true, packKey, grant: grantData })
+  return res.status(200).json({
+    ok: true,
+    packKey,
+    grant: grantData,
+    amountNtd: amount,
+    recTradeId: pay.recTradeId ?? null,
+  })
 }
