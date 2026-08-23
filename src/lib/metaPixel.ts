@@ -1,6 +1,7 @@
 const META_PIXEL_ID = (import.meta.env.VITE_META_PIXEL_ID ?? '').trim()
 const REG_DEDUPE_PREFIX = 'tm_meta_reg_v1_'
 const PURCHASE_DEDUPE_PREFIX = 'tm_meta_purchase_v1_'
+const SUBMIT_APP_DEDUPE_PREFIX = 'tm_meta_submit_app_v1_'
 
 export type MetaPurchaseInput = {
   orderId: string
@@ -83,6 +84,35 @@ export function trackMetaCompleteRegistration(userId?: string | null): void {
     }
   }
   trackMetaEvent('CompleteRegistration')
+}
+
+/**
+ * 送出會員審核（Meta 標準事件 SubmitApplication）。
+ * 事件管理工具顯示為「Submit Application／提交申請」，語意對應「送出審核」。
+ */
+export function trackMetaSubmitApplication(applicationId: string): void {
+  if (!pixelEnabled()) return
+  const id = applicationId.trim()
+  if (!id) return
+
+  const key = `${SUBMIT_APP_DEDUPE_PREFIX}${id}`
+  try {
+    if (localStorage.getItem(key)) return
+    localStorage.setItem(key, '1')
+  } catch {
+    /* 私密模式 */
+  }
+
+  initMetaPixel()
+  fbq(
+    'track',
+    'SubmitApplication',
+    {
+      content_name: '會員審核',
+      content_category: 'verification',
+    },
+    { eventID: id },
+  )
 }
 
 function purchaseContentName(input: MetaPurchaseInput): string {

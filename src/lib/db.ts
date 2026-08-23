@@ -833,7 +833,7 @@ export async function submitVerificationApplication(
   userId: string,
   declaredCompany: string,
   docs: VerificationApplicationDocInput[],
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; applicationId?: string; error?: string }> {
   const company = declaredCompany.trim()
   if (!company) return { ok: false, error: '請先在個人資料填寫任職公司。' }
 
@@ -895,7 +895,7 @@ export async function submitVerificationApplication(
     return { ok: false, error: profileError.message }
   }
 
-  return { ok: true }
+  return { ok: true, applicationId: application.id as string }
 }
 
 async function attachProfilesToApplications(

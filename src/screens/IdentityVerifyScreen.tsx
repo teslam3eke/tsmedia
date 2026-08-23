@@ -17,6 +17,7 @@ import {
   markVerificationReviewNotificationsRead,
   type VerificationApplicationDocInput,
 } from '@/lib/db'
+import { trackMetaSubmitApplication } from '@/lib/metaPixel'
 import {
   PROFILE_PHOTO_MIN,
   PROFILE_PHOTO_MAX,
@@ -419,6 +420,10 @@ export default function IdentityVerifyScreen({
       setSubmitError(result.error ?? '送審失敗，請稍後再試。')
       setSubmitting(false)
       return
+    }
+
+    if (result.applicationId) {
+      trackMetaSubmitApplication(result.applicationId)
     }
 
     // 必須先把上一輪結果設為已讀，再啟用 waiting 的通知 backlog；
