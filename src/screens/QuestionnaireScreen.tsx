@@ -28,7 +28,7 @@ const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot:
   '未來規劃與自尊': { bg: 'bg-violet-50', text: 'text-violet-700', dot: 'bg-violet-400' },
 }
 
-const MIN_CHARS = 20
+const MIN_CHARS = 10
 
 export default function QuestionnaireScreen({
   onComplete,
