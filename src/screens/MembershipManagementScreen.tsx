@@ -271,7 +271,13 @@ export default function MembershipManagementScreen({
           return
         }
         setDiscountCode(normalizedCode)
-        setDiscountMessage('兌換成功，會員效期已免費延長 30 天。')
+        setDiscountMessage(
+          result.freeMonths && result.freeMonths > 0
+            ? `兌換成功，會員效期已免費延長 ${result.freeMonths} 個月。`
+            : result.freeDays && result.freeDays > 0
+              ? `兌換成功，會員效期已免費延長 ${result.freeDays} 天。`
+              : '兌換成功，會員效期已延長。',
+        )
         markSkipInstantMatchLeaveOnNextFullUnload()
         window.location.reload()
         return

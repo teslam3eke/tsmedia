@@ -38,7 +38,7 @@ export function MembershipDiscountGuide({
       <div className="flex items-center gap-2">
         <TicketPercent className="h-4 w-4 text-[#9b753d]" aria-hidden />
         <p className="text-[12px] font-black tracking-[0.08em] text-[#5f4a2d]">
-          {gender === 'male' ? '領取 100 元抵用券' : '免費試用一個月'}
+          {gender === 'male' ? '領取 100 元抵用券' : '免費試用六個月'}
         </p>
       </div>
       <ol className="relative mt-3 space-y-2.5">
@@ -67,7 +67,7 @@ export function MembershipDiscountGuide({
       <div className="mt-3 rounded-xl border border-[#e1c99f] bg-gradient-to-r from-[#fffaf1] to-[#f5ead8] px-3 py-2.5 text-center">
         <p className="text-[11px] font-black tracking-[0.04em] text-[#805e2f]">
           完成後即可獲得
-          {gender === 'male' ? ' NT$100 會員抵用券' : '免費試用一個月'}
+          {gender === 'male' ? ' NT$100 會員抵用券' : '免費試用六個月'}
         </p>
       </div>
     </div>

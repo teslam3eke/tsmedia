@@ -1598,6 +1598,7 @@ export type MembershipDiscountCodeResult = {
   basePriceNtd?: number
   finalPriceNtd?: number
   freeDays?: number
+  freeMonths?: number
   availableAt?: string
   subscriptionExpiresAt?: string
   error?: string
@@ -1617,6 +1618,7 @@ function mapMembershipDiscountCodeResult(
     base_price_ntd?: number
     final_price_ntd?: number
     free_days?: number
+    free_months?: number
     available_at?: string
     subscription_expires_at?: string
   } | null
@@ -1629,6 +1631,7 @@ function mapMembershipDiscountCodeResult(
     basePriceNtd: row?.base_price_ntd,
     finalPriceNtd: row?.final_price_ntd,
     freeDays: row?.free_days,
+    freeMonths: row?.free_months,
     availableAt: row?.available_at,
     subscriptionExpiresAt: row?.subscription_expires_at,
   }
