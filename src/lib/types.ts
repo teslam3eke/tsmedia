@@ -33,9 +33,9 @@ export type CreditType = 'heart' | 'super_like' | 'blur_unlock' | 'point'
 export type CreditTransactionKind = 'purchase' | 'spend' | 'refund' | 'admin_adjust'
 
 export const INCOME_TIER_META: Record<IncomeTier, { label: string; range: string; short: string }> = {
-  silver:  { label: '銀皇冠認證',   range: '200萬+', short: '銀皇冠' },
-  gold:    { label: '金皇冠認證',   range: '300萬+', short: '金皇冠' },
-  diamond: { label: '鑽石皇冠認證', range: '400萬+', short: '鑽石皇冠' },
+  silver:  { label: '銀皇冠認證',   range: '100萬+', short: '銀皇冠' },
+  gold:    { label: '金皇冠認證',   range: '200萬+', short: '金皇冠' },
+  diamond: { label: '鑽石皇冠認證', range: '300萬+', short: '鑽石皇冠' },
 }
 
 export type Region = 'north' | 'central' | 'south' | 'east'

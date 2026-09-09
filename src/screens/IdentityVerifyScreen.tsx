@@ -22,6 +22,7 @@ import {
   PROFILE_PHOTO_MIN,
   PROFILE_PHOTO_MAX,
   VERIFICATION_MANUAL_SLA_HOURS,
+  INCOME_TIER_META,
   type IncomeTier,
   type VerificationStatus,
 } from '@/lib/types'
@@ -71,11 +72,17 @@ function fileToDataUrl(file: File): Promise<string> {
 
 const STEPS = ['生活照上傳', '會員資料確認']
 
-const TIER_CARDS: { tier: IncomeTier; range: string; desc: string }[] = [
-  { tier: 'silver', range: '200萬+', desc: '銀皇冠標章' },
-  { tier: 'gold', range: '300萬+', desc: '金皇冠標章' },
-  { tier: 'diamond', range: '400萬+', desc: '鑽石皇冠標章' },
-]
+const TIER_DESC: Record<IncomeTier, string> = {
+  silver: '銀皇冠標章',
+  gold: '金皇冠標章',
+  diamond: '鑽石皇冠標章',
+}
+
+const TIER_CARDS = (['silver', 'gold', 'diamond'] as const).map((tier) => ({
+  tier,
+  range: INCOME_TIER_META[tier].range,
+  desc: TIER_DESC[tier],
+}))
 
 type VerifyDraftSnapshot = {
   step: number

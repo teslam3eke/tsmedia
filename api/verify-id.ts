@@ -84,9 +84,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 使用者申請的收入等級：${claimedIncomeTier ?? '未提供'}
 使用者姓名：${normalizedClaimedName || '未提供'}
 文件類型提示：${docTypeHint}
-- silver：年收 200–299 萬
-- gold：年收 300–399 萬
-- diamond：年收 400 萬以上
+- silver：年收 100–199 萬
+- gold：年收 200–299 萬
+- diamond：年收 300 萬以上
 
 請以 JSON 格式回覆，格式如下（只回 JSON，不要多餘文字）：
 {
@@ -109,7 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 若使用者姓名有提供，detectedName 只填繁體中文姓名；若同列英文如「林家華 (LIN CHIA-HUA)」仍只填中文「林家華」；中文與使用者姓名一致則 nameMatches 為 true
 - 扣繳憑單必須讀「所得人姓名」的中文作為 detectedName
 - detectedEmployer／employerEvidenceQuote 可填但不影響收入審核通過與否
-- 若年收入 200–299 萬，suggestedIncomeTier 為 silver；300–399 萬為 gold；400 萬以上為 diamond；低於 200 萬或無法判斷為 null
+- 若年收入 100–199 萬，suggestedIncomeTier 為 silver；200–299 萬為 gold；300 萬以上為 diamond；低於 100 萬或無法判斷為 null
 - 若文件有遮蔽敏感資訊但仍能判斷收入範圍，可接受
 - 當姓名一致、suggestedIncomeTier 符合或高於申請等級、文件類型正確時，isEmployeeId 必須為 true`
     : `你是台灣科技公司職業身份文件的驗證系統。
@@ -153,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 - 文件上的姓名必須與使用者姓名「${normalizedClaimedName}」相同或高度一致（員工證若中英文並列，只要中文姓名與使用者姓名一致即可通過 nameMatches）
 - detectedName 必須填入你從文件上看到的使用者姓名；員工識別證請優先抄錄中文姓名，並與英文並列時使用「中文／英文」格式；扣繳憑單與薪資單只填中文姓名；若看不到中文姓名，detectedName 為 null 且 nameMatches 為 false
 - detectedEmployer 必須填入你從文件上看到的公司、扣繳單位、給付單位或雇主名稱
-- 若年收入 200–299 萬，suggestedIncomeTier 為 silver；300–399 萬為 gold；400 萬以上為 diamond；低於 200 萬或無法判斷為 null
+- 若年收入 100–199 萬，suggestedIncomeTier 為 silver；200–299 萬為 gold；300 萬以上為 diamond；低於 100 萬或無法判斷為 null
 - 若只能看到公司 logo 但看不到姓名與正式員工身份，不可通過
 - 對員工證審核要嚴格；對薪資單/扣繳憑單可用雇主名稱與姓名判斷正式任職關係`
 

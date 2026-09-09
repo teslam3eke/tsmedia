@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tsMedia 三種皇冠廣告</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body {
+      margin: 0;
+      overflow: hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .photo-blur {
+      filter: blur(10px);
+      transform: scale(1.06);
+      transform-origin: center;
+    }
+    .crown-stage {
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .crown-stage img {
+      display: block;
+      object-fit: contain;
+    }
+    .crown-silver { filter: drop-shadow(0 12px 28px rgba(100, 116, 139, 0.5)); }
+    .crown-gold { filter: drop-shadow(0 12px 28px rgba(217, 119, 6, 0.48)); }
+    .crown-diamond { filter: drop-shadow(0 14px 32px rgba(99, 102, 241, 0.52)); }
+    .format-vertical { width: 1080px; height: 1920px; }
+    .photo-9-16 { aspect-ratio: 9 / 16; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    const params = new URLSearchParams(location.search)
+    const format = params.get('format') || 'square'
+
+    const TIERS = [
+      {
+        key: 'silver',
+        label: '銀皇冠',
+        income: '年收 100萬+',
+        src: '/assets/images/silver-crown-badge-v3.png',
+        crownClass: 'crown-silver',
+        chipRing: 'ring-slate-200/50',
+        chipBg: 'linear-gradient(to bottom right, rgba(30,41,59,0.72), rgba(51,65,85,0.68), rgba(30,41,59,0.72))',
+        chipAccent: 'text-slate-200/90',
+        chipShadow: '0 6px 18px rgba(51,65,85,0.22)',
+      },
+      {
+        key: 'gold',
+        label: '金皇冠',
+        income: '年收 200萬+',
+        src: '/assets/images/gold-crown-badge-v3.png',
+        crownClass: 'crown-gold',
+        chipRing: 'ring-amber-300/45',
+        chipBg: 'linear-gradient(to bottom right, rgba(120,53,15,0.72), rgba(146,64,14,0.68), rgba(120,53,15,0.72))',
+        chipAccent: 'text-amber-200/90',
+        chipShadow: '0 6px 18px rgba(146,64,14,0.22)',
+      },
+      {
+        key: 'diamond',
+        label: '鑽石皇冠',
+        income: '年收 300萬+',
+        src: '/assets/images/diamond-crown-badge-previous.png',
+        crownClass: 'crown-diamond',
+        chipRing: 'ring-violet-300/45',
+        chipBg: 'linear-gradient(to bottom right, rgba(76,29,149,0.72), rgba(67,56,202,0.68), rgba(76,29,149,0.72))',
+        chipAccent: 'text-violet-200/90',
+        chipShadow: '0 6px 18px rgba(99,102,241,0.22)',
+      },
+    ]
+
+    function crownBlock(tier) {
+      return `
+        <div class="flex w-full items-center gap-6">
+          <div class="crown-stage shrink-0 rounded-[1.75rem] w-[280px] h-[230px] overflow-hidden -ml-3">
+            <img src="${tier.src}" alt="${tier.label}" class="${tier.crownClass} h-[210px] w-auto max-w-none" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-[34px] font-bold tracking-wide text-white/95">${tier.label}</p>
+            <p class="mt-2 text-[28px] font-semibold text-amber-200/85">${tier.income}</p>
+          </div>
+        </div>
+      `
+    }
+
+    function crownRow(tier, compact = false) {
+      const stage = compact ? 'w-[280px] h-[220px]' : 'w-[300px] h-[250px]'
+      const imgH = compact ? 'h-[200px]' : 'h-[230px]'
+      const labelSize = compact ? 'text-[34px]' : 'text-[38px]'
+      const incomeSize = compact ? 'text-[26px]' : 'text-[28px]'
+      const padY = compact ? 'py-4' : 'py-6'
+      return `
+        <div class="flex w-full items-center gap-7 rounded-3xl bg-black/25 pl-4 pr-8 ${padY} ring-1 ring-white/10">
+          <div class="crown-stage shrink-0 rounded-[1.75rem] ${stage} overflow-hidden -ml-2">
+            <img src="${tier.src}" alt="${tier.label}" class="${tier.crownClass} ${imgH} w-auto" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="${labelSize} font-bold text-white/95">${tier.label}</p>
+            <p class="mt-2 ${incomeSize} font-semibold text-amber-200/85">${tier.income}</p>
+          </div>
+        </div>
+      `
+    }
+
+    function profilePreview(photoWidth = 460) {
+      const tier = TIERS[2]
+      const crownH = Math.round(photoWidth * 170 / 380)
+      const crownW = Math.round(crownH * 2)
+      return `
+        <div class="shrink-0 overflow-hidden rounded-[2rem] bg-white shadow-2xl ring-1 ring-white/20" style="width:${photoWidth}px">
+          <div class="relative">
+            <div class="photo-9-16 relative w-full overflow-hidden rounded-t-[2rem]">
+              <img src="/assets/images/discover-demo-peer-male.jpg" alt="" class="photo-blur absolute inset-0 h-full w-full object-cover object-center" />
+              <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
+              <div class="absolute right-4 top-4 z-40 max-w-[12rem] rounded-xl px-3.5 py-2.5 text-left backdrop-blur-sm ring-1 ${tier.chipRing}" style="background:${tier.chipBg}; box-shadow:${tier.chipShadow}">
+                <p class="text-[13px] font-bold tracking-[0.04em] ${tier.chipAccent}">鑽石皇冠認證</p>
+                <p class="mt-0.5 text-[15px] font-black leading-tight text-white/90">年收 300萬+</p>
+              </div>
+              <div class="absolute bottom-4 left-4 z-[25] flex items-center gap-1.5 rounded-full bg-black/30 px-3.5 py-2 backdrop-blur-md">
+                <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                <span class="text-[13px] font-semibold text-white/90">隱私保護中</span>
+              </div>
+            </div>
+            <div class="absolute left-1/2 top-0 z-40 -translate-x-1/2 -translate-y-3">
+              <img src="${tier.src}" alt="鑽石皇冠" class="crown-diamond object-contain drop-shadow-[0_14px_30px_rgba(99,102,241,0.38)]" style="height:${crownH}px;width:${crownW}px" />
+            </div>
+          </div>
+          <div class="px-6 py-5">
+            <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span class="text-[2.25rem] font-semibold tracking-[-0.03em] text-slate-900">阿凱</span>
+              <span class="text-[1.35rem] font-medium text-slate-500">32</span>
+              <span class="text-[1.05rem] font-bold tracking-wide text-violet-600">ENFP</span>
+            </div>
+          </div>
+        </div>
+      `
+    }
+
+    function profileBottomSection(photoWidth = 460, labelClass = 'text-slate-700') {
+      return `
+        <div class="mt-auto w-full pt-6">
+          <p class="mb-4 text-left text-[24px] font-semibold ${labelClass}">個人照片頂部顯示示意</p>
+          <div class="flex items-end justify-start">
+            ${profilePreview(photoWidth)}
+          </div>
+        </div>
+      `
+    }
+
+    const crownPanel = `
+      <div class="space-y-3 rounded-[2.5rem] bg-gradient-to-b from-[#15121a] to-[#0a0a0f] px-5 py-8 shadow-[0_30px_80px_rgba(15,23,42,0.18)] ring-1 ring-black/10">
+        ${TIERS.map(t => crownBlock(t)).join('')}
+      </div>
+    `
+
+    const square = `
+      <div class="format-vertical flex flex-col bg-gradient-to-b from-[#faf6ef] via-[#f7efe3] to-[#efe2cf] px-10 py-14 text-slate-900">
+        <p class="text-center text-[22px] font-semibold tracking-[0.18em] text-amber-800/70">TSMEDIA</p>
+        <h1 class="mt-3 text-center text-[56px] font-black leading-tight tracking-tight text-slate-900">收入皇冠認證</h1>
+        <p class="mt-3 text-center text-[28px] font-medium text-slate-600">三種等級，展現真實財力</p>
+        <div class="mt-10">${crownPanel}</div>
+        ${profileBottomSection(460, 'text-slate-700')}
+        <p class="mt-4 text-left text-[22px] font-medium leading-relaxed text-slate-600">通過收入認證，在個人照片頂部顯示皇冠</p>
+      </div>
+    `
+
+    const story = `
+      <div class="format-vertical flex flex-col bg-gradient-to-b from-[#1a1410] via-[#120e0c] to-[#090807] px-10 py-12 text-white">
+        <p class="text-center text-[24px] font-semibold tracking-[0.2em] text-amber-300/75">TSMEDIA</p>
+        <h1 class="mt-3 text-center text-[60px] font-black leading-none tracking-tight text-amber-100">三種皇冠</h1>
+        <p class="mt-3 text-center text-[30px] font-medium text-amber-200/80">一次看懂收入認證</p>
+        <div class="mt-8 space-y-3">
+          ${TIERS.map(t => crownRow(t, true)).join('')}
+        </div>
+        <div class="mt-6 rounded-full border border-amber-300/35 bg-black/35 px-10 py-3.5 text-center text-[22px] font-semibold text-amber-50/95 backdrop-blur-sm">
+          完成收入認證 · 開啟皇冠特效
+        </div>
+        ${profileBottomSection(460, 'text-white/70')}
+      </div>
+    `
+
+    const feed = `
+      <div class="format-vertical flex flex-col bg-gradient-to-b from-[#faf6ef] via-[#f5ebe0] to-[#ebe0cf] px-10 py-14 text-slate-900">
+        <p class="text-center text-[22px] font-semibold tracking-[0.18em] text-amber-800/70">TSMEDIA</p>
+        <h1 class="mt-3 text-center text-[58px] font-black leading-tight text-slate-900">收入皇冠認證</h1>
+        <p class="mt-3 text-center text-[28px] font-medium text-slate-600">三種等級，展現真實財力</p>
+        <ul class="mt-8 space-y-4 text-[26px] font-semibold text-slate-800">
+          ${TIERS.map(t => `<li class="flex items-center gap-3"><span class="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-amber-600"></span>${t.label} — ${t.income}</li>`).join('')}
+        </ul>
+        <div class="mt-8">${crownPanel}</div>
+        ${profileBottomSection(460, 'text-slate-700')}
+        <p class="mt-4 text-left text-[22px] leading-relaxed text-slate-600">通過認證後，個人照片頂部顯示皇冠</p>
+      </div>
+    `
+
+    const html = format === 'story' ? story : format === 'feed' ? feed : square
+    document.getElementById('root').innerHTML = html
+    document.body.className = format === 'story' ? 'bg-[#120e0c]' : 'bg-[#faf6ef]'
+  </script>
+</body>
+</html>
