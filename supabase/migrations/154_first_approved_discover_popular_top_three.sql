@@ -33,7 +33,53 @@ alter table public.first_approved_discover_boosts enable row level security;
 -- 不開放一般客戶端直接讀寫；僅 trigger／security definer 探索函式使用。
 revoke all on table public.first_approved_discover_boosts from anon, authenticated;
 
--- 先將 migration 上線前已通過者登記為已使用，避免日後 rejected→approved 時補發。
+-- 觸發器必須早於基準回填，避免套用期間 approved 轉換漏登記。
+create or replace function public.register_first_approved_discover_boost()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.verification_status = 'approved'
+     and old.verification_status is distinct from new.verification_status then
+    -- 與探索 RPC 使用同一把會員級交易鎖。若核准與建牌同時發生，
+    -- 兩者會依取得鎖的先後完整執行，不會在 DELETE 後又寫回普通 deck。
+    perform pg_advisory_xact_lock(
+      hashtextextended('first-approved-discover:' || new.id::text, 0)
+    );
+
+    insert into public.first_approved_discover_boosts (user_id, eligible_at)
+    values (new.id, now())
+    on conflict (user_id) do nothing;
+
+    if found then
+      -- 只在「真的新增首次資格」時清除；舊會員 re-approved 的 ON CONFLICT
+      -- 不得誤刪其當日正常 deck。
+      delete from public.daily_discover_deck
+      where viewer_user_id = new.id
+        and app_day_key = public.app_day_key_now();
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_register_first_approved_discover_boost
+  on public.profiles;
+
+create trigger profiles_register_first_approved_discover_boost
+  after update of verification_status on public.profiles
+  for each row
+  when (
+    new.verification_status = 'approved'
+    and old.verification_status is distinct from new.verification_status
+  )
+  execute function public.register_first_approved_discover_boost();
+
+-- CREATE TRIGGER 取得的 profiles 表鎖會持有到 migration 交易提交；
+-- 因此先建立 trigger 再回填，可正確切開上線前／後的 approved 轉換。
 insert into public.first_approved_discover_boosts (
   user_id,
   eligible_at,
@@ -66,44 +112,6 @@ from (
     and vd.verification_kind in ('employment', 'identity')
 ) prior
 on conflict (user_id) do nothing;
-
-create or replace function public.register_first_approved_discover_boost()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if new.verification_status = 'approved'
-     and old.verification_status is distinct from new.verification_status then
-    insert into public.first_approved_discover_boosts (user_id, eligible_at)
-    values (new.id, now())
-    on conflict (user_id) do nothing;
-
-    if found then
-      -- 只在「真的新增首次資格」時清除；舊會員 re-approved 的 ON CONFLICT
-      -- 不得誤刪其當日正常 deck。
-      delete from public.daily_discover_deck
-      where viewer_user_id = new.id
-        and app_day_key = public.app_day_key_now();
-    end if;
-  end if;
-
-  return new;
-end;
-$$;
-
-drop trigger if exists profiles_register_first_approved_discover_boost
-  on public.profiles;
-
-create trigger profiles_register_first_approved_discover_boost
-  after update of verification_status on public.profiles
-  for each row
-  when (
-    new.verification_status = 'approved'
-    and old.verification_status is distinct from new.verification_status
-  )
-  execute function public.register_first_approved_discover_boost();
 
 -- ── 牌組策略欄位：讓同日快取重讀仍可保護前三名 ────────────────────────────
 
@@ -416,6 +424,13 @@ begin
   if v_viewer is null then
     raise exception 'Not authenticated';
   end if;
+
+  -- 與 approved trigger 使用同一把交易鎖。鎖必須早於 profile／deck 讀取：
+  -- 若探索先取得鎖，核准會等普通 deck 完成後再新增資格並刪除該 deck；
+  -- 若核准先取得鎖，探索醒來後會直接看到 approved 與未消耗資格。
+  perform pg_advisory_xact_lock(
+    hashtextextended('first-approved-discover:' || v_viewer::text, 0)
+  );
 
   select
     p.gender::text,
