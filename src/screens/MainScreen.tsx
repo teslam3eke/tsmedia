@@ -113,6 +113,7 @@ import { uuidToGradients } from '@/lib/profileGradients'
 import { profilePhotoPrivacyBlurFilter } from '@/lib/profilePhotoPrivacyBlur'
 import {
   preventProfilePhotoContextMenu,
+  ProfilePhotoPrivacyImage,
   profilePhotoPrivacyGuardClass,
 } from '@/components/ProfilePhotoPrivacyImage'
 import { AI_AUTO_REVIEW_UI_SECONDS, INCOME_WAIT_OVERLAY_MAX_SECONDS } from '@/lib/aiReviewConstants'
@@ -1507,6 +1508,407 @@ function DiscoverDeckRolloverOverlay({ open, tick }: { open: boolean; tick: numb
   )
 }
 
+type MembershipLikePromptVariant =
+  | 'warm'
+  | 'immersive'
+  | 'midnight'
+  | 'letter'
+  | 'spotlight'
+  | 'editorial'
+
+function MembershipLikePhoto({
+  profile,
+  className,
+}: {
+  profile: Profile
+  className: string
+}) {
+  const photoUrl = collectProfilePhotoUrls(profile)[0]
+
+  return (
+    <div
+      className={cn('relative overflow-hidden bg-slate-100', profilePhotoPrivacyGuardClass, className)}
+      onContextMenu={preventProfilePhotoContextMenu}
+    >
+      {photoUrl ? (
+        <ProfilePhotoPrivacyImage
+          src={photoUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full scale-[1.08]"
+        />
+      ) : (
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `linear-gradient(145deg, ${profile.gradientFrom}, ${profile.gradientTo})`,
+            filter: profilePhotoPrivacyBlurFilter(),
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function MembershipLikePrompt({
+  profile,
+  variant,
+  onSubscribe,
+  onPass,
+}: {
+  profile: Profile
+  variant: MembershipLikePromptVariant
+  onSubscribe: () => void
+  onPass: () => void
+}) {
+  if (variant === 'immersive') {
+    return (
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 18 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.97, opacity: 0, y: 10 }}
+        transition={{ type: 'spring', damping: 27, stiffness: 320 }}
+        className="w-full max-w-[23rem] overflow-hidden rounded-[2.25rem] bg-white shadow-[0_28px_80px_rgba(15,23,42,0.35)] ring-1 ring-white/70"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discover-membership-like-title"
+      >
+        <div className="relative h-64 overflow-hidden bg-slate-200">
+          <MembershipLikePhoto profile={profile} className="absolute inset-0" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/10 to-white/5" />
+          <div className="absolute bottom-5 left-5 right-5 text-left">
+            <p className="text-[12px] font-bold tracking-[0.16em] text-white/70">從看見，到互相看見</p>
+          </div>
+        </div>
+
+        <div className="px-6 pb-6 pt-6 text-center">
+          <h2
+            id="discover-membership-like-title"
+            className="text-[1.18rem] font-black leading-[1.55] tracking-[-0.025em] text-slate-900"
+          >
+            有些未來，只差一點點。
+          </h2>
+          <div className="mt-4 px-2 text-center">
+            <p className="text-[12px] font-medium leading-[1.7] text-slate-600">
+              審核通過後的第一顆愛心，值得被好好看見。
+              <br />
+              你的卡片會強制出現在她下一次更新的探索裡。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onSubscribe}
+            className="mx-auto mt-5 flex h-9 w-[65%] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 px-4 text-[13px] font-bold text-white shadow-lg shadow-rose-500/25 active:opacity-90"
+          >
+            <Heart className="h-3.5 w-3.5 fill-current" aria-hidden />
+            讓她看見我
+          </button>
+          <button
+            type="button"
+            onClick={onPass}
+            className="mt-2 flex w-full items-center justify-center gap-1 rounded-2xl px-4 py-3 text-[13px] font-bold text-slate-500 active:bg-slate-50"
+          >
+            先看看下一位
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      </motion.div>
+    )
+  }
+
+  if (variant === 'midnight') {
+    return (
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 18 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.97, opacity: 0, y: 10 }}
+        transition={{ type: 'spring', damping: 27, stiffness: 320 }}
+        className="relative isolate w-full max-w-[23rem] overflow-hidden rounded-[2.25rem] bg-[radial-gradient(circle_at_50%_0%,#29344b_0%,#101827_48%,#090f1c_100%)] px-6 pb-6 pt-8 text-center shadow-[0_30px_90px_rgba(2,6,23,0.55)] ring-1 ring-white/15"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discover-membership-like-title"
+      >
+        <div className="pointer-events-none absolute left-1/2 top-16 -z-10 h-48 w-48 -translate-x-1/2 rounded-full bg-rose-500/15 blur-3xl" />
+        <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.07] px-3 py-1.5 text-[11px] font-bold tracking-[0.1em] text-rose-300">
+          <Sparkles className="h-3.5 w-3.5" aria-hidden />
+          下一個配對，可能是你們
+        </div>
+
+        <div className="relative mx-auto mt-6 w-fit">
+          <MembershipLikePhoto
+            profile={profile}
+            className="h-32 w-32 rounded-[2rem] shadow-[0_18px_45px_rgba(0,0,0,0.42)] ring-1 ring-white/25"
+          />
+          <div className="absolute -bottom-2 -right-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-500 text-white shadow-xl ring-4 ring-[#111a2a]">
+            <Heart className="h-5 w-5 fill-current" aria-hidden />
+          </div>
+        </div>
+
+        <h2
+          id="discover-membership-like-title"
+          className="mt-8 text-[1.4rem] font-black leading-[1.5] tracking-[-0.03em] text-white"
+        >
+          她的下一次心動，
+          <br />
+          也可能是你。
+        </h2>
+        <p className="mx-auto mt-3 max-w-[17rem] text-[13px] font-medium leading-relaxed text-slate-300">
+          讓她看見你的愛心，給彼此一次靠近的機會。
+        </p>
+
+        <div className="mt-5 grid grid-cols-3 gap-2 text-[10px] font-bold text-slate-300">
+          {['送出愛心', '讓她看見', '等待心動'].map((label) => (
+            <div key={label} className="rounded-xl border border-white/10 bg-white/[0.05] py-2.5">
+              <Check className="mx-auto mb-1 h-3.5 w-3.5 text-emerald-400" aria-hidden />
+              {label}
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={onSubscribe}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-4 py-4 text-[15px] font-black text-slate-950 shadow-xl active:bg-slate-100"
+        >
+          給彼此一個機會
+          <ChevronRight className="h-[17px] w-[17px]" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onPass}
+          className="mt-2 flex w-full items-center justify-center gap-1 rounded-2xl px-4 py-3 text-[14px] font-bold text-slate-400 active:bg-white/[0.05]"
+        >
+          先看看下一位
+        </button>
+      </motion.div>
+    )
+  }
+
+  if (variant === 'letter') {
+    return (
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 18 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.97, opacity: 0, y: 10 }}
+        transition={{ type: 'spring', damping: 27, stiffness: 320 }}
+        className="relative w-full max-w-[23rem] overflow-hidden rounded-[2.25rem] bg-[#fffaf1] px-6 pb-6 pt-7 text-center shadow-[0_28px_80px_rgba(55,35,20,0.32)] ring-1 ring-white/80"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discover-membership-like-title"
+      >
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-300 via-rose-400 to-amber-300" />
+        <div className="mx-auto flex h-12 w-12 rotate-[-6deg] items-center justify-center rounded-2xl bg-rose-500 text-white shadow-lg shadow-rose-300/40">
+          <Heart className="h-5 w-5 fill-current" aria-hidden />
+        </div>
+        <p className="mt-3 text-[11px] font-black tracking-[0.16em] text-amber-800/60">一個故事的開頭</p>
+
+        <div className="relative mx-auto mt-5 w-fit">
+          <MembershipLikePhoto
+            profile={profile}
+            className="h-28 w-28 rounded-full shadow-xl ring-4 ring-white outline outline-1 outline-amber-200"
+          />
+          <div className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full border-[6px] border-[#fffaf1] bg-emerald-400" />
+        </div>
+
+        <h2
+          id="discover-membership-like-title"
+          className="mt-6 text-[1.45rem] font-black leading-[1.48] tracking-[-0.035em] text-[#2a211d]"
+        >
+          把這顆愛心，
+          <br />
+          變成你們開始的可能。
+        </h2>
+        <p className="mx-auto mt-3 max-w-[17rem] text-[13px] font-medium leading-relaxed text-stone-500">
+          今天的遇見，也許會成為明天的聊天。
+        </p>
+        <button
+          type="button"
+          onClick={onSubscribe}
+          className="mt-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-500 px-4 py-4 text-[15px] font-bold text-white shadow-lg shadow-rose-400/25 active:bg-rose-600"
+        >
+          讓可能開始
+          <Send className="h-4 w-4" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onPass}
+          className="mt-2 flex w-full items-center justify-center gap-1 rounded-2xl px-4 py-3 text-[14px] font-bold text-stone-500 active:bg-white/60"
+        >
+          先看看下一位
+        </button>
+      </motion.div>
+    )
+  }
+
+  if (variant === 'spotlight') {
+    return (
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 18 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.97, opacity: 0, y: 10 }}
+        transition={{ type: 'spring', damping: 27, stiffness: 320 }}
+        className="relative isolate w-full max-w-[23rem] overflow-hidden rounded-[2.25rem] bg-white px-6 pb-6 pt-8 text-center shadow-[0_28px_80px_rgba(15,23,42,0.35)] ring-1 ring-white/80"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discover-membership-like-title"
+      >
+        <div className="pointer-events-none absolute inset-x-8 top-4 -z-10 h-52 rounded-full bg-gradient-to-b from-violet-200/70 to-sky-100/20 blur-2xl" />
+        <p className="text-[11px] font-black tracking-[0.18em] text-violet-500">她的下一次心動，也可能有你</p>
+
+        <div className="relative mx-auto mt-6 w-fit">
+          <div className="absolute -inset-4 rounded-full border border-violet-200/60" />
+          <div className="absolute -inset-8 rounded-full border border-violet-100/70" />
+          <MembershipLikePhoto
+            profile={profile}
+            className="h-36 w-36 rounded-full shadow-[0_18px_50px_rgba(76,29,149,0.22)] ring-[5px] ring-white"
+          />
+          <Sparkles className="absolute -right-6 -top-3 h-8 w-8 text-amber-400" aria-hidden />
+        </div>
+
+        <h2
+          id="discover-membership-like-title"
+          className="mt-9 text-[1.42rem] font-black leading-[1.5] tracking-[-0.035em] text-slate-900"
+        >
+          先讓她看見你，
+          <br />
+          才有機會互相喜歡。
+        </h2>
+        <p className="mx-auto mt-3 max-w-[17rem] text-[13px] font-medium leading-relaxed text-slate-500">
+          一次愛心，為你們打開配對的可能。
+        </p>
+        <button
+          type="button"
+          onClick={onSubscribe}
+          className="mt-7 flex w-full items-center justify-center gap-2 rounded-2xl bg-violet-600 px-4 py-4 text-[15px] font-bold text-white shadow-lg shadow-violet-500/25 active:bg-violet-700"
+        >
+          打開配對的可能
+          <ChevronRight className="h-[17px] w-[17px]" aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={onPass}
+          className="mt-2 flex w-full items-center justify-center rounded-2xl px-4 py-3 text-[14px] font-bold text-slate-500 active:bg-slate-50"
+        >
+          先看看下一位
+        </button>
+      </motion.div>
+    )
+  }
+
+  if (variant === 'editorial') {
+    return (
+      <motion.div
+        initial={{ scale: 0.94, opacity: 0, y: 18 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.97, opacity: 0, y: 10 }}
+        transition={{ type: 'spring', damping: 27, stiffness: 320 }}
+        className="w-full max-w-[23rem] overflow-hidden rounded-[2.25rem] bg-[#f1eadf] shadow-[0_30px_90px_rgba(28,25,23,0.42)] ring-1 ring-white/50"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discover-membership-like-title"
+      >
+        <div className="grid grid-cols-[1.05fr_0.95fr]">
+          <MembershipLikePhoto profile={profile} className="min-h-52" />
+          <div className="flex flex-col items-start justify-between bg-[#181716] p-5 text-left text-white">
+            <span className="text-[10px] font-black tracking-[0.2em] text-white/50">TSMEDIA / CHOICE</span>
+            <Heart className="h-8 w-8 text-rose-400" aria-hidden />
+            <span className="text-xs font-bold leading-relaxed text-white/70">一次選擇，<br />一個可能。</span>
+          </div>
+        </div>
+        <div className="px-6 pb-6 pt-7 text-left">
+          <h2
+            id="discover-membership-like-title"
+            className="text-[1.55rem] font-black leading-[1.35] tracking-[-0.045em] text-stone-950"
+          >
+            讓今天的遇見，
+            <br />
+            變成明天的聊天。
+          </h2>
+          <p className="mt-3 text-[13px] font-medium leading-relaxed text-stone-600">
+            送出喜歡，讓你們離互相認識更近一步。
+          </p>
+          <button
+            type="button"
+            onClick={onSubscribe}
+            className="mt-6 flex w-full items-center justify-between rounded-none border-y-2 border-stone-950 px-1 py-4 text-[15px] font-black text-stone-950 active:bg-black/5"
+          >
+            走向下一步
+            <ChevronRight className="h-5 w-5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={onPass}
+            className="mt-2 w-full py-3 text-center text-[13px] font-bold text-stone-500 active:bg-white/30"
+          >
+            先看看下一位
+          </button>
+        </div>
+      </motion.div>
+    )
+  }
+
+  return (
+    <motion.div
+      initial={{ scale: 0.94, opacity: 0, y: 18 }}
+      animate={{ scale: 1, opacity: 1, y: 0 }}
+      exit={{ scale: 0.97, opacity: 0, y: 10 }}
+      transition={{ type: 'spring', damping: 27, stiffness: 320 }}
+      className="relative isolate w-full max-w-[23rem] overflow-hidden rounded-[2.25rem] bg-[linear-gradient(180deg,#fff8f5_0%,#ffffff_46%)] px-6 pb-6 pt-8 text-center shadow-[0_28px_80px_rgba(15,23,42,0.32)] ring-1 ring-white/80"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="discover-membership-like-title"
+    >
+      <div className="pointer-events-none absolute -left-16 -top-20 -z-10 h-52 w-52 rounded-full bg-rose-200/35 blur-3xl" />
+      <div className="pointer-events-none absolute -right-20 top-16 -z-10 h-48 w-48 rounded-full bg-amber-100/50 blur-3xl" />
+
+      <div className="mb-5 inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-white/80 px-3 py-1.5 text-[11px] font-bold tracking-[0.08em] text-rose-500 shadow-sm">
+        <Heart className="h-3.5 w-3.5 fill-current" aria-hidden />
+        下一個可能
+      </div>
+
+      <div className="relative mx-auto w-fit">
+        <MembershipLikePhoto
+          profile={profile}
+          className="h-32 w-32 rounded-full shadow-[0_16px_35px_rgba(15,23,42,0.18)] ring-[5px] ring-white outline outline-1 outline-rose-100"
+        />
+        <div className="absolute -bottom-1 -right-1 flex h-10 w-10 items-center justify-center rounded-full bg-rose-500 text-white shadow-lg ring-4 ring-white">
+          <Heart className="h-[18px] w-[18px] fill-current" aria-hidden />
+        </div>
+      </div>
+
+      <h2
+        id="discover-membership-like-title"
+        className="mt-7 text-[1.4rem] font-black leading-[1.5] tracking-[-0.03em] text-slate-900"
+      >
+        下一次互相喜歡，
+        <br />
+        可能就從這顆愛心開始。
+      </h2>
+      <p className="mx-auto mt-3 max-w-[17rem] text-[13px] font-medium leading-relaxed text-slate-500">
+        讓她先看見你，才有機會一起走到配對。
+      </p>
+
+      <div className="mt-7 space-y-2.5">
+        <button
+          type="button"
+          onClick={onSubscribe}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-4 text-[15px] font-bold text-white shadow-lg shadow-slate-900/20 active:bg-slate-800"
+        >
+          <Heart className="h-[17px] w-[17px]" aria-hidden />
+          給彼此一個機會
+        </button>
+        <button
+          type="button"
+          onClick={onPass}
+          className="flex w-full items-center justify-center gap-1 rounded-2xl px-4 py-3 text-[14px] font-bold text-slate-500 active:bg-white/70"
+        >
+          先看看下一位
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+    </motion.div>
+  )
+}
+
 // ─── Discover Tab ─────────────────────────────────────────────────────────────
 function DiscoverTab({
   userId,
@@ -1518,6 +1920,7 @@ function DiscoverTab({
   preferredRegion,
   contentScrollRef,
   creditBalance,
+  onCheckActiveMembership,
   onRequireActiveMembership,
   onOpenSubscription,
   refreshCredits,
@@ -1538,6 +1941,8 @@ function DiscoverTab({
   preferredRegion: import('@/lib/types').Region | null
   contentScrollRef?: React.RefObject<HTMLDivElement | null>
   creditBalance: CreditBalance
+  /** 僅檢查會員資格，不主動開啟付費頁。 */
+  onCheckActiveMembership: () => Promise<boolean>
   onRequireActiveMembership: () => Promise<boolean>
   onOpenSubscription: () => void
   refreshCredits: () => void
@@ -1631,6 +2036,18 @@ function DiscoverTab({
   const [done, setDone] = useState(() => discoverUiSnap?.done ?? false)
   const [scrolled, setScrolled] = useState(() => discoverUiSnap?.scrolled ?? false)
   const [confirmIntent, setConfirmIntent] = useState<null | 'like' | 'super_like'>(null)
+  const [membershipLikeTarget, setMembershipLikeTarget] = useState<Profile | null>(null)
+  const membershipLikePromptVariant = useMemo<MembershipLikePromptVariant>(() => {
+    if (!import.meta.env.DEV) return 'immersive'
+    const preview = new URLSearchParams(window.location.search).get('membershipLikeVariant')
+    return preview === 'immersive'
+      || preview === 'midnight'
+      || preview === 'letter'
+      || preview === 'spotlight'
+      || preview === 'editorial'
+      ? preview
+      : 'immersive'
+  }, [])
   const [reportTarget, setReportTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const [blockTarget, setBlockTarget] = useState<{ profileKey: string; displayName: string; userId?: string | null } | null>(null)
   const cardScrollRef = useRef<HTMLDivElement | null>(null)
@@ -1727,6 +2144,7 @@ function DiscoverTab({
   useEffect(() => {
     if (foregroundReloadNonce === 0) return
     setConfirmIntent(null)
+    setMembershipLikeTarget(null)
     setReportTarget(null)
     setBlockTarget(null)
     requestAnimationFrame(() => {
@@ -2131,7 +2549,10 @@ function DiscoverTab({
       goNext()
       return
     }
-    if (!(await onRequireActiveMembership())) return
+    if (!(await onCheckActiveMembership())) {
+      setMembershipLikeTarget(profile)
+      return
+    }
     if (creditBalance.heart <= 0) {
       onOpenSubscription()
       return
@@ -2672,6 +3093,30 @@ function DiscoverTab({
                 </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {membershipLikeTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[215] flex items-center justify-center bg-slate-950/60 px-5 py-8 backdrop-blur-[3px]"
+          >
+            <MembershipLikePrompt
+              profile={membershipLikeTarget}
+              variant={membershipLikePromptVariant}
+              onSubscribe={() => {
+                setMembershipLikeTarget(null)
+                onOpenSubscription()
+              }}
+              onPass={() => {
+                setMembershipLikeTarget(null)
+                void executeInteraction('pass')
+              }}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -7482,18 +7927,20 @@ export default function MainScreen({
     setShowSubscription(true)
   }, [creditBalance])
 
-  const requireActiveMembership = useCallback(async (): Promise<boolean> => {
+  const checkActiveMembership = useCallback(async (): Promise<boolean> => {
     if (membershipActive === true) return true
-    if (membershipActive === false || !user?.id) {
-      openSubscriptionModal()
-      return false
-    }
+    if (membershipActive === false || !user?.id) return false
     const currentProfile = await getProfile(user.id)
     const active = isMembershipActive(currentProfile?.subscription_expires_at)
     setMembershipActive(active)
+    return active
+  }, [membershipActive, user?.id])
+
+  const requireActiveMembership = useCallback(async (): Promise<boolean> => {
+    const active = await checkActiveMembership()
     if (!active) openSubscriptionModal()
     return active
-  }, [membershipActive, openSubscriptionModal, user?.id])
+  }, [checkActiveMembership, openSubscriptionModal])
 
   const recordDemoPuzzleSlot = useCallback((profileId: number, slot: number) => {
     setDemoPuzzleClearedByProfile((prev) => {
@@ -8379,6 +8826,7 @@ export default function MainScreen({
         preferredRegion={currentUserPreferredRegion}
         contentScrollRef={contentScrollRef}
         creditBalance={creditBalance}
+        onCheckActiveMembership={checkActiveMembership}
         onRequireActiveMembership={requireActiveMembership}
         onOpenSubscription={openSubscriptionModal}
         refreshCredits={refreshCredits}
