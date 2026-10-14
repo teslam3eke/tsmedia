@@ -4,18 +4,28 @@ const GRAPH_VERSION = 'v21.0'
 /** Vercel：await 送達，但不宜超過 function 剩餘時間；6s 為合理上限。 */
 export const META_CAPI_REQUEST_TIMEOUT_MS = 6_000
 
-export type MetaCapiPurchasePayload = {
-  eventId: string
-  eventTimeSec: number
-  valueNtd: number
-  currency: string
-  orderId: string
+export type MetaCapiUserDataInput = {
   externalId: string
   email?: string | null
   fbp?: string | null
   fbc?: string | null
   clientIpAddress?: string | null
   clientUserAgent?: string | null
+}
+
+export type MetaCapiPurchasePayload = MetaCapiUserDataInput & {
+  eventId: string
+  eventTimeSec: number
+  valueNtd: number
+  currency: string
+  orderId: string
+}
+
+export type MetaCapiStandardEventPayload = MetaCapiUserDataInput & {
+  eventName: string
+  eventId: string
+  eventTimeSec: number
+  customData?: Record<string, unknown>
 }
 
 export function normalizeMetaEmail(raw: string): string {
@@ -58,65 +68,48 @@ function readCapiConfig(): { pixelId: string; accessToken: string; testEventCode
   return { pixelId, accessToken, testEventCode }
 }
 
-/**
- * 送 Meta Conversions API Purchase。fail-safe：錯誤只回傳，不 throw。
- * 不得 log token／email 明文。
- */
-export async function sendMetaCapiPurchase(
-  payload: MetaCapiPurchasePayload,
-): Promise<{ ok: true } | { ok: false; skipped?: boolean; error: string }> {
+export function buildMetaCapiUserData(input: MetaCapiUserDataInput): Record<string, unknown> {
+  const userData: Record<string, unknown> = {
+    external_id: [hashMetaExternalId(input.externalId)],
+  }
+
+  const email = input.email?.trim()
+  if (email) {
+    userData.em = [sha256MetaNormalized(normalizeMetaEmail(email))]
+  }
+
+  const fbp = sanitizeMetaFbp(input.fbp)
+  if (fbp) userData.fbp = fbp
+
+  const fbc = sanitizeMetaFbc(input.fbc)
+  if (fbc) userData.fbc = fbc
+
+  const ip = input.clientIpAddress?.trim()
+  if (ip && /^[\d.a-fA-F:]+$/.test(ip) && ip.length <= 45) {
+    userData.client_ip_address = ip
+  }
+
+  const ua = input.clientUserAgent?.trim()
+  if (ua && ua.length <= 512) {
+    userData.client_user_agent = ua
+  }
+
+  return userData
+}
+
+type MetaCapiPostResult = { ok: true } | { ok: false; skipped?: boolean; error: string }
+
+async function postMetaCapiEvents(
+  events: Record<string, unknown>[],
+  logKind: string,
+  eventIdForLog: string,
+): Promise<MetaCapiPostResult> {
   const cfg = readCapiConfig()
   if (!cfg) {
     return { ok: false, skipped: true, error: 'meta_capi_not_configured' }
   }
 
-  const eventId = payload.eventId.trim()
-  if (!eventId) {
-    return { ok: false, error: 'missing_event_id' }
-  }
-
-  const userData: Record<string, unknown> = {
-    external_id: [hashMetaExternalId(payload.externalId)],
-  }
-
-  const email = payload.email?.trim()
-  if (email) {
-    userData.em = [sha256MetaNormalized(normalizeMetaEmail(email))]
-  }
-
-  const fbp = sanitizeMetaFbp(payload.fbp)
-  if (fbp) userData.fbp = fbp
-
-  const fbc = sanitizeMetaFbc(payload.fbc)
-  if (fbc) userData.fbc = fbc
-
-  const ip = payload.clientIpAddress?.trim()
-  if (ip && /^[\d.a-fA-F:]+$/.test(ip) && ip.length <= 45) {
-    userData.client_ip_address = ip
-  }
-
-  const ua = payload.clientUserAgent?.trim()
-  if (ua && ua.length <= 512) {
-    userData.client_user_agent = ua
-  }
-
-  const body: Record<string, unknown> = {
-    data: [
-      {
-        event_name: 'Purchase',
-        event_time: payload.eventTimeSec,
-        event_id: eventId,
-        action_source: 'website',
-        user_data: userData,
-        custom_data: {
-          value: payload.valueNtd,
-          currency: payload.currency,
-          order_id: payload.orderId,
-        },
-      },
-    ],
-  }
-
+  const body: Record<string, unknown> = { data: events }
   if (cfg.testEventCode) {
     body.test_event_code = cfg.testEventCode
   }
@@ -145,23 +138,89 @@ export async function sendMetaCapiPurchase(
 
     if (!res.ok) {
       const msg = json?.error?.message ?? `http_${res.status}`
-      console.warn('[meta-capi] purchase failed', { eventId, status: res.status, message: msg })
+      console.warn(`[meta-capi] ${logKind} failed`, {
+        eventId: eventIdForLog,
+        status: res.status,
+        message: msg,
+      })
       return { ok: false, error: msg }
     }
 
     const received = json?.events_received
     if (typeof received !== 'number' || received < 1) {
-      console.warn('[meta-capi] purchase unexpected body', { eventId, events_received: received })
+      console.warn(`[meta-capi] ${logKind} unexpected body`, {
+        eventId: eventIdForLog,
+        events_received: received,
+      })
       return { ok: false, error: 'events_not_received' }
     }
 
-    console.info('[meta-capi] purchase sent', { eventId, events_received: received })
+    console.info(`[meta-capi] ${logKind} sent`, { eventId: eventIdForLog, events_received: received })
     return { ok: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'request_failed'
-    console.warn('[meta-capi] purchase error', { eventId, message: msg })
+    console.warn(`[meta-capi] ${logKind} error`, { eventId: eventIdForLog, message: msg })
     return { ok: false, error: msg }
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * 標準事件 CAPI（CompleteRegistration、SubmitApplication 等）。fail-safe，不 throw。
+ */
+export async function sendMetaCapiStandardEvent(
+  payload: MetaCapiStandardEventPayload,
+): Promise<MetaCapiPostResult> {
+  const eventId = payload.eventId.trim()
+  const eventName = payload.eventName.trim()
+  if (!eventId || !eventName) {
+    return { ok: false, error: 'missing_event_id' }
+  }
+
+  const event: Record<string, unknown> = {
+    event_name: eventName,
+    event_time: payload.eventTimeSec,
+    event_id: eventId,
+    action_source: 'website',
+    user_data: buildMetaCapiUserData(payload),
+  }
+  if (payload.customData && Object.keys(payload.customData).length > 0) {
+    event.custom_data = payload.customData
+  }
+
+  const logKind = eventName.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+  return postMetaCapiEvents([event], logKind, eventId)
+}
+
+/**
+ * 送 Meta Conversions API Purchase。fail-safe：錯誤只回傳，不 throw。
+ * 不得 log token／email 明文。
+ */
+export async function sendMetaCapiPurchase(
+  payload: MetaCapiPurchasePayload,
+): Promise<MetaCapiPostResult> {
+  const eventId = payload.eventId.trim()
+  if (!eventId) {
+    return { ok: false, error: 'missing_event_id' }
+  }
+
+  return postMetaCapiEvents(
+    [
+      {
+        event_name: 'Purchase',
+        event_time: payload.eventTimeSec,
+        event_id: eventId,
+        action_source: 'website',
+        user_data: buildMetaCapiUserData(payload),
+        custom_data: {
+          value: payload.valueNtd,
+          currency: payload.currency,
+          order_id: payload.orderId,
+        },
+      },
+    ],
+    'purchase',
+    eventId,
+  )
 }

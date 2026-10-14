@@ -77,3 +77,29 @@ export async function syncMetaAttributionToServer(accessToken: string): Promise<
     /* ignore */
   }
 }
+
+/** CompleteRegistration Server CAPI（JWT + event_id=user.id；失敗不阻擋 UI）。 */
+export async function requestMetaCompleteRegistrationCapi(accessToken: string): Promise<void> {
+  const { metaFbp, metaFbc } = getMetaAttributionPayload()
+  try {
+    await fetch('/api/meta-capi-complete-registration', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ metaFbp, metaFbc }),
+      cache: 'no-store',
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 先同步 attribution 再送 CompleteRegistration CAPI（註冊／信箱確認後 session 就緒時）。 */
+export async function syncMetaAttributionAndCompleteRegistrationCapi(
+  accessToken: string,
+): Promise<void> {
+  await syncMetaAttributionToServer(accessToken)
+  await requestMetaCompleteRegistrationCapi(accessToken)
+}

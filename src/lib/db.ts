@@ -16,6 +16,7 @@ import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 import { formatVerificationApplicationRejectionAlertBody } from './verificationAiUtils'
+import { getMetaAttributionPayload } from './metaAttribution'
 
 export const TERMS_VERSION = '2026-07-14'
 
@@ -830,72 +831,51 @@ export async function getLatestVerificationApplication(
 }
 
 export async function submitVerificationApplication(
-  userId: string,
+  _userId: string,
   declaredCompany: string,
   docs: VerificationApplicationDocInput[],
 ): Promise<{ ok: boolean; applicationId?: string; error?: string }> {
-  const company = declaredCompany.trim()
-  if (!company) return { ok: false, error: '請先在個人資料填寫任職公司。' }
-
-  const { data: pending } = await supabase
-    .from('verification_applications')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('status', 'pending')
-    .limit(1)
-
-  if (pending?.length) {
-    return { ok: false, error: '你已有待審核的申請，請等待結果。' }
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  const token = session?.access_token
+  if (!token) {
+    return { ok: false, error: '請先登入後再試。' }
   }
 
-  const { data: application, error: appError } = await supabase
-    .from('verification_applications')
-    .insert({ user_id: userId, status: 'pending' })
-    .select('id')
-    .single()
-
-  if (appError || !application) {
-    console.error('[db] submitVerificationApplication app error:', appError?.message)
-    return { ok: false, error: appError?.message ?? '送審失敗，請稍後再試。' }
+  const { metaFbp, metaFbc } = getMetaAttributionPayload()
+  let res: Response
+  try {
+    res = await fetch('/api/submit-verification-application', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        declaredCompany,
+        docs,
+        metaFbp,
+        metaFbc,
+      }),
+      cache: 'no-store',
+    })
+  } catch {
+    return { ok: false, error: '網路連線異常，請稍後再試。' }
   }
 
-  const rows = docs.map((d) => ({
-    user_id: userId,
-    application_id: application.id,
-    company,
-    doc_type: d.docType,
-    doc_url: d.path,
-    status: 'pending' as const,
-    verification_kind: d.kind,
-    review_mode: 'manual' as const,
-    claimed_income_tier: d.kind === 'income' ? (d.claimedIncomeTier ?? null) : null,
-  }))
-
-  // 新流程允許不附證件直接送出會員審核；空陣列不可呼叫 PostgREST insert。
-  if (rows.length > 0) {
-    const { error: docsError } = await supabase.from('verification_docs').insert(rows)
-    if (docsError) {
-      console.error('[db] submitVerificationApplication docs error:', docsError.message)
-      await deleteProofDocsFromStorage(docs.map((d) => d.path))
-      await supabase.from('verification_applications').delete().eq('id', application.id)
-      return { ok: false, error: docsError.message }
-    }
+  let body: { ok?: boolean; applicationId?: string; error?: string } = {}
+  try {
+    body = (await res.json()) as { ok?: boolean; applicationId?: string; error?: string }
+  } catch {
+    /* ignore */
   }
 
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .update({ verification_status: 'submitted', company })
-    .eq('id', userId)
-
-  if (profileError) {
-    console.error('[db] submitVerificationApplication profile error:', profileError.message)
-    await supabase.from('verification_docs').delete().eq('application_id', application.id)
-    await supabase.from('verification_applications').delete().eq('id', application.id)
-    await deleteProofDocsFromStorage(docs.map((d) => d.path))
-    return { ok: false, error: profileError.message }
+  if (!res.ok || !body.ok || !body.applicationId) {
+    return { ok: false, error: body.error ?? '送審失敗，請稍後再試。' }
   }
 
-  return { ok: true, applicationId: application.id as string }
+  return { ok: true, applicationId: body.applicationId }
 }
 
 async function attachProfilesToApplications(

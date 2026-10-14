@@ -74,16 +74,19 @@ export function trackMetaEvent(eventName: string, params?: Record<string, unknow
 /** 註冊成功（同一 user id 只送一次，避免重複登入重複計轉換）。 */
 export function trackMetaCompleteRegistration(userId?: string | null): void {
   if (!pixelEnabled()) return
-  if (userId) {
-    const key = `${REG_DEDUPE_PREFIX}${userId}`
-    try {
-      if (localStorage.getItem(key)) return
-      localStorage.setItem(key, '1')
-    } catch {
-      /* 私密模式 */
-    }
+  const id = userId?.trim()
+  if (!id) return
+
+  const key = `${REG_DEDUPE_PREFIX}${id}`
+  try {
+    if (localStorage.getItem(key)) return
+    localStorage.setItem(key, '1')
+  } catch {
+    /* 私密模式 */
   }
-  trackMetaEvent('CompleteRegistration')
+
+  initMetaPixel()
+  fbq('track', 'CompleteRegistration', {}, { eventID: id })
 }
 
 /**

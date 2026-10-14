@@ -6,6 +6,7 @@ import { BrandMark } from '@/components/BrandMark'
 import { requestPasswordReset, signIn, signUp } from '@/lib/auth'
 import { iosEmailAuthSafariHint } from '@/lib/authBrowser'
 import { trackMetaCompleteRegistration } from '@/lib/metaPixel'
+import { syncMetaAttributionAndCompleteRegistrationCapi } from '@/lib/metaAttribution'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -59,6 +60,9 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
 
     if (mode === 'signup') {
       trackMetaCompleteRegistration(result.user.id)
+      if (result.session?.access_token) {
+        void syncMetaAttributionAndCompleteRegistrationCapi(result.session.access_token)
+      }
     }
 
     if (mode === 'signup' && !result.session) {
