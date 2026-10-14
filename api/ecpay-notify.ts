@@ -7,6 +7,7 @@ import { verifyCheckMacValue } from './_utils/ecpayCrypto.js'
 import { readEcpayConfig } from './_utils/ecpayConfig.js'
 import { readEcpayFormBody } from './_utils/ecpayFormBody.js'
 import { fulfillEcpayOrder } from './_utils/ecpayFulfill.js'
+import { afterEcpayFulfillSuccess } from './_utils/ecpayAfterFulfill.js'
 
 export const config = {
   api: {
@@ -44,6 +45,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!result.ok) {
     console.error('[ecpay-notify] fulfill', result.error, body.MerchantTradeNo)
     return res.status(500).send(`0|${result.error}`)
+  }
+
+  if (result.ok) {
+    await afterEcpayFulfillSuccess(admin, body.MerchantTradeNo!.trim())
   }
 
   return res.status(200).send('1|OK')

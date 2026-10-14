@@ -7,6 +7,7 @@ import { verifyCheckMacValue } from './_utils/ecpayCrypto.js'
 import { readEcpayConfig } from './_utils/ecpayConfig.js'
 import { readEcpayFormBody } from './_utils/ecpayFormBody.js'
 import { fulfillEcpayOrder } from './_utils/ecpayFulfill.js'
+import { afterEcpayFulfillSuccess } from './_utils/ecpayAfterFulfill.js'
 
 export const config = {
   api: {
@@ -57,6 +58,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!result.ok) {
       /** 綠界已扣款但 return 入帳失敗時仍導 ok+order，由前端輪詢 notify／重試；勿誤顯「付款未完成」。 */
       console.error('[ecpay-return] fulfill', result.error, merchantTradeNo)
+    } else if (result.ok) {
+      await afterEcpayFulfillSuccess(admin, merchantTradeNo)
     }
   }
 

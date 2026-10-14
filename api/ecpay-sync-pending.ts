@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js'
 import { readAuthedUserId } from './_utils/tappayPayByPrime.js'
 import { readEcpayConfig } from './_utils/ecpayConfig.js'
 import { fulfillEcpayOrder } from './_utils/ecpayFulfill.js'
+import { afterEcpayFulfillSuccess } from './_utils/ecpayAfterFulfill.js'
 import { isEcpayTradePaid, queryEcpayTrade } from './_utils/ecpayQueryTrade.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -81,6 +82,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orderNo,
         error: fulfill.error,
       })
+    }
+
+    if (fulfill.ok) {
+      await afterEcpayFulfillSuccess(admin, orderNo)
     }
 
     let subscriptionExpiresAt: string | null = null

@@ -1,5 +1,6 @@
 import { QUERY_CACHE_STORAGE_KEY, queryClient } from '@/lib/queryClient'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
+import { getMetaAttributionPayload } from '@/lib/metaAttribution'
 import { clearPaymentReturnAuthRepairPending, markPaymentReturnAuthRepairPending, supabase } from '@/lib/supabase'
 
 export type EcpayCheckoutParams = {
@@ -58,7 +59,10 @@ export async function startEcpayCheckout(params: EcpayCheckoutParams): Promise<v
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      ...params,
+      ...getMetaAttributionPayload(),
+    }),
   })
 
   const json = (await res.json()) as {

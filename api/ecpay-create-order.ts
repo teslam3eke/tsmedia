@@ -21,12 +21,19 @@ import {
   normalizeMembershipDiscountCode,
   resolveMaleMembershipDiscount,
 } from './_utils/membershipDiscount.js'
+import {
+  readClientIpFromRequest,
+  readClientUserAgent,
+  readMetaAttributionFromBody,
+} from './_utils/clientRequestMeta.js'
 
 type Body = {
   productType?: 'membership' | 'credit_pack'
   packKey?: string
   email?: string
   membershipDiscountCode?: string
+  metaFbp?: string
+  metaFbc?: string
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -144,6 +151,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const merchantTradeNo = makeMerchantTradeNo()
+  const { metaFbp, metaFbc } = readMetaAttributionFromBody(body)
+  const clientIp = readClientIpFromRequest(req)
+  const clientUserAgent = readClientUserAgent(req)
 
   const { error: insErr } = await admin.from('ecpay_orders').insert({
     merchant_trade_no: merchantTradeNo,
@@ -154,11 +164,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     item_desc: itemDesc,
     status: 'pending',
     membership_discount_code: membershipDiscountCodeToStore,
+    meta_fbp: metaFbp,
+    meta_fbc: metaFbc,
+    client_ip: clientIp,
+    client_user_agent: clientUserAgent,
   })
 
   if (insErr) {
     console.error('[ecpay-create-order] insert', insErr)
     return res.status(500).json({ ok: false, error: '無法建立訂單，請稍後再試。' })
+  }
+
+  if (metaFbp || metaFbc) {
+    const profilePatch: Record<string, string> = {
+      meta_attribution_updated_at: new Date().toISOString(),
+    }
+    if (metaFbp) profilePatch.meta_fbp = metaFbp
+    if (metaFbc) profilePatch.meta_fbc = metaFbc
+    const { error: attrErr } = await admin.from('profiles').update(profilePatch).eq('id', auth.userId)
+    if (attrErr) {
+      console.warn('[ecpay-create-order] meta attribution profile update', attrErr.message)
+    }
   }
 
   const formFields: Record<string, string> = {

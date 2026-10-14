@@ -59,6 +59,7 @@ import {
   hasPendingPaymentReturn,
   tryAlternateOriginForPaymentReturn,
 } from '@/lib/ecpayCheckout'
+import { syncMetaAttributionToServer } from '@/lib/metaAttribution'
 import { needsPwaEncapsulationGate, readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { PROFILE_PHOTO_MIN } from '@/lib/types'
 import { isOnboardingFlowScreen, setOnboardingResumeProtect, clearOnboardingJsonDraft } from '@/lib/onboardingDraft'
@@ -803,6 +804,12 @@ export default function App() {
         if (Date.now() < paymentReturnGraceUntilRef.current) return
         go('landing')
         return
+      }
+      if (
+        session?.access_token
+        && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED')
+      ) {
+        void syncMetaAttributionToServer(session.access_token)
       }
       await maybeRoutePaymentReturnSession(nextUser ?? userRef.current, event)
       /** 首屏路由由下方 init 負責；勿在此處 SIGNED_IN → main，會搶在 recovery 判斷之前。 */
