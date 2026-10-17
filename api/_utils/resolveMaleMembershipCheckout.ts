@@ -44,14 +44,15 @@ export async function resolveMaleMembershipCheckout(
     )
   }
 
+  if (userCoupon && requestedCode) {
+    throw new MembershipCheckoutPricingError(
+      'COUPON_STACKING_CONFLICT',
+      'COUPON_STACKING_CONFLICT',
+    )
+  }
+
   let membershipDiscount = null
   if (requestedCode) {
-    if (userCoupon && !userCoupon.allowsMembershipDiscountCode) {
-      throw new MembershipCheckoutPricingError(
-        'COUPON_STACKING_CONFLICT',
-        'COUPON_STACKING_CONFLICT',
-      )
-    }
     membershipDiscount = await resolveMaleMembershipDiscount(admin, requestedCode, promoBase)
   }
 

@@ -94,17 +94,11 @@ export function computeMaleMembershipCheckoutAmount(input: {
     }
   }
 
-  let running = promoPriceNtd
-
-  if (membershipDiscount) {
-    running = membershipDiscount.finalPriceNtd
-  }
-
   if (userCoupon) {
     if (userCoupon.stackingPolicy !== 'stack_on_promo_price') {
       throw new MembershipCheckoutPricingError('INVALID_USER_COUPON', 'INVALID_USER_COUPON')
     }
-    if (membershipDiscount && !userCoupon.allowsMembershipDiscountCode) {
+    if (membershipDiscount) {
       throw new MembershipCheckoutPricingError(
         'COUPON_STACKING_CONFLICT',
         'COUPON_STACKING_CONFLICT',
@@ -113,14 +107,13 @@ export function computeMaleMembershipCheckoutAmount(input: {
     if (userCoupon.discountKind !== 'fixed_amount') {
       throw new MembershipCheckoutPricingError('INVALID_USER_COUPON', 'INVALID_USER_COUPON')
     }
-    const calculated = running - userCoupon.discountValue
+    const calculated = promoPriceNtd - userCoupon.discountValue
     const finalAmountNtd = applyAcquisitionCouponCheckoutFloor(calculated)
     return {
       listPriceNtd,
       promoPriceNtd,
       finalAmountNtd,
       appliedUserCouponCampaign: userCoupon.campaignKey,
-      appliedMembershipDiscountCode: membershipDiscount?.code,
     }
   }
 
