@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   META_CAPI_REQUEST_TIMEOUT_MS,
+  META_EVENT_SOURCE_URL_FALLBACK,
   buildMetaCapiUserData,
   hashMetaExternalId,
   normalizeMetaEmail,
+  sanitizeMetaEventSourceUrl,
   sanitizeMetaFbc,
   sanitizeMetaFbp,
   sha256MetaNormalized,
@@ -32,6 +34,16 @@ describe('metaCapi helpers', () => {
     expect(sanitizeMetaFbp('fb.1.123.456')).toBe('fb.1.123.456')
     expect(sanitizeMetaFbc('fb.1.123.clid')).toBe('fb.1.123.clid')
     expect(sanitizeMetaFbp('bad')).toBeNull()
+  })
+
+  it('sanitizes event_source_url for allowed hosts and strips query', () => {
+    expect(
+      sanitizeMetaEventSourceUrl('https://tsmedia.tw/?fbclid=secret&email=a@b.com'),
+    ).toBe('https://tsmedia.tw/')
+    expect(sanitizeMetaEventSourceUrl('https://www.tsmedia.tw/app')).toBe('https://www.tsmedia.tw/app')
+    expect(sanitizeMetaEventSourceUrl('https://evil.com/')).toBe(META_EVENT_SOURCE_URL_FALLBACK)
+    expect(sanitizeMetaEventSourceUrl('javascript:alert(1)')).toBe(META_EVENT_SOURCE_URL_FALLBACK)
+    expect(sanitizeMetaEventSourceUrl('')).toBe(META_EVENT_SOURCE_URL_FALLBACK)
   })
 
   it('builds user_data with hashed em and external_id', () => {

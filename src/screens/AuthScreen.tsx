@@ -6,7 +6,11 @@ import { BrandMark } from '@/components/BrandMark'
 import { requestPasswordReset, signIn, signUp } from '@/lib/auth'
 import { iosEmailAuthSafariHint } from '@/lib/authBrowser'
 import { trackMetaCompleteRegistration } from '@/lib/metaPixel'
-import { syncMetaAttributionAndCompleteRegistrationCapi } from '@/lib/metaAttribution'
+import {
+  clearRegistrationCapiPending,
+  markRegistrationCapiPending,
+  requestMetaCompleteRegistrationCapi,
+} from '@/lib/metaAttribution'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -60,8 +64,13 @@ export default function AuthScreen({ onSuccess, onBack }: Props) {
 
     if (mode === 'signup') {
       trackMetaCompleteRegistration(result.user.id)
+      const registeredAt = result.user.created_at ?? new Date().toISOString()
+      markRegistrationCapiPending(result.user.id, registeredAt)
       if (result.session?.access_token) {
-        void syncMetaAttributionAndCompleteRegistrationCapi(result.session.access_token)
+        void (async () => {
+          const ok = await requestMetaCompleteRegistrationCapi(result.session!.access_token)
+          if (ok) clearRegistrationCapiPending(result.user.id)
+        })()
       }
     }
 

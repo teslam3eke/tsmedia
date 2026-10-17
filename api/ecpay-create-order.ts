@@ -24,6 +24,7 @@ import {
 import {
   readClientIpFromRequest,
   readClientUserAgent,
+  readEventSourceUrlFromBody,
   readMetaAttributionFromBody,
 } from './_utils/clientRequestMeta.js'
 
@@ -152,6 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const merchantTradeNo = makeMerchantTradeNo()
   const { metaFbp, metaFbc } = readMetaAttributionFromBody(body)
+  const metaEventSourceUrl = readEventSourceUrlFromBody(body)
   const clientIp = readClientIpFromRequest(req)
   const clientUserAgent = readClientUserAgent(req)
 
@@ -166,6 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     membership_discount_code: membershipDiscountCodeToStore,
     meta_fbp: metaFbp,
     meta_fbc: metaFbc,
+    meta_event_source_url: metaEventSourceUrl,
     client_ip: clientIp,
     client_user_agent: clientUserAgent,
   })

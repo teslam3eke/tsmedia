@@ -17,6 +17,35 @@ export async function patchProfileMetaAttributionIfPresent(
   }
 }
 
+/** 註冊當下 attribution 僅凍結一次（CompleteRegistration CAPI 專用，勿用後續 login 的 fbc）。 */
+export async function freezeRegistrationMetaAttributionIfPresent(
+  admin: SupabaseClient,
+  userId: string,
+  input: MetaAttributionInput,
+): Promise<void> {
+  if (!input.metaFbp && !input.metaFbc) return
+
+  const { data, error: readErr } = await admin
+    .from('profiles')
+    .select('meta_reg_fbp, meta_reg_fbc')
+    .eq('id', userId)
+    .maybeSingle()
+  if (readErr) {
+    console.warn('[meta-capi] reg attribution read failed', { userId, message: readErr.message })
+    return
+  }
+
+  const patch: Record<string, string> = {}
+  if (input.metaFbp && !data?.meta_reg_fbp) patch.meta_reg_fbp = input.metaFbp
+  if (input.metaFbc && !data?.meta_reg_fbc) patch.meta_reg_fbc = input.metaFbc
+  if (Object.keys(patch).length === 0) return
+
+  const { error } = await admin.from('profiles').update(patch).eq('id', userId)
+  if (error) {
+    console.warn('[meta-capi] reg attribution freeze failed', { userId, message: error.message })
+  }
+}
+
 export async function loadProfileMetaAttribution(
   admin: SupabaseClient,
   userId: string,

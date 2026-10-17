@@ -7,6 +7,7 @@ import { readAuthedUserId } from './_utils/tappayPayByPrime.js'
 import {
   readClientIpFromRequest,
   readClientUserAgent,
+  readEventSourceUrlFromBody,
   readMetaAttributionFromBody,
 } from './_utils/clientRequestMeta.js'
 import { patchProfileMetaAttributionIfPresent } from './_utils/metaCapiAttributionPatch.js'
@@ -94,6 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const capiCtx = {
     clientIpAddress: readClientIpFromRequest(req),
     clientUserAgent: readClientUserAgent(req),
+    eventSourceUrl: readEventSourceUrlFromBody(body),
   }
   await deliverMetaSubmitApplicationCapiIfNeeded(admin, result.applicationId, capiCtx)
 

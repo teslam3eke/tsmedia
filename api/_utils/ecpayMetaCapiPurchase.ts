@@ -10,6 +10,7 @@ type ClaimRow = {
   meta_fbc: string | null
   client_user_agent: string | null
   client_ip: string | null
+  meta_event_source_url: string | null
 }
 
 function parseClaim(data: unknown): ClaimRow | null {
@@ -29,6 +30,8 @@ function parseClaim(data: unknown): ClaimRow | null {
     meta_fbc: typeof o.meta_fbc === 'string' ? o.meta_fbc : null,
     client_user_agent: typeof o.client_user_agent === 'string' ? o.client_user_agent : null,
     client_ip: typeof o.client_ip === 'string' ? o.client_ip : null,
+    meta_event_source_url:
+      typeof o.meta_event_source_url === 'string' ? o.meta_event_source_url : null,
   }
 }
 
@@ -83,6 +86,7 @@ export async function deliverMetaPurchaseCapiIfNeeded(
     const result = await sendMetaCapiPurchase({
       eventId: row.merchant_trade_no,
       eventTimeSec,
+      eventSourceUrl: row.meta_event_source_url,
       valueNtd: row.amount_ntd,
       currency: 'TWD',
       orderId: row.merchant_trade_no,

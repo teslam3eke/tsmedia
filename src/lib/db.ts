@@ -16,7 +16,7 @@ import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 import { formatVerificationApplicationRejectionAlertBody } from './verificationAiUtils'
-import { getMetaAttributionPayload } from './metaAttribution'
+import { getClientMetaEventSourceUrl, getMetaAttributionPayload } from './metaAttribution'
 
 export const TERMS_VERSION = '2026-07-14'
 
@@ -857,6 +857,7 @@ export async function submitVerificationApplication(
         docs,
         metaFbp,
         metaFbc,
+        eventSourceUrl: getClientMetaEventSourceUrl(),
       }),
       cache: 'no-store',
     })

@@ -1,5 +1,5 @@
 import type { VercelRequest } from '@vercel/node'
-import { sanitizeMetaFbc, sanitizeMetaFbp } from './metaCapi.js'
+import { sanitizeMetaEventSourceUrl, sanitizeMetaFbc, sanitizeMetaFbp } from './metaCapi.js'
 
 export function readClientIpFromRequest(req: VercelRequest): string | null {
   const forwarded = req.headers['x-forwarded-for']
@@ -28,4 +28,10 @@ export function readMetaAttributionFromBody(body: unknown): MetaAttributionInput
     metaFbp: sanitizeMetaFbp(o.metaFbp ?? o.meta_fbp),
     metaFbc: sanitizeMetaFbc(o.metaFbc ?? o.meta_fbc),
   }
+}
+
+export function readEventSourceUrlFromBody(body: unknown): string {
+  const o = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const raw = o.eventSourceUrl ?? o.event_source_url
+  return sanitizeMetaEventSourceUrl(typeof raw === 'string' ? raw : null)
 }

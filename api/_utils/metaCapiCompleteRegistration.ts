@@ -1,16 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendMetaCapiStandardEvent } from './metaCapi.js'
-import { loadProfileMetaAttribution } from './metaCapiAttributionPatch.js'
+import type { MetaAttributionInput } from './clientRequestMeta.js'
 
 export type CompleteRegistrationCapiContext = {
   clientIpAddress: string | null
   clientUserAgent: string | null
+  eventSourceUrl: string
+  /** 本次請求帶入的 attribution（註冊／待送快照）；勿 fallback 至 profiles.meta_fbp/fbc。 */
+  attribution?: MetaAttributionInput
 }
 
 type ClaimRow = {
   userId: string
-  metaFbp: string | null
-  metaFbc: string | null
+  metaRegFbp: string | null
+  metaRegFbc: string | null
   registeredAt: string | null
 }
 
@@ -22,8 +25,8 @@ function parseClaim(data: unknown): ClaimRow | null {
   if (!userId) return null
   return {
     userId,
-    metaFbp: typeof o.meta_fbp === 'string' ? o.meta_fbp : null,
-    metaFbc: typeof o.meta_fbc === 'string' ? o.meta_fbc : null,
+    metaRegFbp: typeof o.meta_reg_fbp === 'string' ? o.meta_reg_fbp : null,
+    metaRegFbc: typeof o.meta_reg_fbc === 'string' ? o.meta_reg_fbc : null,
     registeredAt: typeof o.registered_at === 'string' ? o.registered_at : null,
   }
 }
@@ -57,13 +60,9 @@ export async function deliverMetaCompleteRegistrationCapiIfNeeded(
       /* ignore */
     }
 
-    let fbp = row.metaFbp
-    let fbc = row.metaFbc
-    if (!fbp || !fbc) {
-      const profile = await loadProfileMetaAttribution(admin, id)
-      if (!fbp && profile.metaFbp) fbp = profile.metaFbp
-      if (!fbc && profile.metaFbc) fbc = profile.metaFbc
-    }
+    const fromRequest = ctx.attribution
+    let fbp = fromRequest?.metaFbp ?? row.metaRegFbp
+    let fbc = fromRequest?.metaFbc ?? row.metaRegFbc
 
     const eventTimeSec = row.registeredAt
       ? Math.floor(new Date(row.registeredAt).getTime() / 1000)
@@ -73,6 +72,7 @@ export async function deliverMetaCompleteRegistrationCapiIfNeeded(
       eventName: 'CompleteRegistration',
       eventId: id,
       eventTimeSec,
+      eventSourceUrl: ctx.eventSourceUrl,
       externalId: id,
       email,
       fbp,

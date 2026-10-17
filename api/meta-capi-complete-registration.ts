@@ -7,9 +7,13 @@ import { readAuthedUserId } from './_utils/tappayPayByPrime.js'
 import {
   readClientIpFromRequest,
   readClientUserAgent,
+  readEventSourceUrlFromBody,
   readMetaAttributionFromBody,
 } from './_utils/clientRequestMeta.js'
-import { patchProfileMetaAttributionIfPresent } from './_utils/metaCapiAttributionPatch.js'
+import {
+  freezeRegistrationMetaAttributionIfPresent,
+  patchProfileMetaAttributionIfPresent,
+} from './_utils/metaCapiAttributionPatch.js'
 import { deliverMetaCompleteRegistrationCapiIfNeeded } from './_utils/metaCapiCompleteRegistration.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -40,14 +44,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
   const attribution = readMetaAttributionFromBody(body)
+  const eventSourceUrl = readEventSourceUrlFromBody(body)
   const admin = createClient(url, service)
 
-  await patchProfileMetaAttributionIfPresent(admin, auth.userId, attribution)
+  await freezeRegistrationMetaAttributionIfPresent(admin, auth.userId, attribution)
 
   await deliverMetaCompleteRegistrationCapiIfNeeded(admin, auth.userId, {
     clientIpAddress: readClientIpFromRequest(req),
     clientUserAgent: readClientUserAgent(req),
+    eventSourceUrl,
+    attribution,
   })
+
+  await patchProfileMetaAttributionIfPresent(admin, auth.userId, attribution)
 
   return res.status(200).json({ ok: true })
 }

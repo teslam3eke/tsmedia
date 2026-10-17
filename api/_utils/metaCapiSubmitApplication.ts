@@ -65,6 +65,7 @@ export async function deliverMetaSubmitApplicationCapiIfNeeded(
       eventName: 'SubmitApplication',
       eventId: appId,
       eventTimeSec,
+      eventSourceUrl: ctx.eventSourceUrl,
       externalId: row.userId,
       email,
       fbp: profile.metaFbp,

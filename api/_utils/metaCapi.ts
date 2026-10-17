@@ -16,6 +16,7 @@ export type MetaCapiUserDataInput = {
 export type MetaCapiPurchasePayload = MetaCapiUserDataInput & {
   eventId: string
   eventTimeSec: number
+  eventSourceUrl?: string | null
   valueNtd: number
   currency: string
   orderId: string
@@ -25,6 +26,7 @@ export type MetaCapiStandardEventPayload = MetaCapiUserDataInput & {
   eventName: string
   eventId: string
   eventTimeSec: number
+  eventSourceUrl?: string | null
   customData?: Record<string, unknown>
 }
 
@@ -58,6 +60,36 @@ export function sanitizeMetaFbc(raw: unknown): string | null {
   if (v.length < 8 || v.length > 512) return null
   if (!v.startsWith('fb.')) return null
   return v
+}
+
+export const META_EVENT_SOURCE_URL_FALLBACK = 'https://tsmedia.tw/'
+
+const META_EVENT_SOURCE_ALLOWED_HOSTS = new Set(['tsmedia.tw', 'www.tsmedia.tw'])
+
+/**
+ * Server CAPI event_source_url：僅允許 tsmedia.tw / www.tsmedia.tw、https、無 query/hash。
+ */
+export function sanitizeMetaEventSourceUrl(raw: unknown): string {
+  if (typeof raw !== 'string') return META_EVENT_SOURCE_URL_FALLBACK
+  const trimmed = raw.trim()
+  if (!trimmed) return META_EVENT_SOURCE_URL_FALLBACK
+
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  } catch {
+    return META_EVENT_SOURCE_URL_FALLBACK
+  }
+
+  if (url.protocol !== 'https:') return META_EVENT_SOURCE_URL_FALLBACK
+  const host = url.hostname.toLowerCase()
+  if (!META_EVENT_SOURCE_ALLOWED_HOSTS.has(host)) return META_EVENT_SOURCE_URL_FALLBACK
+  if (url.username || url.password) return META_EVENT_SOURCE_URL_FALLBACK
+
+  url.search = ''
+  url.hash = ''
+  const path = url.pathname || '/'
+  return `https://${host}${path}`
 }
 
 function readCapiConfig(): { pixelId: string; accessToken: string; testEventCode: string | null } | null {
@@ -183,6 +215,7 @@ export async function sendMetaCapiStandardEvent(
     event_time: payload.eventTimeSec,
     event_id: eventId,
     action_source: 'website',
+    event_source_url: sanitizeMetaEventSourceUrl(payload.eventSourceUrl),
     user_data: buildMetaCapiUserData(payload),
   }
   if (payload.customData && Object.keys(payload.customData).length > 0) {
@@ -212,6 +245,7 @@ export async function sendMetaCapiPurchase(
         event_time: payload.eventTimeSec,
         event_id: eventId,
         action_source: 'website',
+        event_source_url: sanitizeMetaEventSourceUrl(payload.eventSourceUrl),
         user_data: buildMetaCapiUserData(payload),
         custom_data: {
           value: payload.valueNtd,
