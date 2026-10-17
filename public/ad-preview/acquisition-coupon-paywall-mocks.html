@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Acquisition 優惠券付費畫面模擬（48 小時內 / 7 日後）</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --gold: #aa8147;
+      --gold-light: #c9a962;
+      --ink: #2c2419;
+      --muted: #5b5045;
+      --paper: #f7f3ec;
+      --paper-deep: #ebe4d8;
+      --card: #fffdf9;
+      --line: rgba(91, 80, 69, 0.12);
+      --serif: "Noto Serif TC", "Songti TC", Georgia, serif;
+      --sans: "Noto Sans TC", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(160deg, #1a1510 0%, #2d241c 40%, #1a1510 100%);
+      font-family: var(--sans);
+      color: var(--ink);
+      padding: 24px 16px 48px;
+    }
+    .page-title {
+      text-align: center;
+      color: #f5ebe0;
+      font-family: var(--serif);
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .page-sub {
+      text-align: center;
+      color: rgba(245, 235, 224, 0.65);
+      font-size: 0.75rem;
+      max-width: 520px;
+      margin: 0 auto 28px;
+      line-height: 1.5;
+    }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 32px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    .frame-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .frame-label {
+      color: var(--gold-light);
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .phone {
+      width: 390px;
+      max-width: 100%;
+      height: 844px;
+      border-radius: 36px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.08),
+        0 24px 80px rgba(0, 0, 0, 0.55);
+      background: var(--paper);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .status-bar {
+      height: 44px;
+      padding: 12px 24px 0;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+      flex-shrink: 0;
+    }
+    .screen-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 20px 24px;
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0 16px;
+    }
+    .nav-title {
+      font-family: var(--serif);
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 999px;
+      letter-spacing: 0.02em;
+    }
+    .badge-gold {
+      background: linear-gradient(135deg, #3d2f1a, var(--gold));
+      color: #fff8ef;
+    }
+    .badge-soft {
+      background: var(--paper-deep);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+    .hero {
+      text-align: center;
+      padding: 8px 0 20px;
+    }
+    .crown {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 12px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, #fff9f0, #e8dcc8);
+      border: 1px solid rgba(170, 129, 71, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+    }
+    .hero h1 {
+      font-family: var(--serif);
+      font-size: 1.35rem;
+      font-weight: 700;
+      line-height: 1.45;
+      margin: 0 0 8px;
+      color: var(--ink);
+    }
+    .hero p {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .price-card {
+      background: var(--card);
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      padding: 18px 18px 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 8px 24px rgba(44, 36, 25, 0.06);
+    }
+    .price-card h2 {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 0 0 12px;
+    }
+    .line-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.88rem;
+      padding: 7px 0;
+      border-bottom: 1px dashed var(--line);
+      color: var(--muted);
+    }
+    .line-item:last-of-type { border-bottom: none; }
+    .line-item strong { color: var(--ink); font-weight: 600; }
+    .line-item.discount strong { color: #b45309; }
+    .line-item.strike span:first-child { text-decoration: line-through; opacity: 0.55; }
+    .line-item.final {
+      margin-top: 10px;
+      padding-top: 14px;
+      border-top: 2px solid rgba(170, 129, 71, 0.25);
+      border-bottom: none;
+      font-size: 1rem;
+    }
+    .line-item.final strong {
+      font-family: var(--serif);
+      font-size: 1.5rem;
+      color: var(--gold);
+    }
+    .note {
+      font-size: 0.72rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      background: var(--paper-deep);
+      border-radius: 12px;
+    }
+    .note.warn {
+      background: #fff7ed;
+      border: 1px solid rgba(180, 83, 9, 0.15);
+      color: #7c2d12;
+    }
+    .discount-block {
+      background: #faf5ec;
+      border-radius: 16px;
+      padding: 14px 14px 12px;
+      margin-bottom: 16px;
+      border: 1px solid #e4d5bc;
+    }
+    .discount-block h3 {
+      margin: 0 0 10px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #5f4a2d;
+    }
+    .discount-row {
+      display: flex;
+      gap: 8px;
+    }
+    .discount-input {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #4b4033;
+      background: #fff;
+      box-shadow: 0 0 0 1px #ddc9aa;
+      font-family: var(--sans);
+    }
+    .discount-input::placeholder {
+      text-transform: none;
+      font-weight: 500;
+      letter-spacing: normal;
+      color: #aa9b89;
+    }
+    .discount-input:disabled {
+      background: #f3ede3;
+      color: #9a8b7a;
+      box-shadow: 0 0 0 1px #e0d4c4;
+    }
+    .discount-btn {
+      flex-shrink: 0;
+      min-width: 72px;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: var(--sans);
+      background: #9e7945;
+      color: #fff;
+    }
+    .discount-btn:disabled {
+      background: #d8ccbc;
+      color: #fff;
+    }
+    .discount-ok {
+      margin: 8px 0 0;
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #047857;
+      line-height: 1.45;
+    }
+    .discount-muted {
+      margin: 8px 0 0;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: #9a8b7a;
+      line-height: 1.45;
+    }
+    .discount-block--disabled {
+      opacity: 0.85;
+      background: #f5f0e8;
+    }
+    .cta {
+      width: 100%;
+      border: none;
+      border-radius: 14px;
+      padding: 16px 20px;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: var(--sans);
+      cursor: default;
+      background: linear-gradient(180deg, #c9a962 0%, var(--gold) 45%, #8f6b3a 100%);
+      color: #fffef9;
+      box-shadow: 0 6px 20px rgba(170, 129, 71, 0.35);
+    }
+    .cta-sub {
+      text-align: center;
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-top: 10px;
+      line-height: 1.4;
+    }
+    .benefits {
+      margin-top: 20px;
+    }
+    .benefits li {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+      list-style: none;
+      padding-left: 22px;
+      position: relative;
+    }
+    .benefits li::before {
+      content: "✓";
+      position: absolute;
+      left: 0;
+      color: var(--gold);
+      font-weight: 700;
+    }
+    .mock-tag {
+      position: absolute;
+      top: 52px;
+      right: 12px;
+      font-size: 9px;
+      font-weight: 700;
+      color: rgba(44, 36, 25, 0.35);
+      transform: rotate(8deg);
+      pointer-events: none;
+    }
+    /* 7d variant accent */
+    .phone--7d .badge-gold {
+      background: linear-gradient(135deg, #1e3a5f, #2563eb);
+    }
+    .phone--7d .line-item.final strong { color: #1d4ed8; }
+    .phone--7d .cta {
+      background: linear-gradient(180deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%);
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <p class="page-title">Acquisition 優惠券 · 付費畫面模擬</p>
+  <p class="page-sub">
+    靜態 UI 預覽（非 Production App）。金額示意依目前 Production 定價；有效期限由 lifecycle 發放時設定，畫面不 hardcode 天數或計算說明。
+  </p>
+
+  <div class="grid">
+    <!-- 48h NT$200 -->
+    <div class="frame-wrap">
+      <span class="frame-label">審核通過 48 小時內 · APPROVED_48H_200</span>
+      <div class="phone" id="mock-48h">
+        <span class="mock-tag">UI MOCK</span>
+        <div class="status-bar">
+          <span>9:41</span>
+          <span>5G ▮▮▮</span>
+        </div>
+        <div class="screen-scroll">
+          <div class="nav">
+            <span style="font-size:1.25rem;opacity:.5">←</span>
+            <span class="nav-title">開通 VIP 會員</span>
+            <span style="width:24px"></span>
+          </div>
+
+          <div class="badge-row">
+            <span class="badge badge-gold">審核通過專屬禮</span>
+            <span class="badge badge-soft">48 小時內 NT$200 折價</span>
+          </div>
+
+          <div class="hero">
+            <div class="crown">👑</div>
+            <h1>再少 NT$200<br />完成你的 VIP 開通</h1>
+            <p>可與目前全站活動價疊加。<br />不可與會員折扣碼併用；金額以伺服器計算為準。</p>
+          </div>
+
+          <div class="discount-block discount-block--disabled">
+            <h3>會員折扣碼</h3>
+            <div class="discount-row">
+              <input
+                type="text"
+                class="discount-input"
+                disabled
+                placeholder="請輸入折扣碼"
+                aria-label="30 天會員折扣碼"
+              />
+              <button type="button" class="discount-btn" disabled>套用</button>
+            </div>
+            <p class="discount-muted">使用 48 小時內折價券時，不可再套用會員折扣碼。</p>
+          </div>
+
+          <div class="price-card">
+            <h2>付款明細（示意 · 七折 + 48h 券）</h2>
+            <div class="line-item strike">
+              <span>VIP 月卡原價</span>
+              <strong>NT$ 599</strong>
+            </div>
+            <div class="line-item">
+              <span>全站活動價（七折）</span>
+              <strong>NT$ 419</strong>
+            </div>
+            <div class="line-item strike">
+              <span>會員折扣碼（不適用）</span>
+              <strong>—</strong>
+            </div>
+            <div class="line-item discount">
+              <span>48 小時內折價券</span>
+              <strong>− NT$ 200</strong>
+            </div>
+            <div class="line-item final">
+              <span>應付金額</span>
+              <strong>NT$ 219</strong>
+            </div>
+          </div>
+
+          <button type="button" class="cta">以 NT$ 219 前往付款（綠界）</button>
+          <p class="cta-sub">僅限男性首次 VIP 月卡 · 不可用於道具加購<br />優惠券有效期限內使用</p>
+
+          <ul class="benefits">
+            <li>即時配對功能</li>
+            <li>天選之人配對</li>
+            <li>每日 6 位探索卡片</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7d 三折 -->
+    <div class="frame-wrap">
+      <span class="frame-label">APPROVED_7D_30PCT · 限時三折</span>
+      <div class="phone phone--7d" id="mock-7d">
+        <span class="mock-tag">UI MOCK</span>
+        <div class="status-bar">
+          <span>9:41</span>
+          <span>5G ▮▮▮</span>
+        </div>
+        <div class="screen-scroll">
+          <div class="nav">
+            <span style="font-size:1.25rem;opacity:.5">←</span>
+            <span class="nav-title">開通 VIP 會員</span>
+            <span style="width:24px"></span>
+          </div>
+
+          <div class="badge-row">
+            <span class="badge badge-gold">限時三折券</span>
+            <span class="badge badge-soft">不與其他優惠疊加</span>
+          </div>
+
+          <div class="hero">
+            <div class="crown">👑</div>
+            <h1>VIP 月卡<br />原價三折優惠</h1>
+            <p>以原價 30% 開通，不套用全站活動價、<br />也不與折扣碼或其他券併用。</p>
+          </div>
+
+          <div class="discount-block discount-block--disabled">
+            <h3>折扣碼</h3>
+            <div class="discount-row">
+              <input
+                type="text"
+                class="discount-input"
+                disabled
+                placeholder="請輸入折扣碼"
+                aria-label="30 天會員折扣碼"
+              />
+              <button type="button" class="discount-btn" disabled>套用</button>
+            </div>
+            <p class="discount-muted">使用三折券時不可再套用會員折扣碼或其他優惠。</p>
+          </div>
+
+          <div class="price-card">
+            <h2>付款明細</h2>
+            <div class="line-item">
+              <span>VIP 月卡原價</span>
+              <strong>NT$ 599</strong>
+            </div>
+            <div class="line-item strike">
+              <span>全站活動價（不適用）</span>
+              <strong>—</strong>
+            </div>
+            <div class="line-item strike">
+              <span>會員折扣碼（不適用）</span>
+              <strong>—</strong>
+            </div>
+            <div class="line-item discount">
+              <span>三折券（付原價 30%）</span>
+              <strong>× 0.30</strong>
+            </div>
+            <div class="line-item final">
+              <span>應付金額</span>
+              <strong>NT$ 179</strong>
+            </div>
+          </div>
+
+          <button type="button" class="cta">以 NT$ 179 前往付款（綠界）</button>
+          <p class="cta-sub">僅限男性首次 VIP 月卡 · 不可用於道具加購<br />優惠券有效期限內使用</p>
+
+          <ul class="benefits">
+            <li>即時配對功能</li>
+            <li>天選之人配對</li>
+            <li>每日 6 位探索卡片</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="page-sub" style="margin-top:32px">
+    本機預覽：在瀏覽器開啟<br />
+    <code style="color:#c9a962">/ad-preview/acquisition-coupon-paywall-mocks.html</code><br />
+    或執行 <code style="color:#c9a962">npm run dev</code> 後造訪同路徑。
+  </p>
+</body>
+</html>
