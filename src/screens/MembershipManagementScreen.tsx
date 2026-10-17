@@ -42,6 +42,7 @@ import {
   type TPDirectAPI,
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
+import { PAYMENT_UNAVAILABLE_USER_MESSAGE } from '@/lib/paymentProvider'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
 import { trackMetaPurchaseFromTapPay } from '@/lib/metaPixel'
 import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnloadGuard'
@@ -312,6 +313,10 @@ export default function MembershipManagementScreen({
     setBusy(true)
     setError(null)
     try {
+      if (paymentMode === 'unavailable') {
+        setError(PAYMENT_UNAVAILABLE_USER_MESSAGE)
+        return
+      }
       if (paymentMode === 'mock') {
         const res = await purchaseCreditPackMock(packKey)
         if (!res.ok) {
@@ -374,6 +379,10 @@ export default function MembershipManagementScreen({
     setBusy(true)
     setError(null)
     try {
+      if (paymentMode === 'unavailable') {
+        setError(PAYMENT_UNAVAILABLE_USER_MESSAGE)
+        return
+      }
       if (paymentMode === 'mock') {
         const res = await purchaseCrownEffectMock()
         if (!res.ok) {
@@ -509,15 +518,21 @@ export default function MembershipManagementScreen({
   }
 
   const handleSubscribe = () => {
+    if (paymentMode === 'unavailable') {
+      setError(PAYMENT_UNAVAILABLE_USER_MESSAGE)
+      return
+    }
     if (paymentMode === 'ecpay') void subscribeEcpay()
     else if (paymentMode === 'tappay') void subscribeTapPay()
-    else void subscribeMock()
+    else if (paymentMode === 'mock') void subscribeMock()
+    else setError(PAYMENT_UNAVAILABLE_USER_MESSAGE)
   }
 
   const subscribeDisabled =
     busy ||
     discountBusy ||
     paymentLoading ||
+    paymentMode === 'unavailable' ||
     (paymentMode === 'tappay' && (!tapReady || Boolean(tapInitError)))
 
   const subscribeLabel = busy

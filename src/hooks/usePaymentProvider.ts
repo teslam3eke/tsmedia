@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchPaymentProvider, type PaymentProviderMode } from '@/lib/paymentProvider'
 
 export function usePaymentProvider() {
-  const [mode, setMode] = useState<PaymentProviderMode>('mock')
+  const [mode, setMode] = useState<PaymentProviderMode>('unavailable')
   const [sandbox, setSandbox] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
 

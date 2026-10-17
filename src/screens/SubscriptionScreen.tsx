@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { ChevronLeft, Crown, Heart, Sparkles, Eye, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { completeMonthlyMembership } from '@/lib/db'
+import { isClientMockPaymentEnabled, PAYMENT_UNAVAILABLE_USER_MESSAGE } from '@/lib/paymentProvider'
 import { supabase } from '@/lib/supabase'
 import {
   loadTapPaySdk,
@@ -280,7 +281,7 @@ export default function SubscriptionScreen({
           >
             {busy ? '付款處理中⋯' : done ? '已完成' : `信用卡付款 ${price} 元／月`}
           </button>
-        ) : (
+        ) : isClientMockPaymentEnabled() ? (
           <button
             type="button"
             disabled={busy || done}
@@ -294,6 +295,8 @@ export default function SubscriptionScreen({
           >
             {busy ? '處理中⋯' : done ? '已完成' : `立即開通 ${price} 元／月（模擬付款）`}
           </button>
+        ) : (
+          <p className="text-center text-sm font-semibold text-slate-400">{PAYMENT_UNAVAILABLE_USER_MESSAGE}</p>
         )}
         <p className="mt-3 max-w-sm mx-auto text-center text-[11px] leading-relaxed text-slate-500">
           繼續付款即表示您已閱讀並同意{' '}

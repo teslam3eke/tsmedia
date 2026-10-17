@@ -16,6 +16,7 @@ import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 import { getClientMetaEventSourceUrl, getMetaAttributionPayload } from './metaAttribution'
+import { isClientMockPaymentEnabled, PAYMENT_UNAVAILABLE_USER_MESSAGE } from './paymentProvider'
 
 export const TERMS_VERSION = '2026-07-14'
 
@@ -1451,6 +1452,9 @@ export async function completeMonthlyMembership(): Promise<{
   priceNtd?: number
   subscriptionExpiresAt?: string
 }> {
+  if (!isClientMockPaymentEnabled()) {
+    return { ok: false, error: PAYMENT_UNAVAILABLE_USER_MESSAGE }
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('complete_monthly_membership')
 
@@ -1552,6 +1556,9 @@ export async function cancelMembershipSubscription(): Promise<{ ok: boolean; rea
 export async function purchaseCreditPackMock(
   packKey: CreditPackKey,
 ): Promise<{ ok: boolean; error?: string }> {
+  if (!isClientMockPaymentEnabled()) {
+    return { ok: false, error: PAYMENT_UNAVAILABLE_USER_MESSAGE }
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('purchase_credit_pack', {
     p_pack_key: packKey,
@@ -1573,6 +1580,9 @@ export async function purchaseCrownEffectMock(): Promise<{
   error?: string
   reason?: string
 }> {
+  if (!isClientMockPaymentEnabled()) {
+    return { ok: false, error: PAYMENT_UNAVAILABLE_USER_MESSAGE }
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).rpc('purchase_credit_pack', {
     p_pack_key: 'crown_effect',

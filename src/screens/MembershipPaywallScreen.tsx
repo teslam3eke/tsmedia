@@ -30,6 +30,7 @@ import {
   type TPDirectAPI,
 } from '@/lib/tappayClient'
 import { usePaymentProvider } from '@/hooks/usePaymentProvider'
+import { PAYMENT_UNAVAILABLE_USER_MESSAGE } from '@/lib/paymentProvider'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
@@ -291,14 +292,20 @@ export default function MembershipPaywallScreen({
   }
 
   const handleSubscribe = () => {
+    if (paymentMode === 'unavailable') {
+      setError(PAYMENT_UNAVAILABLE_USER_MESSAGE)
+      return
+    }
     if (paymentMode === 'ecpay') void subscribeEcpay()
     else if (paymentMode === 'tappay') void subscribeTapPay()
-    else void subscribeMock()
+    else if (paymentMode === 'mock') void subscribeMock()
+    else setError(PAYMENT_UNAVAILABLE_USER_MESSAGE)
   }
 
   const subscribeDisabled =
     busy ||
     paymentLoading ||
+    paymentMode === 'unavailable' ||
     (paymentMode === 'tappay' && (!tapReady || Boolean(tapInitError)))
 
   const subscribeLabel = busy
