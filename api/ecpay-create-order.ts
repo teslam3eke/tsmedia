@@ -17,10 +17,16 @@ import {
   membershipAmountFromPricing,
   packAmountFromPricing,
 } from './_utils/pricingResolver.js'
+import { resolveMaleMembershipCheckout } from './_utils/resolveMaleMembershipCheckout.js'
 import {
-  normalizeMembershipDiscountCode,
-  resolveMaleMembershipDiscount,
-} from './_utils/membershipDiscount.js'
+  MembershipCheckoutPricingError,
+  stripUntrustedCheckoutPriceFields,
+} from './_utils/membershipCheckoutPricing.js'
+import {
+  normalizeUserCouponEntitlementId,
+  reserveUserCouponForEcpayOrder,
+  userCouponErrorToClientMessage,
+} from './_utils/userCouponEntitlement.js'
 import {
   readClientIpFromRequest,
   readClientUserAgent,
@@ -33,6 +39,7 @@ type Body = {
   packKey?: string
   email?: string
   membershipDiscountCode?: string
+  userCouponEntitlementId?: string
   metaFbp?: string
   metaFbc?: string
 }
@@ -61,10 +68,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(auth.status).json({ ok: false, error: auth.error })
   }
 
-  const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) as Body
+  const bodyRaw = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) as Body &
+    Record<string, unknown>
+  stripUntrustedCheckoutPriceFields(bodyRaw)
+  const body = bodyRaw
   const productType = body.productType
   const packKey = body.packKey?.trim() ?? ''
   const email = body.email?.trim() || undefined
+  const userCouponEntitlementIdEarly = normalizeUserCouponEntitlementId(
+    body.userCouponEntitlementId,
+  )
+
+  if (userCouponEntitlementIdEarly && productType !== 'membership') {
+    return res.status(400).json({
+      ok: false,
+      error: '此優惠券僅限男性 VIP 月卡結帳，無法用於其他商品。',
+    })
+  }
 
   const admin = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey)
 
@@ -81,6 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let itemName: string
   let packKeyToStore: string | null = null
   let membershipDiscountCodeToStore: string | null = null
+  let userCouponEntitlementIdToStore: string | null = null
 
   if (productType === 'membership') {
     const { data: profile, error: profileErr } = await admin
@@ -93,32 +114,63 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
     }
 
-    const baseAmount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
-    const requestedCode = normalizeMembershipDiscountCode(body.membershipDiscountCode)
-    if (requestedCode) {
-      if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
-        return res.status(400).json({ ok: false, error: '目前帳號不符合折扣碼使用資格。' })
+    const userCouponEntitlementId = normalizeUserCouponEntitlementId(body.userCouponEntitlementId)
+
+    if (profile.gender === 'female') {
+      if (userCouponEntitlementId) {
+        return res.status(400).json({ ok: false, error: '此優惠券僅限男性會員 VIP 購買。' })
       }
-      if (profile.gender !== 'male') {
-        return res.status(400).json({ ok: false, error: '女性免費試用請直接在會員管理頁兌換。' })
+      amount = membershipAmountFromPricing(pricing, 'female')
+    } else {
+      const needsDiscountEligibility =
+        Boolean(body.membershipDiscountCode?.trim()) || Boolean(userCouponEntitlementId)
+      if (needsDiscountEligibility) {
+        if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
+          return res.status(400).json({ ok: false, error: '目前帳號不符合折扣碼使用資格。' })
+        }
       }
       try {
-        const discount = await resolveMaleMembershipDiscount(admin, requestedCode, baseAmount)
-        amount = discount?.finalPriceNtd ?? baseAmount
-        membershipDiscountCodeToStore = discount?.code ?? null
+        const resolved = await resolveMaleMembershipCheckout(admin, {
+          userId: auth.userId,
+          pricing,
+          membershipDiscountCodeRaw: body.membershipDiscountCode,
+          userCouponEntitlementIdRaw: userCouponEntitlementId,
+        })
+        amount = resolved.amountNtd
+        membershipDiscountCodeToStore = resolved.membershipDiscountCode
+        userCouponEntitlementIdToStore = resolved.userCouponEntitlementId
       } catch (e) {
+        if (e instanceof MembershipCheckoutPricingError) {
+          if (e.code === 'COUPON_STACKING_CONFLICT') {
+            return res.status(400).json({
+              ok: false,
+              error: '此優惠券不可與目前的折扣碼或活動價同時使用。',
+            })
+          }
+          return res.status(400).json({ ok: false, error: '無法套用優惠券。' })
+        }
         if (e instanceof Error && e.message === 'INVALID_MEMBERSHIP_DISCOUNT_CODE') {
           return res.status(400).json({ ok: false, error: '折扣碼無效或已停止使用。' })
         }
-        console.error('[ecpay-create-order] membership discount', e)
-        return res.status(500).json({ ok: false, error: '暫時無法套用折扣碼，請稍後再試。' })
+        if (e instanceof Error && e.message.startsWith('COUPON_')) {
+          return res.status(400).json({
+            ok: false,
+            error: userCouponErrorToClientMessage(e.message),
+          })
+        }
+        console.error('[ecpay-create-order] membership checkout pricing', e)
+        return res.status(500).json({ ok: false, error: '暫時無法計算付款金額，請稍後再試。' })
       }
-    } else {
-      amount = baseAmount
     }
     itemDesc = 'tsMedia VIP 月卡 30 天'
     itemName = 'tsMedia VIP 月卡 30 天'
   } else if (productType === 'credit_pack') {
+    if (userCouponEntitlementIdEarly) {
+      return res.status(400).json({
+        ok: false,
+        error: '此優惠券僅限男性 VIP 月卡結帳，無法用於其他商品。',
+      })
+    }
     const pack = CREDIT_PACKS[packKey]
     if (!pack) {
       return res.status(400).json({ ok: false, error: '無效的道具包。' })
@@ -166,6 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     item_desc: itemDesc,
     status: 'pending',
     membership_discount_code: membershipDiscountCodeToStore,
+    user_coupon_entitlement_id: userCouponEntitlementIdToStore,
     meta_fbp: metaFbp,
     meta_fbc: metaFbc,
     meta_event_source_url: metaEventSourceUrl,
@@ -176,6 +229,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (insErr) {
     console.error('[ecpay-create-order] insert', insErr)
     return res.status(500).json({ ok: false, error: '無法建立訂單，請稍後再試。' })
+  }
+
+  if (userCouponEntitlementIdToStore) {
+    try {
+      await reserveUserCouponForEcpayOrder(admin, {
+        entitlementId: userCouponEntitlementIdToStore,
+        userId: auth.userId,
+        merchantTradeNo,
+      })
+    } catch (e) {
+      await admin.from('ecpay_orders').delete().eq('merchant_trade_no', merchantTradeNo)
+      const code = e instanceof Error ? e.message : ''
+      if (code.startsWith('COUPON_')) {
+        return res.status(400).json({
+          ok: false,
+          error: userCouponErrorToClientMessage(code),
+        })
+      }
+      console.error('[ecpay-create-order] coupon reserve', e)
+      return res.status(500).json({ ok: false, error: '無法保留優惠券，請稍後再試。' })
+    }
   }
 
   if (metaFbp || metaFbc) {

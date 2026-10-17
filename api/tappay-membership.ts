@@ -27,6 +27,7 @@ type TapPayPrimeBody = {
   prime?: string
   cardholder?: Cardholder
   membershipDiscountCode?: string
+  userCouponEntitlementId?: string
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -75,6 +76,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body) as TapPayPrimeBody
+  if (body.userCouponEntitlementId?.trim()) {
+    return res.status(400).json({
+      ok: false,
+      error: '此優惠券僅支援綠界付款流程，請改用信用卡（綠界）結帳。',
+    })
+  }
   const prime = body.prime?.trim()
   const ch = body.cardholder
 

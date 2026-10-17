@@ -12,7 +12,8 @@ import {
   formatPromoEndsAtZhTw,
 } from '@/lib/paymentPricing'
 
-const DISCOUNT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const
+/** 一般全站特價最低 5 折（DB／RPC 強制） */
+const DISCOUNT_OPTIONS = [5, 6, 7, 8, 9, 10] as const
 
 function campaignStatus(row: PaymentPromoCampaignRow, now = Date.now()): 'active' | 'scheduled' | 'expired' | 'cancelled' {
   if (row.cancelled_at) return 'cancelled'
@@ -53,7 +54,7 @@ export default function AdminPricingTab() {
   const [success, setSuccess] = useState<string | null>(null)
 
   const [label, setLabel] = useState('試營運特價')
-  const [discountTenths, setDiscountTenths] = useState<number>(2)
+  const [discountTenths, setDiscountTenths] = useState<number>(5)
   const [endsAtLocal, setEndsAtLocal] = useState(defaultEndsAtLocalInput)
 
   const load = useCallback(async () => {

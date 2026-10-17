@@ -8,6 +8,8 @@ export type EcpayCheckoutParams = {
   packKey?: string
   email?: string
   membershipDiscountCode?: string
+  /** Server 查 entitlement；不可傳金額 */
+  userCouponEntitlementId?: string
 }
 
 export type EcpayOrderStatus = {

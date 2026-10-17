@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest'
+
+/** migration 162：僅 service_role 可執行（文件／回歸；實際權限在 SQL GRANT） */
+export const COUPON_SERVICE_ROLE_ONLY_RPCS = [
+  'issue_user_coupon_entitlement_for_service',
+  'reserve_user_coupon_for_ecpay_order',
+  'release_user_coupon_reservation_for_ecpay',
+  'attempt_user_coupon_redemption_for_ecpay_order',
+  'reconcile_ecpay_coupon_redemption_for_service',
+  'release_stale_user_coupon_reservations',
+] as const
+
+describe('coupon RPC access policy (documented)', () => {
+  it('lists acquisition coupon RPCs as service-only', () => {
+    expect(COUPON_SERVICE_ROLE_ONLY_RPCS).toContain('issue_user_coupon_entitlement_for_service')
+    expect(COUPON_SERVICE_ROLE_ONLY_RPCS).not.toContain('get_public_payment_pricing')
+  })
+
+  it('authenticated must not use issue/reserve/redeem (enforced in migration 162 REVOKE)', () => {
+    for (const rpc of [
+      'issue_user_coupon_entitlement_for_service',
+      'reserve_user_coupon_for_ecpay_order',
+      'attempt_user_coupon_redemption_for_ecpay_order',
+    ]) {
+      expect(COUPON_SERVICE_ROLE_ONLY_RPCS.includes(rpc as (typeof COUPON_SERVICE_ROLE_ONLY_RPCS)[number])).toBe(
+        true,
+      )
+    }
+  })
+})
