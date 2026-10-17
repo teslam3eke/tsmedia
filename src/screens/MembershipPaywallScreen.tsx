@@ -34,6 +34,10 @@ import { PAYMENT_UNAVAILABLE_USER_MESSAGE } from '@/lib/paymentProvider'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 import { startEcpayCheckout, syncPendingEcpayOrders } from '@/lib/ecpayCheckout'
+import {
+  fetchAcquisitionCouponAutoApply,
+  type AcquisitionCouponAutoApply,
+} from '@/lib/acquisitionCouponCheckout'
 import { trackMetaPurchaseFromTapPay } from '@/lib/metaPixel'
 import TermsOfServiceModal from '@/components/TermsOfServiceModal'
 import FeedbackScreen from '@/screens/FeedbackScreen'
@@ -113,6 +117,15 @@ export default function MembershipPaywallScreen({
 
   const monthlyListPrice = MEMBERSHIP_LIST_PRICE_NTD[gender]
   const monthlyPrice = pricing?.membership[gender].priceNtd ?? monthlyListPrice
+  const [acquisitionAutoApply, setAcquisitionAutoApply] =
+    useState<AcquisitionCouponAutoApply | null>(null)
+
+  const checkoutPriceNtd = acquisitionAutoApply?.finalAmountNtd ?? monthlyPrice
+  const showAcquisitionAutoApply = gender === 'male' && Boolean(acquisitionAutoApply)
+  const showPriceStrikethrough = showAcquisitionAutoApply
+    ? checkoutPriceNtd < monthlyPrice
+    : isPromoPriceActive(monthlyListPrice, monthlyPrice)
+  const strikethroughPriceNtd = showAcquisitionAutoApply ? monthlyPrice : monthlyListPrice
 
   const reloadProfile = useCallback(async () => {
     if (paymentMode === 'ecpay') {
@@ -146,6 +159,20 @@ export default function MembershipPaywallScreen({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (gender !== 'male') {
+      setAcquisitionAutoApply(null)
+      return
+    }
+    let cancelled = false
+    void fetchAcquisitionCouponAutoApply().then((next) => {
+      if (!cancelled) setAcquisitionAutoApply(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [gender, userId])
 
   useEffect(() => {
     const onVisible = () => {
@@ -241,6 +268,7 @@ export default function MembershipPaywallScreen({
       await startEcpayCheckout({
         productType: 'membership',
         email: userEmail,
+        userCouponEntitlementId: acquisitionAutoApply?.entitlementId,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : '無法前往付款')
@@ -507,7 +535,13 @@ export default function MembershipPaywallScreen({
               </div>
             ))}
 
-            {pricing?.promo && (
+            {showAcquisitionAutoApply && acquisitionAutoApply && (
+              <p className="rounded-2xl bg-[#f0f9ff] px-4 py-2.5 text-center text-sm font-bold leading-snug text-[#0c4a6e] ring-1 ring-[#bae6fd]">
+                折價已自動帶入：{acquisitionAutoApply.displayLabel}
+              </p>
+            )}
+
+            {pricing?.promo && !showAcquisitionAutoApply && (
               <p className="rounded-2xl bg-[#fff8f0] px-4 py-2.5 text-center text-sm font-bold leading-snug text-[#8b6914] ring-1 ring-[#e8d5b5]">
                 {pricing.promo.label}
               </p>
@@ -578,9 +612,9 @@ export default function MembershipPaywallScreen({
 
                 <div className="flex w-[158px] shrink-0 flex-col items-end pb-0.5">
                   <p className="whitespace-nowrap text-right leading-none">
-                    {isPromoPriceActive(monthlyListPrice, monthlyPrice) && (
+                    {showPriceStrikethrough && (
                       <span className="mr-1 text-[9px] text-[#a3968a] line-through">
-                        NT$ {monthlyListPrice}
+                        NT$ {strikethroughPriceNtd}
                       </span>
                     )}
                     <span className="text-[10px] font-bold text-[#5b5045]">NT$ </span>
@@ -588,7 +622,7 @@ export default function MembershipPaywallScreen({
                       className="bg-gradient-to-b from-[#d5aa58] via-[#9f6827] to-[#714217] bg-clip-text text-[38px] text-transparent"
                       style={{ fontFamily: SERIF }}
                     >
-                      {monthlyPrice}
+                      {checkoutPriceNtd}
                     </span>
                     <span className="ml-0.5 text-[10px] font-semibold text-[#4c443b]">/ 30天</span>
                   </p>

@@ -17,10 +17,17 @@
     {
       "path": "/api/cron-discover-rollover-push",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron-acquisition-coupon-lifecycle",
+      "schedule": "0 */6 * * *"
     }
   ],
   "functions": {
     "api/cron-discover-rollover-push.ts": {
+      "maxDuration": 120
+    },
+    "api/cron-acquisition-coupon-lifecycle.ts": {
       "maxDuration": 120
     }
   },

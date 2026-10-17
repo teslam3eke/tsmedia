@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE,
   EMAIL_LAUNCH_APPROVAL_VALUE,
   EMAIL_LAUNCH_FROM_PARAM,
   captureEmailLaunchSourceFromUrl,
@@ -33,6 +34,23 @@ describe('emailLaunchSource', () => {
     captureEmailLaunchSourceFromUrl()
     const src = readEmailLaunchSource()
     expect(src?.kind).toBe(EMAIL_LAUNCH_APPROVAL_VALUE)
+  })
+
+  it('captures fromEmail=acquisition_coupon', () => {
+    const href = `https://tsmedia.tw/?${EMAIL_LAUNCH_FROM_PARAM}=${EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE}`
+    vi.stubGlobal('window', {
+      location: {
+        href,
+        search: `?${EMAIL_LAUNCH_FROM_PARAM}=${EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE}`,
+        pathname: '/',
+        hash: '',
+      },
+      history: { replaceState: vi.fn() },
+    } as unknown as Window)
+
+    captureEmailLaunchSourceFromUrl()
+    const src = readEmailLaunchSource()
+    expect(src?.kind).toBe(EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE)
   })
 
   it('CTA path is in PWA scope', () => {
