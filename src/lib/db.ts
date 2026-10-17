@@ -15,7 +15,6 @@ import type {
 import { PROFILE_PHOTO_MAX } from './types'
 import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
-import { formatVerificationApplicationRejectionAlertBody } from './verificationAiUtils'
 import { getClientMetaEventSourceUrl, getMetaAttributionPayload } from './metaAttribution'
 
 export const TERMS_VERSION = '2026-07-14'
@@ -946,175 +945,72 @@ export async function getAllVerificationApplications(
   return attachProfilesToApplications((data ?? []) as VerificationApplicationWithProfile[])
 }
 
+async function requestAdminVerificationApplicationReview(body: {
+  action: 'approve' | 'reject'
+  applicationId: string
+  skipIncome?: boolean
+  reviewerNote?: string | null
+}): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
+  const { data } = await supabase.auth.getSession()
+  const token = data.session?.access_token
+  if (!token) return { ok: false, error: '管理員登入已失效' }
+
+  try {
+    const res = await fetch('/api/admin-verification-application-review', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    })
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean
+      error?: string
+      pushSent?: number
+      pushFailed?: number
+    }
+    if (!res.ok || json.ok === false) {
+      return { ok: false, error: json.error ?? `審核 API 失敗（${res.status}）` }
+    }
+    return {
+      ok: true,
+      pushSent: json.pushSent,
+      pushFailed: json.pushFailed,
+      ...(json.pushSent && json.pushSent > 0 ? {} : { error: json.error }),
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : '審核 API 請求失敗',
+    }
+  }
+}
+
 export async function approveVerificationApplication(
   applicationId: string,
-  application: VerificationApplicationWithProfile,
+  _application: VerificationApplicationWithProfile,
   opts?: { reviewerNote?: string; skipIncome?: boolean },
 ): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
-  const reviewedAt = new Date().toISOString()
-  const reviewerNote = opts?.reviewerNote ?? null
-  const skipIncome = opts?.skipIncome === true
-  const incomeDocs = application.docs.filter((d) => d.verification_kind === 'income')
-  const incomeDoc = incomeDocs.find((d) => d.claimed_income_tier)
-  const nonIncomeDocIds = application.docs
-    .filter((d) => d.verification_kind !== 'income')
-    .map((d) => d.id)
-  const incomeDocIds = incomeDocs.map((d) => d.id)
-  const incomeSkipNote = '收入皇冠認證未通過；會員審核已通過。'
-
-  const { error: appError } = await supabase
-    .from('verification_applications')
-    .update({
-      status: 'approved',
-      reviewed_at: reviewedAt,
-      reviewer_note: skipIncome && incomeDocIds.length > 0
-        ? (reviewerNote ?? '會員審核通過；收入皇冠未核可')
-        : reviewerNote,
-    })
-    .eq('id', applicationId)
-
-  if (appError) {
-    console.error('[db] approveVerificationApplication app error:', appError.message)
-    return { ok: false, error: appError.message }
-  }
-
-  if (nonIncomeDocIds.length > 0) {
-    const { error: docsError } = await supabase
-      .from('verification_docs')
-      .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote })
-      .in('id', nonIncomeDocIds)
-
-    if (docsError) {
-      console.error('[db] approveVerificationApplication docs error:', docsError.message)
-      return { ok: false, error: docsError.message }
-    }
-  }
-
-  if (skipIncome && incomeDocIds.length > 0) {
-    const { error: incomeRejectError } = await supabase
-      .from('verification_docs')
-      .update({
-        status: 'rejected',
-        reviewed_at: reviewedAt,
-        reviewer_note: incomeSkipNote,
-      })
-      .in('id', incomeDocIds)
-
-    if (incomeRejectError) {
-      console.error('[db] approveVerificationApplication income reject error:', incomeRejectError.message)
-      return { ok: false, error: incomeRejectError.message }
-    }
-  } else if (incomeDocIds.length > 0) {
-    const { error: incomeApproveError } = await supabase
-      .from('verification_docs')
-      .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote })
-      .in('id', incomeDocIds)
-
-    if (incomeApproveError) {
-      console.error('[db] approveVerificationApplication income approve error:', incomeApproveError.message)
-      return { ok: false, error: incomeApproveError.message }
-    }
-  }
-
-  const profilePatch: Record<string, unknown> = {
-    is_verified: true,
-    verification_status: 'approved',
-  }
-  if (!skipIncome && incomeDoc?.claimed_income_tier) {
-    profilePatch.income_tier = incomeDoc.claimed_income_tier
-  }
-
-  const { error: profileError } = await supabase
-    .from('profiles')
-    .update(profilePatch)
-    .eq('id', application.user_id)
-
-  if (profileError) {
-    console.error('[db] approveVerificationApplication profile error:', profileError.message)
-    return { ok: false, error: profileError.message }
-  }
-
-  const paths = application.docs.map((d) => d.doc_url).filter(Boolean) as string[]
-  const deleted = await deleteProofDocsFromStorage(paths)
-
-  if (paths.length > 0 && deleted) {
-    await supabase
-      .from('verification_docs')
-      .update({ doc_url: null })
-      .eq('application_id', applicationId)
-  }
-
-  const bodyParts = ['你的會員審核已通過。']
-  if (skipIncome && incomeDocIds.length > 0) {
-    bodyParts.push('收入皇冠認證未通過；若日後有合適文件，可重新申請皇冠。')
-  } else if (incomeDoc?.claimed_income_tier) {
-    bodyParts.push('收入皇冠認證已一併通過，可到編輯個人資訊開啟皇冠顯示。')
-  }
-
-  const notification = await createAppNotification({
-    userId: application.user_id,
-    kind: 'verification_approved',
-    title: '會員審核已通過',
-    body: bodyParts.join(''),
+  return requestAdminVerificationApplicationReview({
+    action: 'approve',
+    applicationId,
+    skipIncome: opts?.skipIncome,
+    reviewerNote: opts?.reviewerNote ?? null,
   })
-
-  return {
-    ok: notification.ok,
-    ...(notification.error ? { error: notification.error } : {}),
-    ...(typeof notification.pushSent === 'number' ? { pushSent: notification.pushSent } : {}),
-    ...(typeof notification.pushFailed === 'number' ? { pushFailed: notification.pushFailed } : {}),
-  }
 }
 
 export async function rejectVerificationApplication(
   applicationId: string,
-  application: VerificationApplicationWithProfile,
+  _application: VerificationApplicationWithProfile,
   reviewerNote?: string,
 ): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
-  const reviewedAt = new Date().toISOString()
-
-  const { error: appError } = await supabase
-    .from('verification_applications')
-    .update({
-      status: 'rejected',
-      reviewed_at: reviewedAt,
-      reviewer_note: reviewerNote ?? null,
-    })
-    .eq('id', applicationId)
-
-  if (appError) {
-    console.error('[db] rejectVerificationApplication app error:', appError.message)
-    return { ok: false, error: appError.message }
-  }
-
-  const { error: docsError } = await supabase
-    .from('verification_docs')
-    .update({ status: 'rejected', reviewed_at: reviewedAt, reviewer_note: reviewerNote ?? null })
-    .eq('application_id', applicationId)
-
-  if (docsError) {
-    console.error('[db] rejectVerificationApplication docs error:', docsError.message)
-    return { ok: false, error: docsError.message }
-  }
-
-  await supabase
-    .from('profiles')
-    .update({ is_verified: false, verification_status: 'rejected' })
-    .eq('id', application.user_id)
-
-  const notification = await createAppNotification({
-    userId: application.user_id,
-    kind: 'verification_rejected',
-    title: '會員審核未通過',
-    body: formatVerificationApplicationRejectionAlertBody(reviewerNote),
+  return requestAdminVerificationApplicationReview({
+    action: 'reject',
+    applicationId,
+    reviewerNote: reviewerNote ?? null,
   })
-
-  return {
-    ok: notification.ok,
-    ...(notification.error ? { error: notification.error } : {}),
-    ...(typeof notification.pushSent === 'number' ? { pushSent: notification.pushSent } : {}),
-    ...(typeof notification.pushFailed === 'number' ? { pushFailed: notification.pushFailed } : {}),
-  }
 }
 
 async function requestAdminVerificationNotification(payload: {

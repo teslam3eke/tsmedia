@@ -22,6 +22,7 @@ import { markSkipInstantMatchLeaveOnNextFullUnload } from '@/lib/instantMatchUnl
 import { TM_APP_DEEP_LINK_EVENT } from '@/lib/appDeepLinkEvents'
 import { markDiscoverRolloverNotified } from '@/lib/appDay'
 import { captureMetaClickIdFromUrl } from '@/lib/metaAttribution'
+import { captureEmailLaunchSourceFromUrl } from '@/lib/emailLaunchSource'
 import { initMetaPixel } from '@/lib/metaPixel'
 import {
   mergePushDeepLinkIntent,
@@ -35,6 +36,7 @@ import {
 void maybeInitEruda()
 markPwaStandaloneSeenIfNeeded()
 captureMetaClickIdFromUrl()
+captureEmailLaunchSourceFromUrl()
 initMetaPixel()
 
 /** SW：推播點擊 → replaceState（避免 navigate 不重跑 SPA）再通知 MainScreen 吃 tab/match */
