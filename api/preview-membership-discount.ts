@@ -4,8 +4,27 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { readAuthedUserId, readTapPayEnv } from './_utils/tappayPayByPrime.js'
+import { readAuthedUserId } from './_utils/tappayPayByPrime.js'
 import { previewMembershipDiscountAuthoritative } from './_utils/previewMembershipDiscountServer.js'
+
+function readPreviewSupabaseEnv():
+  | { ok: true; url: string; anon: string; serviceKey: string }
+  | { ok: false; error: string } {
+  const url = process.env.SUPABASE_URL?.trim() ?? process.env.VITE_SUPABASE_URL?.trim()
+  const anon = process.env.SUPABASE_ANON_KEY?.trim() ?? process.env.VITE_SUPABASE_ANON_KEY?.trim()
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!url || !anon || !serviceKey) {
+    return { ok: false, error: '伺服器未設定資料庫（環境變數）。' }
+  }
+  return { ok: true, url, anon, serviceKey }
+}
+
+function bearerTokenFromRequest(req: VercelRequest): string | null {
+  const authHeader = req.headers.authorization
+  if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) return null
+  const token = authHeader.slice(7).trim()
+  return token || null
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   res.setHeader('Cache-Control', 'no-store')
@@ -15,7 +34,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return
   }
 
-  const env = readTapPayEnv()
+  const bearer = bearerTokenFromRequest(req)
+  if (!bearer) {
+    res.status(401).json({ ok: false, error: '請重新登入後再試。' })
+    return
+  }
+
+  const env = readPreviewSupabaseEnv()
   if (!env.ok) {
     res.status(500).json({ ok: false, error: env.error })
     return
@@ -31,14 +56,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const codeRaw = typeof body.code === 'string' ? body.code : ''
   if (!codeRaw.trim()) {
     res.status(400).json({ ok: false, reason: 'invalid_code' })
-    return
-  }
-
-  const authHeader = req.headers.authorization?.trim()
-  const bearer =
-    authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  if (!bearer) {
-    res.status(401).json({ ok: false, error: '請重新登入後再試。' })
     return
   }
 
