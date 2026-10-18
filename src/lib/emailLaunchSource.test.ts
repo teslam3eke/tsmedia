@@ -3,6 +3,7 @@ import {
   EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE,
   EMAIL_LAUNCH_APPROVAL_VALUE,
   EMAIL_LAUNCH_FROM_PARAM,
+  EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE,
   captureEmailLaunchSourceFromUrl,
   isEmailCtaPathInPwaScope,
   readEmailLaunchSource,
@@ -34,6 +35,23 @@ describe('emailLaunchSource', () => {
     captureEmailLaunchSourceFromUrl()
     const src = readEmailLaunchSource()
     expect(src?.kind).toBe(EMAIL_LAUNCH_APPROVAL_VALUE)
+  })
+
+  it('captures fromEmail=verification_reminder', () => {
+    const href = `https://tsmedia.tw/?${EMAIL_LAUNCH_FROM_PARAM}=${EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE}`
+    vi.stubGlobal('window', {
+      location: {
+        href,
+        search: `?${EMAIL_LAUNCH_FROM_PARAM}=${EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE}`,
+        pathname: '/',
+        hash: '',
+      },
+      history: { replaceState: vi.fn() },
+    } as unknown as Window)
+
+    captureEmailLaunchSourceFromUrl()
+    const src = readEmailLaunchSource()
+    expect(src?.kind).toBe(EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE)
   })
 
   it('captures fromEmail=acquisition_coupon', () => {

@@ -21,6 +21,10 @@
     {
       "path": "/api/cron-acquisition-coupon-lifecycle",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron-registration-reminder-email",
+      "schedule": "30 1,7,13,19 * * *"
     }
   ],
   "functions": {
@@ -28,6 +32,9 @@
       "maxDuration": 120
     },
     "api/cron-acquisition-coupon-lifecycle.ts": {
+      "maxDuration": 120
+    },
+    "api/cron-registration-reminder-email.ts": {
       "maxDuration": 120
     }
   },

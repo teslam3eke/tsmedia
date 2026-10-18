@@ -3,6 +3,7 @@
 export const EMAIL_LAUNCH_FROM_PARAM = 'fromEmail'
 export const EMAIL_LAUNCH_APPROVAL_VALUE = 'approval'
 export const EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE = 'acquisition_coupon'
+export const EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE = 'verification_reminder'
 
 const STORAGE_KEY = 'tm_email_launch_source_v1'
 /** 與推播 launch token 同量級：短期 attribution */
@@ -11,11 +12,19 @@ export const EMAIL_LAUNCH_MAX_AGE_MS = 7 * 24 * 3600 * 1000
 export type EmailLaunchSource =
   | { kind: typeof EMAIL_LAUNCH_APPROVAL_VALUE; capturedAtMs: number }
   | { kind: typeof EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE; capturedAtMs: number }
+  | { kind: typeof EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE; capturedAtMs: number }
 
 function isKnownEmailLaunchKind(
   from: string,
-): from is typeof EMAIL_LAUNCH_APPROVAL_VALUE | typeof EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE {
-  return from === EMAIL_LAUNCH_APPROVAL_VALUE || from === EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE
+):
+  | typeof EMAIL_LAUNCH_APPROVAL_VALUE
+  | typeof EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE
+  | typeof EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE
+  | null {
+  if (from === EMAIL_LAUNCH_APPROVAL_VALUE) return EMAIL_LAUNCH_APPROVAL_VALUE
+  if (from === EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE) return EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE
+  if (from === EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE) return EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE
+  return null
 }
 
 export function captureEmailLaunchSourceFromUrl(): void {
@@ -23,10 +32,11 @@ export function captureEmailLaunchSourceFromUrl(): void {
   try {
     const params = new URLSearchParams(window.location.search)
     const from = params.get(EMAIL_LAUNCH_FROM_PARAM)?.trim()
-    if (!from || !isKnownEmailLaunchKind(from)) return
+    const kind = from ? isKnownEmailLaunchKind(from) : null
+    if (!kind) return
 
     const payload: EmailLaunchSource = {
-      kind: from,
+      kind,
       capturedAtMs: Date.now(),
     }
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
@@ -44,7 +54,8 @@ export function readEmailLaunchSource(maxAgeMs = EMAIL_LAUNCH_MAX_AGE_MS): Email
     const o = JSON.parse(raw) as EmailLaunchSource
     if (
       o?.kind !== EMAIL_LAUNCH_APPROVAL_VALUE &&
-      o?.kind !== EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE
+      o?.kind !== EMAIL_LAUNCH_ACQUISITION_COUPON_VALUE &&
+      o?.kind !== EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE
     ) {
       return null
     }

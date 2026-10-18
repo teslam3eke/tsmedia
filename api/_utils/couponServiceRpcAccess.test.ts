@@ -19,10 +19,24 @@ export const LIFECYCLE_164_SERVICE_ROLE_ONLY_RPCS = [
   'release_acquisition_coupon_email_in_flight',
 ] as const
 
+/** migration 166：registration reminder email delivery（僅 service_role） */
+export const REGISTRATION_REMINDER_166_SERVICE_ROLE_ONLY_RPCS = [
+  'registration_reminder_eligible_after',
+  'claim_registration_reminder_email_delivery',
+  'mark_registration_reminder_email_sent',
+  'release_registration_reminder_email_in_flight',
+] as const
+
 describe('coupon RPC access policy (documented)', () => {
   it('lists acquisition coupon RPCs as service-only', () => {
     expect(COUPON_SERVICE_ROLE_ONLY_RPCS).toContain('issue_user_coupon_entitlement_for_service')
     expect(COUPON_SERVICE_ROLE_ONLY_RPCS).not.toContain('get_public_payment_pricing')
+  })
+
+  it('lists registration reminder 166 RPCs as service-only', () => {
+    expect(REGISTRATION_REMINDER_166_SERVICE_ROLE_ONLY_RPCS).toContain(
+      'claim_registration_reminder_email_delivery',
+    )
   })
 
   it('authenticated must not use issue/reserve/redeem (enforced in migration 162 REVOKE)', () => {
