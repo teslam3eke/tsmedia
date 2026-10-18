@@ -11,6 +11,7 @@ import {
   countRegistrationRemindersSentTodayUtc,
   deliverRegistrationReminderEmailIfNeeded,
   loadRegistrationReminderEligibleAfterMs,
+  loadRegistrationReminderLifecycleGenderByUserIds,
   loadRegistrationReminderSentStages,
   retryPendingRegistrationReminderEmails,
   type RegistrationReminderRunGuard,
@@ -132,6 +133,18 @@ export async function runRegistrationReminderEmailCron(
     const users = data.users ?? []
     if (!users.length) break
 
+    const candidateIds: string[] = []
+    for (const u of users) {
+      const confirmedAt = u.email_confirmed_at ?? null
+      if (!confirmedAt) continue
+      if (submittedIds.has(u.id) || legacyIds.has(u.id)) continue
+      candidateIds.push(u.id)
+    }
+    const genderByUserId = await loadRegistrationReminderLifecycleGenderByUserIds(
+      admin,
+      candidateIds,
+    )
+
     for (const u of users) {
       stats.scanned += 1
       const confirmedAt = u.email_confirmed_at ?? null
@@ -151,6 +164,8 @@ export async function runRegistrationReminderEmailCron(
 
       if (runGuard.sentUserIdsThisRun.has(u.id)) continue
 
+      const lifecycleGender = genderByUserId.get(u.id) ?? 'unknown'
+
       for (const stage of REGISTRATION_REMINDER_STAGES) {
         if (
           isRegistrationReminderStageEligible({
@@ -159,6 +174,7 @@ export async function runRegistrationReminderEmailCron(
             eligibleAfterMs,
             hasAnyVerificationApplication: false,
             hasLegacyVerificationDocsOnly: false,
+            lifecycleGender,
           })
         ) {
           bumpEligibleStage(stats, stage)
@@ -172,6 +188,7 @@ export async function runRegistrationReminderEmailCron(
         eligibleAfterMs,
         hasAnyVerificationApplication: hasApp,
         hasLegacyVerificationDocsOnly: legacy,
+        lifecycleGender,
       })
       if (!stage) continue
       if (remaining <= 0) break
@@ -182,6 +199,7 @@ export async function runRegistrationReminderEmailCron(
         eligibleAfterMs,
         hasAnyVerificationApplication: hasApp,
         hasLegacyVerificationDocsOnly: legacy,
+        lifecycleGender,
         runGuard,
       })
 

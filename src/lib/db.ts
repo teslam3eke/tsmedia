@@ -1521,11 +1521,34 @@ function mapMembershipDiscountCodeResult(
 export async function previewMembershipDiscountCode(
   code: string,
 ): Promise<MembershipDiscountCodeResult> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any).rpc('preview_membership_discount_code', {
-    p_code: code,
+  const { data: sessionData } = await supabase.auth.getSession()
+  const token = sessionData.session?.access_token
+  if (!token) {
+    return { ok: false, error: '請重新登入後再試。' }
+  }
+
+  const res = await fetch('/api/preview-membership-discount', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ code }),
   })
-  return mapMembershipDiscountCodeResult(data, error)
+
+  let json: unknown = null
+  try {
+    json = await res.json()
+  } catch {
+    return { ok: false, error: '無法預覽折扣碼，請稍後再試。' }
+  }
+
+  if (!res.ok) {
+    const errRow = json as { error?: string } | null
+    return { ok: false, error: errRow?.error ?? '無法預覽折扣碼，請稍後再試。' }
+  }
+
+  return mapMembershipDiscountCodeResult(json, null)
 }
 
 export async function redeemFemaleMembershipDiscountCode(

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isTsspeMembershipDiscountCode } from './tsspeMembershipEligibility.js'
 
 export type ResolvedMaleMembershipDiscount = {
   code: string
@@ -21,6 +22,10 @@ export async function resolveMaleMembershipDiscount(
 ): Promise<ResolvedMaleMembershipDiscount | null> {
   const code = normalizeMembershipDiscountCode(rawCode)
   if (!code) return null
+
+  if (isTsspeMembershipDiscountCode(code)) {
+    throw new Error('INVALID_MEMBERSHIP_DISCOUNT_CODE')
+  }
 
   const nowIso = new Date().toISOString()
   const { data, error } = await admin

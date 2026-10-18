@@ -9,10 +9,13 @@ import {
   fetchPublicPaymentPricing,
   membershipAmountFromPricing,
 } from './_utils/pricingResolver.js'
+import { resolveMaleMembershipCheckout } from './_utils/resolveMaleMembershipCheckout.js'
+import { MembershipCheckoutPricingError } from './_utils/membershipCheckoutPricing.js'
 import {
-  normalizeMembershipDiscountCode,
-  resolveMaleMembershipDiscount,
-} from './_utils/membershipDiscount.js'
+  TsspeMembershipEligibilityError,
+  isTsspeMembershipDiscountCode,
+} from './_utils/tsspeMembershipEligibility.js'
+import { normalizeMembershipDiscountCode } from './_utils/membershipDiscount.js'
 
 type Cardholder = {
   phone_number: string
@@ -109,20 +112,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ ok: false, error: '請先完成個人資料性別設定。' })
   }
 
-  const baseAmount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
-  const requestedCode = normalizeMembershipDiscountCode(body.membershipDiscountCode)
-  let amount = baseAmount
-  if (requestedCode) {
-    if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
-      return res.status(400).json({ ok: false, error: '目前帳號不符合折扣碼使用資格。' })
+  if (profile.gender !== 'male') {
+    const requestedCode = normalizeMembershipDiscountCode(body.membershipDiscountCode)
+    if (requestedCode) {
+      return res.status(400).json({ ok: false, error: '女性免費試用請直接在會員管理頁兌換。' })
     }
+  }
+
+  const baseAmount = membershipAmountFromPricing(pricing, profile.gender as 'male' | 'female')
+  let amount = baseAmount
+  const requestedCodeRaw = body.membershipDiscountCode?.trim() ?? ''
+  const isTsspe = isTsspeMembershipDiscountCode(requestedCodeRaw)
+  if (requestedCodeRaw) {
     if (profile.gender !== 'male') {
       return res.status(400).json({ ok: false, error: '女性免費試用請直接在會員管理頁兌換。' })
     }
+    const needsStandardApprovedGate = Boolean(requestedCodeRaw && !isTsspe)
+    if (needsStandardApprovedGate) {
+      if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
+        return res.status(400).json({ ok: false, error: '目前帳號不符合折扣碼使用資格。' })
+      }
+    }
+    if (isTsspe) {
+      if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
+        return res.status(400).json({ ok: false, error: '目前帳號不符合 TSSPE 使用資格。' })
+      }
+    }
     try {
-      const discount = await resolveMaleMembershipDiscount(admin, requestedCode, baseAmount)
-      amount = discount?.finalPriceNtd ?? baseAmount
+      const resolved = await resolveMaleMembershipCheckout(admin, {
+        userId: user.id,
+        pricing,
+        membershipDiscountCodeRaw: body.membershipDiscountCode,
+        checkoutProfile: {
+          gender: profile.gender,
+          verification_status: profile.verification_status,
+          account_status: profile.account_status,
+        },
+      })
+      amount = resolved.amountNtd
     } catch (e) {
+      if (e instanceof MembershipCheckoutPricingError) {
+        return res.status(400).json({
+          ok: false,
+          error: '此優惠券不可與目前的折扣碼或活動價同時使用。',
+        })
+      }
+      if (e instanceof TsspeMembershipEligibilityError) {
+        if (e.code === 'TSSPE_NOT_CONFIGURED') {
+          return res.status(503).json({ ok: false, error: 'TSSPE 尚未開放，請稍後再試。' })
+        }
+        return res.status(400).json({ ok: false, error: '目前帳號不符合 TSSPE 使用資格。' })
+      }
       if (e instanceof Error && e.message === 'INVALID_MEMBERSHIP_DISCOUNT_CODE') {
         return res.status(400).json({ ok: false, error: '折扣碼無效或已停止使用。' })
       }

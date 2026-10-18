@@ -1,4 +1,6 @@
 import type { RegistrationReminderStage } from './registrationReminderEligibility.js'
+import type { RegistrationReminderLifecycleGender } from './registrationReminderGender.js'
+import { TSSPE_DISCOUNT_NTD, TSSPE_MEMBERSHIP_DISCOUNT_CODE } from './tsspeConfig.js'
 
 export const EMAIL_LAUNCH_FROM_PARAM = 'fromEmail'
 export const EMAIL_LAUNCH_VERIFICATION_REMINDER_VALUE = 'verification_reminder'
@@ -43,7 +45,40 @@ type StageCopy = {
   footerText: string
 }
 
-function stageCopy(stage: RegistrationReminderStage): StageCopy {
+function maleStage2TsspeCopy(): StageCopy {
+  const code = TSSPE_MEMBERSHIP_DISCOUNT_CODE
+  const discount = TSSPE_DISCOUNT_NTD
+  return {
+    bodyHtml: `<p style="margin:0 0 16px;">你的 tsmedia 帳號已經建立完成，<br>但目前還差審核資料沒有送出。</p>
+          <p style="margin:0 0 16px;color:#475569;">如果前幾天剛好沒時間完成，<br>可以直接從上次的進度繼續。</p>
+          <p style="margin:0 0 16px;color:#475569;">不用重新註冊。</p>
+          <p style="margin:0 0 16px;color:#475569;">另外，我們替你保留了一組會員優惠：</p>
+          <p style="margin:0 0 16px;font-weight:600;color:#0f172a;">優惠碼：<span style="letter-spacing:0.06em;">${code}</span></p>
+          <p style="margin:0 0 16px;color:#475569;">完成審核並通過後，<br>購買 VIP 會員可再折 <strong style="color:#0f172a;">NT$${discount}</strong>。</p>`,
+    bodyText: `你的 tsmedia 帳號已經建立完成，
+但目前還差審核資料沒有送出。
+
+如果前幾天剛好沒時間完成，
+可以直接從上次的進度繼續。
+
+不用重新註冊。
+
+另外，我們替你保留了一組會員優惠：
+
+優惠碼：${code}
+
+完成審核並通過後，
+購買 VIP 會員可再折 NT$${discount}。`,
+    footerHtml:
+      '<p style="margin:0 0 16px;font-size:14px;color:#475569;">完成資料並送出後，<br>我們就會進行人工審核。</p>',
+    footerText: '完成資料並送出後，\n我們就會進行人工審核。',
+  }
+}
+
+function stageCopy(
+  stage: RegistrationReminderStage,
+  lifecycleGender: RegistrationReminderLifecycleGender = 'unknown',
+): StageCopy {
   if (stage === 1) {
     return {
       bodyHtml: `<p style="margin:0 0 16px;">你已經完成 tsmedia 的帳號註冊，<br>不過你的申請還沒有送出。</p>
@@ -62,6 +97,9 @@ function stageCopy(stage: RegistrationReminderStage): StageCopy {
     }
   }
   if (stage === 2) {
+    if (lifecycleGender === 'male') {
+      return maleStage2TsspeCopy()
+    }
     return {
       bodyHtml: `<p style="margin:0 0 16px;">你的 tsmedia 帳號已經建立完成，<br>但目前還差審核資料沒有送出。</p>
           <p style="margin:0 0 16px;color:#475569;">如果前幾天剛好沒時間完成，<br>可以直接從上次的進度繼續。</p>
@@ -94,11 +132,12 @@ function stageCopy(stage: RegistrationReminderStage): StageCopy {
 export function buildRegistrationReminderEmailContent(
   siteUrl: string,
   stage: RegistrationReminderStage = 1,
+  lifecycleGender: RegistrationReminderLifecycleGender = 'unknown',
 ): RegistrationReminderEmailContent {
   const ctaUrl = buildRegistrationReminderEmailCtaUrl(siteUrl)
   const ctaLabel = '繼續完成申請'
   const subject = REGISTRATION_REMINDER_EMAIL_SUBJECT_BY_STAGE[stage]
-  const copy = stageCopy(stage)
+  const copy = stageCopy(stage, lifecycleGender)
 
   const html = `<!DOCTYPE html>
 <html lang="zh-TW">

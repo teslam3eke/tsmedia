@@ -121,6 +121,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(ready.ok).toBe(false)
     if (!ready.ok) expect(ready.reason).toBe('predecessor_stage_not_sent')
@@ -135,6 +136,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'female',
     })
     expect(ready.ok).toBe(false)
     if (!ready.ok) expect(ready.reason).toBe('predecessor_stage_not_sent')
@@ -148,6 +150,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('skipped')
     expect(rpc).toHaveBeenCalledWith('release_registration_reminder_email_in_flight', {
@@ -190,6 +193,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('skipped')
     expect(rpc).toHaveBeenCalledWith('release_registration_reminder_email_in_flight', {
@@ -211,6 +215,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('failed')
     expect(rpc).toHaveBeenCalledWith('release_registration_reminder_email_in_flight', {
@@ -229,6 +234,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
       runGuard,
     })
     expect(r).toBe('skipped')
@@ -242,6 +248,7 @@ describe('registration reminder guard (predecessor + run)', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(rpc).toHaveBeenCalledWith('release_registration_reminder_email_in_flight', {
       p_user_id: 'u1',

@@ -2,13 +2,18 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   REGISTRATION_REMINDER_DAILY_SEND_CAP,
   REGISTRATION_REMINDER_MONTHLY_SEND_CAP,
+  type RegistrationReminderLifecycleGender,
   type RegistrationReminderStage,
   areRegistrationReminderStagePredecessorsSent,
   isRegistrationReminderStageEligible,
   pickEarliestUnsentEligibleRegistrationReminderStage,
   utcMonthStartIso,
 } from './registrationReminderEligibility.js'
+import { isRegistrationReminderStageAllowedForGender } from './registrationReminderGender.js'
+import { loadRegistrationReminderLifecycleGenderByUserIds } from './registrationReminderProfileBatch.js'
 import { sendRegistrationReminderEmailToRecipient } from './registrationReminderEmailSend.js'
+
+export { loadRegistrationReminderLifecycleGenderByUserIds } from './registrationReminderProfileBatch.js'
 
 export type DeliverRegistrationReminderOutcome = 'sent' | 'skipped' | 'failed' | 'already_sent'
 
@@ -143,11 +148,16 @@ export async function assertAuthoritativeRegistrationReminderSendReady(
     eligibleAfterMs: number
     hasAnyVerificationApplication: boolean
     hasLegacyVerificationDocsOnly: boolean
+    lifecycleGender: RegistrationReminderLifecycleGender
   },
 ): Promise<
   | { ok: true; sentStages: Set<RegistrationReminderStage> }
   | { ok: false; reason: string }
 > {
+  if (!isRegistrationReminderStageAllowedForGender(params.stage, params.lifecycleGender)) {
+    return { ok: false, reason: 'stage_not_allowed_for_gender' }
+  }
+
   const sentStages = await loadRegistrationReminderSentStages(admin, params.userId)
 
   if (sentStages.has(params.stage)) {
@@ -164,6 +174,7 @@ export async function assertAuthoritativeRegistrationReminderSendReady(
     eligibleAfterMs: params.eligibleAfterMs,
     hasAnyVerificationApplication: params.hasAnyVerificationApplication,
     hasLegacyVerificationDocsOnly: params.hasLegacyVerificationDocsOnly,
+    lifecycleGender: params.lifecycleGender,
   })
 
   if (expectedStage !== params.stage) {
@@ -177,6 +188,7 @@ export async function assertAuthoritativeRegistrationReminderSendReady(
       eligibleAfterMs: params.eligibleAfterMs,
       hasAnyVerificationApplication: params.hasAnyVerificationApplication,
       hasLegacyVerificationDocsOnly: params.hasLegacyVerificationDocsOnly,
+      lifecycleGender: params.lifecycleGender,
     })
   ) {
     return { ok: false, reason: 'stage_not_time_eligible' }
@@ -195,6 +207,7 @@ export async function deliverRegistrationReminderEmailIfNeeded(
     eligibleAfterMs: number
     hasAnyVerificationApplication: boolean
     hasLegacyVerificationDocsOnly: boolean
+    lifecycleGender: RegistrationReminderLifecycleGender
     runGuard?: RegistrationReminderRunGuard
   },
 ): Promise<DeliverRegistrationReminderOutcome> {
@@ -202,6 +215,10 @@ export async function deliverRegistrationReminderEmailIfNeeded(
   if (!uid) return 'skipped'
 
   if (ctx.runGuard?.sentUserIdsThisRun.has(uid)) {
+    return 'skipped'
+  }
+
+  if (!isRegistrationReminderStageAllowedForGender(ctx.stage, ctx.lifecycleGender)) {
     return 'skipped'
   }
 
@@ -213,6 +230,7 @@ export async function deliverRegistrationReminderEmailIfNeeded(
         eligibleAfterMs: ctx.eligibleAfterMs,
         hasAnyVerificationApplication: ctx.hasAnyVerificationApplication,
         hasLegacyVerificationDocsOnly: ctx.hasLegacyVerificationDocsOnly,
+        lifecycleGender: ctx.lifecycleGender,
       })
     ) {
       return 'skipped'
@@ -262,6 +280,7 @@ export async function deliverRegistrationReminderEmailIfNeeded(
       eligibleAfterMs: ctx.eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: ctx.lifecycleGender,
     })
 
     if (!ready.ok) {
@@ -269,7 +288,11 @@ export async function deliverRegistrationReminderEmailIfNeeded(
       return 'skipped'
     }
 
-    const result = await sendRegistrationReminderEmailToRecipient(auth.email, ctx.stage)
+    const result = await sendRegistrationReminderEmailToRecipient(
+      auth.email,
+      ctx.stage,
+      ctx.lifecycleGender,
+    )
 
     if (result.ok) {
       const { error: markErr } = await admin.rpc('mark_registration_reminder_email_sent', {
@@ -384,6 +407,9 @@ export async function retryPendingRegistrationReminderEmails(
     const legacy = await userHasLegacyVerificationDocsOnly(admin, uid)
     if (hasApp || legacy) continue
 
+    const genderMap = await loadRegistrationReminderLifecycleGenderByUserIds(admin, [uid])
+    const lifecycleGender = genderMap.get(uid) ?? 'unknown'
+
     const sentStages = await loadRegistrationReminderSentStages(admin, uid)
     const stage = pickEarliestUnsentEligibleRegistrationReminderStage({
       sentStages,
@@ -391,6 +417,7 @@ export async function retryPendingRegistrationReminderEmails(
       eligibleAfterMs: params.eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender,
     })
     if (!stage) continue
 
@@ -400,6 +427,7 @@ export async function retryPendingRegistrationReminderEmails(
       eligibleAfterMs: params.eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender,
       runGuard: params.runGuard,
     })
 

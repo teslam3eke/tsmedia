@@ -1,4 +1,5 @@
 import type { RegistrationReminderStage } from './registrationReminderEligibility.js'
+import type { RegistrationReminderLifecycleGender } from './registrationReminderGender.js'
 import { buildRegistrationReminderEmailContent } from './registrationReminderEmailTemplate.js'
 import { getSiteUrl } from './ecpayConfig.js'
 
@@ -16,6 +17,7 @@ function readResendConfig(): { apiKey: string; from: string } | null {
 export async function sendRegistrationReminderEmailToRecipient(
   recipientEmail: string,
   stage: RegistrationReminderStage,
+  lifecycleGender: RegistrationReminderLifecycleGender = 'unknown',
 ): Promise<SendRegistrationReminderEmailResult> {
   const cfg = readResendConfig()
   if (!cfg) {
@@ -27,7 +29,7 @@ export async function sendRegistrationReminderEmailToRecipient(
     return { ok: false, error: 'invalid_recipient' }
   }
 
-  const content = buildRegistrationReminderEmailContent(getSiteUrl(), stage)
+  const content = buildRegistrationReminderEmailContent(getSiteUrl(), stage, lifecycleGender)
 
   try {
     const res = await fetch('https://api.resend.com/emails', {

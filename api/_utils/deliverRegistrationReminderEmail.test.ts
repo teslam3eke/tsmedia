@@ -14,7 +14,9 @@ function mockAdmin(overrides: {
   hasLegacyDocs?: boolean
   email?: string | null
   emailConfirmedAt?: string | null
+  sentStages?: number[]
 }): SupabaseClient {
+  const sentStageRows = (overrides.sentStages ?? []).map((reminder_stage) => ({ reminder_stage }))
   const rpc = vi.fn(async (name: string) => {
     if (name === 'claim_registration_reminder_email_delivery') {
       return { data: overrides.claim ?? null, error: null }
@@ -50,11 +52,31 @@ function mockAdmin(overrides: {
       }
     }
     if (table === 'registration_reminder_email_deliveries') {
-      return {
-        select: vi.fn().mockReturnThis(),
+      const chain = {
         eq: vi.fn().mockReturnThis(),
         not: vi.fn().mockReturnThis(),
         limit: vi.fn(async () => ({ data: [], error: null })),
+        upsert: vi.fn(() => {
+          throw new Error('must not upsert fake stage3 sent_at')
+        }),
+        insert: vi.fn(() => {
+          throw new Error('must not insert fake stage3 sent_at')
+        }),
+      }
+      return {
+        select: vi.fn((cols?: string) => {
+          if (cols === 'reminder_stage') {
+            return {
+              eq: vi.fn().mockReturnThis(),
+              not: vi.fn().mockResolvedValue({
+                data: sentStageRows,
+                error: null,
+              }),
+            }
+          }
+          return chain
+        }),
+        ...chain,
       }
     }
     return {
@@ -108,6 +130,7 @@ describe('deliverRegistrationReminderEmailIfNeeded', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('skipped')
     expect(admin.rpc).toHaveBeenCalledWith('release_registration_reminder_email_in_flight', {
@@ -116,6 +139,36 @@ describe('deliverRegistrationReminderEmailIfNeeded', () => {
       p_error: 'verification_application_exists',
     })
     expect(admin.rpc).not.toHaveBeenCalledWith('mark_registration_reminder_email_sent', expect.anything())
+  })
+
+  it('male stage2 success marks stage2 only — no stage3 sent_at write', async () => {
+    const stage2ConfirmedAt = new Date(
+      Date.now() - registrationReminderStageMinAgeMs(2) - 3600_000,
+    ).toISOString()
+    const admin = mockAdmin({
+      claim: { ok: true, user_id: 'u-male', reminder_stage: 2 },
+      hasApplication: false,
+      email: 'male@example.com',
+      emailConfirmedAt: stage2ConfirmedAt,
+      sentStages: [1],
+    })
+    const r = await deliverRegistrationReminderEmailIfNeeded(admin, 'u-male', {
+      stage: 2,
+      emailConfirmedAt: stage2ConfirmedAt,
+      eligibleAfterMs,
+      hasAnyVerificationApplication: false,
+      hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'male',
+    })
+    expect(r).toBe('sent')
+    expect(admin.rpc).toHaveBeenCalledWith('mark_registration_reminder_email_sent', {
+      p_user_id: 'u-male',
+      p_reminder_stage: 2,
+    })
+    expect(admin.rpc).not.toHaveBeenCalledWith('mark_registration_reminder_email_sent', {
+      p_user_id: 'u-male',
+      p_reminder_stage: 3,
+    })
   })
 
   it('14–15. resend success marks sent; already sent skips claim path', async () => {
@@ -130,6 +183,7 @@ describe('deliverRegistrationReminderEmailIfNeeded', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('sent')
     expect(admin.rpc).toHaveBeenCalledWith('mark_registration_reminder_email_sent', {
@@ -149,6 +203,7 @@ describe('deliverRegistrationReminderEmailIfNeeded', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('already_sent')
   })
@@ -168,6 +223,7 @@ describe('deliverRegistrationReminderEmailIfNeeded', () => {
       eligibleAfterMs,
       hasAnyVerificationApplication: false,
       hasLegacyVerificationDocsOnly: false,
+      lifecycleGender: 'unknown',
     })
     expect(r).toBe('failed')
     expect(admin.rpc).toHaveBeenCalledWith('release_registration_reminder_email_in_flight', {

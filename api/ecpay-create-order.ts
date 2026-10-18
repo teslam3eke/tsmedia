@@ -23,6 +23,10 @@ import {
   stripUntrustedCheckoutPriceFields,
 } from './_utils/membershipCheckoutPricing.js'
 import {
+  TsspeMembershipEligibilityError,
+  isTsspeMembershipDiscountCode,
+} from './_utils/tsspeMembershipEligibility.js'
+import {
   normalizeUserCouponEntitlementId,
   reserveUserCouponForEcpayOrder,
   userCouponErrorToClientMessage,
@@ -122,11 +126,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       amount = membershipAmountFromPricing(pricing, 'female')
     } else {
+      const requestedCodeRaw = body.membershipDiscountCode?.trim() ?? ''
+      const isTsspe = isTsspeMembershipDiscountCode(requestedCodeRaw)
       const needsDiscountEligibility =
-        Boolean(body.membershipDiscountCode?.trim()) || Boolean(userCouponEntitlementId)
+        Boolean(requestedCodeRaw && !isTsspe) || Boolean(userCouponEntitlementId)
       if (needsDiscountEligibility) {
         if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
           return res.status(400).json({ ok: false, error: '目前帳號不符合折扣碼使用資格。' })
+        }
+      }
+      if (isTsspe) {
+        if (profile.verification_status !== 'approved' || profile.account_status !== 'active') {
+          return res.status(400).json({ ok: false, error: '目前帳號不符合 TSSPE 使用資格。' })
         }
       }
       try {
@@ -135,6 +146,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           pricing,
           membershipDiscountCodeRaw: body.membershipDiscountCode,
           userCouponEntitlementIdRaw: userCouponEntitlementId,
+          checkoutProfile: {
+            gender: profile.gender,
+            verification_status: profile.verification_status,
+            account_status: profile.account_status,
+          },
         })
         amount = resolved.amountNtd
         membershipDiscountCodeToStore = resolved.membershipDiscountCode
@@ -148,6 +164,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           }
           return res.status(400).json({ ok: false, error: '無法套用優惠券。' })
+        }
+        if (e instanceof TsspeMembershipEligibilityError) {
+          if (e.code === 'TSSPE_NOT_CONFIGURED') {
+            return res.status(503).json({ ok: false, error: 'TSSPE 尚未開放，請稍後再試。' })
+          }
+          return res.status(400).json({ ok: false, error: '目前帳號不符合 TSSPE 使用資格。' })
         }
         if (e instanceof Error && e.message === 'INVALID_MEMBERSHIP_DISCOUNT_CODE') {
           return res.status(400).json({ ok: false, error: '折扣碼無效或已停止使用。' })

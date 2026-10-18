@@ -1,5 +1,14 @@
 /** Registration reminder eligibility（authoritative 規則；cron / deliver 共用；UTC 日／月 cap） */
 
+import {
+  type RegistrationReminderLifecycleGender,
+  isRegistrationReminderStageAllowedForGender,
+  normalizeRegistrationReminderLifecycleGender,
+} from './registrationReminderGender.js'
+
+export type { RegistrationReminderLifecycleGender }
+export { normalizeRegistrationReminderLifecycleGender }
+
 export const REGISTRATION_REMINDER_DAILY_SEND_CAP = 30
 export const REGISTRATION_REMINDER_MONTHLY_SEND_CAP = 600
 
@@ -79,9 +88,13 @@ export function isRegistrationReminderStageEligible(params: {
   nowMs?: number
   hasAnyVerificationApplication: boolean
   hasLegacyVerificationDocsOnly: boolean
+  lifecycleGender?: RegistrationReminderLifecycleGender
 }): boolean {
   if (params.hasAnyVerificationApplication) return false
   if (params.hasLegacyVerificationDocsOnly) return false
+
+  const gender = params.lifecycleGender ?? 'unknown'
+  if (!isRegistrationReminderStageAllowedForGender(params.stage, gender)) return false
 
   const confirmedRaw = params.emailConfirmedAt
   if (!confirmedRaw) return false
@@ -114,9 +127,12 @@ export function pickEarliestUnsentEligibleRegistrationReminderStage(params: {
   nowMs?: number
   hasAnyVerificationApplication: boolean
   hasLegacyVerificationDocsOnly: boolean
+  lifecycleGender?: RegistrationReminderLifecycleGender
 }): RegistrationReminderStage | null {
   if (params.hasAnyVerificationApplication || params.hasLegacyVerificationDocsOnly) return null
   if (!params.emailConfirmedAt) return null
+
+  const gender = params.lifecycleGender ?? 'unknown'
 
   for (const stage of REGISTRATION_REMINDER_STAGES) {
     if (params.sentStages.has(stage)) continue
@@ -128,6 +144,7 @@ export function pickEarliestUnsentEligibleRegistrationReminderStage(params: {
         nowMs: params.nowMs,
         hasAnyVerificationApplication: false,
         hasLegacyVerificationDocsOnly: false,
+        lifecycleGender: gender,
       })
     ) {
       return stage
