@@ -35,6 +35,7 @@ import {
 } from '@/lib/onboardingDraft'
 import { LifePhotoUploadSection, type LifePhotoSlot } from '@/components/LifePhotoUploadSection'
 import { MembershipDiscountGuide } from '@/components/MembershipDiscountGuide'
+import { VerifyWaitNotificationCard } from '@/components/VerifyWaitNotificationCard'
 import {
   VERIFICATION_DAILY_SUBMIT_LIMIT,
   VERIFICATION_APPLICATION_REJECTION_FOOTER,
@@ -469,13 +470,9 @@ export default function IdentityVerifyScreen({
             <br />
             最長等待時間約 {VERIFICATION_MANUAL_SLA_HOURS} 小時，通過後會通知你。
           </p>
-          <p className="text-[11px] text-slate-400 leading-[1.7]">
-            選填的加分與收入文件僅供審核使用
-            <br />
-            <strong className="text-slate-500">審核通過後，檔案即刪除</strong>
-            <br />
-            不留存於伺服器
-          </p>
+          {userId ? (
+            <VerifyWaitNotificationCard userId={userId} className="mx-auto w-full max-w-[340px]" />
+          ) : null}
           {applicantGender && (
             <MembershipDiscountGuide
               gender={applicantGender}

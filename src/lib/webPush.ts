@@ -67,10 +67,7 @@ export async function ensureServiceWorkerRegistration(
   }
 }
 
-/**
- * Terms「同意並繼續」：於 user gesture 內請求通知權限並訂閱（default → requestPermission）。
- * 失敗不 throw，不阻擋 onboarding。
- */
+/** user gesture：default → requestPermission；granted → 訂閱。失敗不 throw。 */
 export async function maybeSubscribeWebPushAfterTermsAccept(userId: string): Promise<void> {
   if (!userId.trim()) return
   if (typeof window === 'undefined' || !('Notification' in window)) return

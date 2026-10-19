@@ -210,7 +210,7 @@ export default function SecurityCheckScreen({
   const isStandaloneMode = readStandaloneMode()
   const notifSupported = notificationPermission !== 'unsupported'
   const notifGranted = notificationPermission === 'granted'
-  /** 通知權限改在 TermsConsentScreen；安全檢查頁不再阻擋或強制推播。 */
+  /** 安全檢查頁不阻擋或強制推播（等待審核頁可選開啟通知）。 */
   const notificationRequired = false
   const showNotifStep = false
 

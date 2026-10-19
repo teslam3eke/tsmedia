@@ -3,40 +3,16 @@ import { motion } from 'framer-motion'
 import { AlertCircle, Check, ChevronLeft, FileText, ShieldCheck } from 'lucide-react'
 import { TERMS_VERSION } from '@/lib/db'
 import { TERMS_SECTIONS } from '@/lib/termsContent'
-import { maybeSubscribeWebPushAfterTermsAccept } from '@/lib/webPush'
 
 interface Props {
-  userId?: string | null
   busy?: boolean
   error?: string
   onAccept: () => void | Promise<void>
   onBack?: () => void
 }
 
-export default function TermsConsentScreen({
-  userId,
-  busy = false,
-  error,
-  onAccept,
-  onBack,
-}: Props) {
-  const [termsChecked, setTermsChecked] = useState(false)
-  const [acceptBusy, setAcceptBusy] = useState(false)
-
-  const handleAccept = async () => {
-    if (!termsChecked || busy || acceptBusy) return
-    if (userId) {
-      await maybeSubscribeWebPushAfterTermsAccept(userId)
-    }
-    setAcceptBusy(true)
-    try {
-      await onAccept()
-    } finally {
-      setAcceptBusy(false)
-    }
-  }
-
-  const combinedBusy = busy || acceptBusy
+export default function TermsConsentScreen({ busy = false, error, onAccept, onBack }: Props) {
+  const [checked, setChecked] = useState(false)
 
   return (
     <div className="min-h-dvh bg-[#f8fafc] flex flex-col">
@@ -86,11 +62,11 @@ export default function TermsConsentScreen({
         )}
         <button
           type="button"
-          onClick={() => setTermsChecked((value) => !value)}
+          onClick={() => setChecked((value) => !value)}
           className="flex w-full items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-left"
         >
-          <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${termsChecked ? 'border-slate-900 bg-slate-900' : 'border-slate-300 bg-white'}`}>
-            {termsChecked && <Check className="h-3.5 w-3.5 text-white" />}
+          <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${checked ? 'border-slate-900 bg-slate-900' : 'border-slate-300 bg-white'}`}>
+            {checked && <Check className="h-3.5 w-3.5 text-white" />}
           </span>
           <span className="text-xs leading-relaxed text-slate-600">
             我已閱讀並同意服務條款與隱私權政策
@@ -98,11 +74,11 @@ export default function TermsConsentScreen({
         </button>
         <motion.button
           whileTap={{ scale: 0.98 }}
-          onClick={() => void handleAccept()}
-          disabled={!termsChecked || combinedBusy}
+          onClick={() => void onAccept()}
+          disabled={!checked || busy}
           className="mt-3 w-full rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 disabled:opacity-40"
         >
-          {combinedBusy ? '儲存同意紀錄中' : '同意並繼續'}
+          {busy ? '儲存同意紀錄中' : '同意並繼續'}
         </motion.button>
       </div>
     </div>

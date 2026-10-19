@@ -1295,7 +1295,6 @@ export default function App() {
 
         {screen === 'terms-consent' && (
           <TermsConsentScreen
-            userId={user?.id}
             busy={termsBusy}
             error={termsError}
             onAccept={handleTermsAccept}
