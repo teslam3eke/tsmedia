@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { AlertCircle, Check, ChevronLeft, FileText, ShieldCheck } from 'lucide-react'
 import { TERMS_VERSION } from '@/lib/db'
 import { TERMS_SECTIONS } from '@/lib/termsContent'
-import { maybeSubscribeWebPushAfterServiceInfoConsent } from '@/lib/webPush'
+import { maybeSubscribeWebPushAfterTermsAccept } from '@/lib/webPush'
 
 interface Props {
   userId?: string | null
@@ -21,16 +21,15 @@ export default function TermsConsentScreen({
   onBack,
 }: Props) {
   const [termsChecked, setTermsChecked] = useState(false)
-  const [serviceInfoChecked, setServiceInfoChecked] = useState(true)
   const [acceptBusy, setAcceptBusy] = useState(false)
 
   const handleAccept = async () => {
     if (!termsChecked || busy || acceptBusy) return
+    if (userId) {
+      await maybeSubscribeWebPushAfterTermsAccept(userId)
+    }
     setAcceptBusy(true)
     try {
-      if (userId) {
-        await maybeSubscribeWebPushAfterServiceInfoConsent(userId, serviceInfoChecked)
-      }
       await onAccept()
     } finally {
       setAcceptBusy(false)
@@ -95,18 +94,6 @@ export default function TermsConsentScreen({
           </span>
           <span className="text-xs leading-relaxed text-slate-600">
             我已閱讀並同意服務條款與隱私權政策
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setServiceInfoChecked((value) => !value)}
-          className="mt-2 flex w-full items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-left"
-        >
-          <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${serviceInfoChecked ? 'border-slate-900 bg-slate-900' : 'border-slate-300 bg-white'}`}>
-            {serviceInfoChecked && <Check className="h-3.5 w-3.5 text-white" />}
-          </span>
-          <span className="text-xs leading-relaxed text-slate-600">
-            同意接收服務資訊及相關提醒
           </span>
         </button>
         <motion.button
