@@ -10,7 +10,6 @@ import { markPwaStandaloneSeenIfNeeded } from '@/lib/pwaStandaloneMarker'
 import { readPwaStandaloneMode } from '@/lib/pwaEncapsulationGate'
 import { subscribeWebPushForCurrentUser } from '@/lib/webPush'
 import { enableAllNotificationSettings } from '@/lib/notificationSettings'
-import { shouldSkipNotificationNudge } from '@/lib/appEnv'
 
 interface Check {
   id: string
@@ -71,7 +70,7 @@ function readStandaloneMode(): boolean {
 export default function SecurityCheckScreen({
   onContinue,
   userId,
-  requireNotificationPermission = false,
+  requireNotificationPermission: _requireNotificationPermission = false,
 }: Props) {
   const [checks, setChecks] = useState<Check[]>(
     CHECKS.map((c) => ({ ...c, status: 'pending' })),
@@ -80,7 +79,7 @@ export default function SecurityCheckScreen({
   const [allDone, setAllDone] = useState(false)
   const [pwaSkipped, setPwaSkipped] = useState(false)
   const [notifBusy, setNotifBusy] = useState(false)
-  const [notifDismissed, setNotifDismissed] = useState(false)
+  const [, setNotifDismissed] = useState(false)
   const [pushSubscriptionReady, setPushSubscriptionReady] = useState(false)
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     () => typeof window !== 'undefined' && 'Notification' in window
@@ -211,29 +210,11 @@ export default function SecurityCheckScreen({
   const isStandaloneMode = readStandaloneMode()
   const notifSupported = notificationPermission !== 'unsupported'
   const notifGranted = notificationPermission === 'granted'
-  const notificationRequired =
-    requireNotificationPermission &&
-    isStandaloneMode &&
-    notifSupported &&
-    !shouldSkipNotificationNudge()
-  const notificationGateReady =
-    notifGranted && (!notificationRequired || pushSubscriptionReady)
-  const showNotifStep =
-    allDone &&
-    isStandaloneMode &&
-    notifSupported &&
-    !notificationGateReady &&
-    (notificationRequired || !notifDismissed) &&
-    !shouldSkipNotificationNudge()
+  /** 通知權限改在 TermsConsentScreen；安全檢查頁不再阻擋或強制推播。 */
+  const notificationRequired = false
+  const showNotifStep = false
 
-  const canContinue =
-    allDone &&
-    (isStandaloneMode
-      ? notificationGateReady ||
-        (!notificationRequired && notifDismissed) ||
-        !notifSupported ||
-        shouldSkipNotificationNudge()
-      : pwaSkipped)
+  const canContinue = allDone && (isStandaloneMode || pwaSkipped)
 
   const requestNotifications = async () => {
     if (!notifSupported) {

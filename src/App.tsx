@@ -1280,9 +1280,7 @@ export default function App() {
         {screen === 'security-check' && (
           <SecurityCheckScreen
             userId={user?.id}
-            requireNotificationPermission={
-              user ? !readSecurityOnboardingDone(user.id) : false
-            }
+            requireNotificationPermission={false}
             onContinue={async () => {
               const activeUser = await getActiveUser()
               if (!activeUser) return go('profile-setup')
@@ -1297,6 +1295,7 @@ export default function App() {
 
         {screen === 'terms-consent' && (
           <TermsConsentScreen
+            userId={user?.id}
             busy={termsBusy}
             error={termsError}
             onAccept={handleTermsAccept}

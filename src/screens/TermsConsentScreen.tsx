@@ -3,16 +3,41 @@ import { motion } from 'framer-motion'
 import { AlertCircle, Check, ChevronLeft, FileText, ShieldCheck } from 'lucide-react'
 import { TERMS_VERSION } from '@/lib/db'
 import { TERMS_SECTIONS } from '@/lib/termsContent'
+import { maybeSubscribeWebPushAfterServiceInfoConsent } from '@/lib/webPush'
 
 interface Props {
+  userId?: string | null
   busy?: boolean
   error?: string
-  onAccept: () => void
+  onAccept: () => void | Promise<void>
   onBack?: () => void
 }
 
-export default function TermsConsentScreen({ busy = false, error, onAccept, onBack }: Props) {
-  const [checked, setChecked] = useState(false)
+export default function TermsConsentScreen({
+  userId,
+  busy = false,
+  error,
+  onAccept,
+  onBack,
+}: Props) {
+  const [termsChecked, setTermsChecked] = useState(false)
+  const [serviceInfoChecked, setServiceInfoChecked] = useState(true)
+  const [acceptBusy, setAcceptBusy] = useState(false)
+
+  const handleAccept = async () => {
+    if (!termsChecked || busy || acceptBusy) return
+    setAcceptBusy(true)
+    try {
+      if (userId) {
+        await maybeSubscribeWebPushAfterServiceInfoConsent(userId, serviceInfoChecked)
+      }
+      await onAccept()
+    } finally {
+      setAcceptBusy(false)
+    }
+  }
+
+  const combinedBusy = busy || acceptBusy
 
   return (
     <div className="min-h-dvh bg-[#f8fafc] flex flex-col">
@@ -62,23 +87,35 @@ export default function TermsConsentScreen({ busy = false, error, onAccept, onBa
         )}
         <button
           type="button"
-          onClick={() => setChecked((value) => !value)}
+          onClick={() => setTermsChecked((value) => !value)}
           className="flex w-full items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-left"
         >
-          <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${checked ? 'border-slate-900 bg-slate-900' : 'border-slate-300 bg-white'}`}>
-            {checked && <Check className="h-3.5 w-3.5 text-white" />}
+          <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${termsChecked ? 'border-slate-900 bg-slate-900' : 'border-slate-300 bg-white'}`}>
+            {termsChecked && <Check className="h-3.5 w-3.5 text-white" />}
           </span>
           <span className="text-xs leading-relaxed text-slate-600">
-            我已年滿 18 歲，並已完整閱讀、理解且同意上述會員同意書與平台規範。
+            我已閱讀並同意服務條款與隱私權政策
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setServiceInfoChecked((value) => !value)}
+          className="mt-2 flex w-full items-start gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-left"
+        >
+          <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${serviceInfoChecked ? 'border-slate-900 bg-slate-900' : 'border-slate-300 bg-white'}`}>
+            {serviceInfoChecked && <Check className="h-3.5 w-3.5 text-white" />}
+          </span>
+          <span className="text-xs leading-relaxed text-slate-600">
+            同意接收服務資訊及相關提醒
           </span>
         </button>
         <motion.button
           whileTap={{ scale: 0.98 }}
-          onClick={onAccept}
-          disabled={!checked || busy}
+          onClick={() => void handleAccept()}
+          disabled={!termsChecked || combinedBusy}
           className="mt-3 w-full rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 disabled:opacity-40"
         >
-          {busy ? '儲存同意紀錄中' : '同意並繼續'}
+          {combinedBusy ? '儲存同意紀錄中' : '同意並繼續'}
         </motion.button>
       </div>
     </div>

@@ -81,7 +81,7 @@ import {
 } from '@/lib/db'
 import { readInstantEnqueueIntent, clearInstantEnqueueIntent } from '@/lib/instantMatchEnqueueIntent'
 import { useIosChatKeyboardInset } from '@/lib/iosChatKeyboardInset'
-import { getAppDayKey, msUntilNextAppDayKeyChange, msUntilNextTaipei2200, showDiscoverDeckRolloverNotification } from '@/lib/appDay'
+import { getAppDayKey, msUntilNextAppDayKeyChange } from '@/lib/appDay'
 import { armAudioContextOnUserGesture, playInAppSound } from '@/lib/appSounds'
 import MembershipManagementScreen, {
   type MembershipUpdateEvent,
@@ -3164,25 +3164,9 @@ function NotifEnablePrompt({
         ? await Notification.requestPermission()
         : Notification.permission
       if (perm === 'granted') {
-        // Enable the core toggles by default once user grants permission
         try {
           const prev = readNotifSettings()
           writeNotifSettings({ ...prev, newMatch: true, messages: true })
-        } catch { /* noop */ }
-        // Fire a welcome ping so the user immediately sees it works
-        try {
-          const options: NotificationOptions = {
-            body: '通知已啟用，配對成功或收到訊息時會第一時間通知你',
-            icon: '/icons/icon-192.png',
-            badge: '/icons/icon-192.png',
-            tag: 'tsmedia-welcome',
-          }
-          if ('serviceWorker' in navigator) {
-            const reg = await navigator.serviceWorker.ready
-            await reg.showNotification('通知已開啟', options)
-          } else {
-            new Notification('通知已開啟', options)
-          }
         } catch { /* noop */ }
         onDismiss()
       } else {
@@ -7966,26 +7950,6 @@ export default function MainScreen({
       localStorage.setItem(LS, k)
     } catch {
       /* private mode — 不中斷 */
-    }
-  }, [user?.id])
-
-  /** Asia/Taipei 22:00:00 準點換日推播（App 有 JS 時；Cron 僅補 App 完全未開）。 */
-  useEffect(() => {
-    if (!user?.id) return
-    let timeoutId: number | undefined
-
-    const scheduleTaipei2200Push = () => {
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
-      const delay = msUntilNextTaipei2200()
-      timeoutId = window.setTimeout(() => {
-        void showDiscoverDeckRolloverNotification(getAppDayKey())
-        scheduleTaipei2200Push()
-      }, delay)
-    }
-
-    scheduleTaipei2200Push()
-    return () => {
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId)
     }
   }, [user?.id])
 

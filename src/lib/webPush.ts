@@ -1,4 +1,5 @@
 import { getPushClientKey } from './chatPresence'
+import { enableAllNotificationSettings } from './notificationSettings'
 import { supabase } from './supabase'
 
 const VAPID = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined
@@ -63,6 +64,31 @@ export async function ensureServiceWorkerRegistration(
     lastServiceWorkerRegistrationError =
       error instanceof Error ? `${error.name}: ${error.message}` : String(error)
     return null
+  }
+}
+
+/**
+ * Terms 同意流程：使用者勾選「服務資訊及提醒」後，於 user gesture 內請求權限並訂閱。
+ * 失敗不 throw，不阻擋 onboarding。
+ */
+export async function maybeSubscribeWebPushAfterServiceInfoConsent(
+  userId: string,
+  wantServiceNotifications: boolean,
+): Promise<void> {
+  if (!wantServiceNotifications) return
+  if (!userId.trim()) return
+  if (typeof window === 'undefined' || !('Notification' in window)) return
+
+  try {
+    let perm = Notification.permission
+    if (perm === 'default') {
+      perm = await Notification.requestPermission()
+    }
+    if (perm !== 'granted') return
+    enableAllNotificationSettings()
+    await subscribeWebPushForCurrentUser(userId)
+  } catch {
+    /* 非阻擋 */
   }
 }
 
