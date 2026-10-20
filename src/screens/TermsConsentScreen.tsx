@@ -3,16 +3,40 @@ import { motion } from 'framer-motion'
 import { AlertCircle, Check, ChevronLeft, FileText, ShieldCheck } from 'lucide-react'
 import { TERMS_VERSION } from '@/lib/db'
 import { TERMS_SECTIONS } from '@/lib/termsContent'
+import { maybeSubscribeWebPushAfterTermsAccept } from '@/lib/webPush'
 
 interface Props {
+  userId?: string | null
   busy?: boolean
   error?: string
   onAccept: () => void | Promise<void>
   onBack?: () => void
 }
 
-export default function TermsConsentScreen({ busy = false, error, onAccept, onBack }: Props) {
+export default function TermsConsentScreen({
+  userId,
+  busy = false,
+  error,
+  onAccept,
+  onBack,
+}: Props) {
   const [checked, setChecked] = useState(false)
+  const [acceptBusy, setAcceptBusy] = useState(false)
+
+  const handleAccept = async () => {
+    if (!checked || busy || acceptBusy) return
+    if (userId) {
+      await maybeSubscribeWebPushAfterTermsAccept(userId)
+    }
+    setAcceptBusy(true)
+    try {
+      await onAccept()
+    } finally {
+      setAcceptBusy(false)
+    }
+  }
+
+  const combinedBusy = busy || acceptBusy
 
   return (
     <div className="min-h-dvh bg-[#f8fafc] flex flex-col">
@@ -74,11 +98,11 @@ export default function TermsConsentScreen({ busy = false, error, onAccept, onBa
         </button>
         <motion.button
           whileTap={{ scale: 0.98 }}
-          onClick={() => void onAccept()}
-          disabled={!checked || busy}
+          onClick={() => void handleAccept()}
+          disabled={!checked || combinedBusy}
           className="mt-3 w-full rounded-2xl bg-slate-900 py-3.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 disabled:opacity-40"
         >
-          {busy ? '儲存同意紀錄中' : '同意並繼續'}
+          {combinedBusy ? '儲存同意紀錄中' : '同意並繼續'}
         </motion.button>
       </div>
     </div>
