@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera, FileText, Trash2, ChevronRight, ChevronLeft,
-  ShieldCheck, AlertCircle, Upload, Gem, Sparkles, LogOut, Clock,
+  ShieldCheck, AlertCircle, Upload, Gem, Sparkles, LogOut, Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -460,16 +460,24 @@ export default function IdentityVerifyScreen({
     return (
       <>
       <div className="min-h-dvh max-w-md mx-auto flex flex-col items-center overflow-y-auto bg-[#fafafa] px-6 pb-[calc(env(safe-area-inset-bottom,0px)+32px)] pt-[calc(env(safe-area-inset-top,0px)+32px)] text-center">
-        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="my-auto w-full space-y-4">
-          <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto">
-            <Clock className="w-8 h-8 text-amber-600" />
+        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="my-auto w-full space-y-5">
+          <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-2 border-slate-200 border-t-slate-800 animate-spin" aria-hidden />
+            <ShieldCheck className="relative h-7 w-7 text-slate-800" aria-hidden />
           </div>
-          <h2 className="text-xl font-bold text-slate-900">人工審核中</h2>
-          <p className="text-sm text-slate-500 leading-relaxed">
-            我們已收到你的申請，目前採<strong className="text-slate-700">全人工審核</strong>。
-            <br />
-            最長等待時間約 {VERIFICATION_MANUAL_SLA_HOURS} 小時，通過後會通知你。
-          </p>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-slate-900">正在進行安全審核</h2>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              為降低假帳號與詐騙風險，
+              <br />
+              新會員申請都必須通過安全審核。
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-2 text-slate-500" role="status" aria-live="polite">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+            <span className="text-sm font-medium">審核中…</span>
+          </div>
+          <p className="text-xs text-slate-400">通常於 1 分鐘內完成</p>
           {userId ? (
             <VerifyWaitNotificationCard userId={userId} className="mx-auto w-full max-w-[340px]" />
           ) : null}

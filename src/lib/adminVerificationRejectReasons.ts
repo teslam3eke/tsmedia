@@ -93,6 +93,20 @@ export const ADMIN_VERIFICATION_REJECT_PRESETS: AdminVerificationRejectPreset[] 
       '自傳或問卷內容過於簡短，無法協助其他會員認識您。請充實自我介紹與問卷回答後重新送審。',
   },
   {
+    id: 'text_repeat_stuffing',
+    category: '自傳／問卷',
+    label: '重複字元或符號',
+    message:
+      '自傳或問卷有過多重複的字或符號（如連續「～」「！」、同一字重複多次）。請改寫成正常句子後再送審。',
+  },
+  {
+    id: 'text_off_platform',
+    category: '自傳／問卷',
+    label: '站外聯絡或導流',
+    message:
+      '自傳或問卷不可留 IG、LINE、電話、Email、網址等站外聯絡或導流。請刪除後再送審。',
+  },
+  {
     id: 'profile_enrich',
     category: '生活照／資料',
     label: '建議充實加分項目',

@@ -62,7 +62,7 @@ export function VerifyWaitNotificationCard({
         type="button"
         onClick={() => void onEnable()}
         disabled={busy}
-        className="mx-auto mt-3 block w-1/2 min-w-[8.5rem] rounded-2xl bg-slate-900 py-3.5 text-sm font-semibold text-white transition-all active:scale-[0.98] disabled:opacity-60"
+        className="mx-auto mt-3 block w-[35%] min-w-[5.95rem] rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white transition-all active:scale-[0.98] disabled:opacity-60"
       >
         {busy ? '處理中' : '開啟通知'}
       </button>

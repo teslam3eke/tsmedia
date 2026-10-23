@@ -34,21 +34,32 @@
       width: 1px;
       background: linear-gradient(to bottom, #c7a46e, #e6d8c1);
     }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin-ring { animation: spin 0.9s linear infinite; }
+    .spin-icon { animation: spin 1s linear infinite; }
   </style>
 </head>
 <body class="min-h-dvh bg-[#fafafa] font-sans text-slate-900">
   <!-- 與 IdentityVerifyScreen waitingForReview 相同外層 -->
   <div id="screen" class="min-h-dvh max-w-md mx-auto flex flex-col items-center overflow-y-auto bg-[#fafafa] px-6 pb-[calc(env(safe-area-inset-bottom,0px)+32px)] pt-[calc(env(safe-area-inset-top,0px)+32px)] text-center">
-    <div class="my-auto w-full space-y-4">
-      <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
-        <svg class="h-8 w-8 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    <div class="my-auto w-full space-y-5">
+      <div class="relative mx-auto flex h-16 w-16 items-center justify-center">
+        <div class="absolute inset-0 rounded-full border-2 border-slate-200 border-t-slate-800 spin-ring" aria-hidden="true"></div>
+        <svg class="relative h-7 w-7 text-slate-800" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
       </div>
-      <h2 class="text-xl font-bold text-slate-900">人工審核中</h2>
-      <p class="text-sm leading-relaxed text-slate-500">
-        我們已收到你的申請，目前採<strong class="text-slate-700">全人工審核</strong>。
-        <br />
-        最長等待時間約 12 小時，通過後會通知你。
-      </p>
+      <div class="space-y-2">
+        <h2 class="text-xl font-bold text-slate-900">正在進行安全審核</h2>
+        <p class="text-sm leading-relaxed text-slate-500">
+          為降低假帳號與詐騙風險，
+          <br />
+          新會員申請都必須通過安全審核。
+        </p>
+      </div>
+      <div class="flex items-center justify-center gap-2 text-slate-500" role="status">
+        <svg class="h-5 w-5 spin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+        <span class="text-sm font-medium">審核中…</span>
+      </div>
+      <p class="text-xs text-slate-400">通常於 1 分鐘內完成</p>
 
       <div class="mx-auto w-full max-w-[340px] rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200">
         <div class="flex items-start gap-3">
@@ -61,7 +72,7 @@
             即可獲得相關折扣（配合全站活動）
           </p>
         </div>
-        <button type="button" class="mx-auto mt-3 block w-1/2 min-w-[8.5rem] rounded-2xl bg-slate-900 py-3.5 text-sm font-semibold text-white">
+        <button type="button" class="mx-auto mt-3 block w-[35%] min-w-[5.95rem] rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white">
           開啟通知
         </button>
       </div>
