@@ -613,6 +613,15 @@ export default function IdentityVerifyScreen({
           </div>
         )}
 
+        {verifyGate === 'rejected' && (
+          <VerifyWaitActions
+            onEditProfile={onEditProfile}
+            onEditQuestionnaire={onEditQuestionnaire}
+            onSignOut={onSignOut}
+            className="mb-4"
+          />
+        )}
+
         <AnimatePresence mode="wait">
           <motion.div
             key={step}

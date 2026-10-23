@@ -1033,6 +1033,10 @@ export default function App() {
         preferredRegion: data.preferredRegion || null,
       })
     }
+    if (gateRevisit) {
+      go(gateRevisit)
+      return
+    }
     go('questionnaire')
   }
 
@@ -1056,6 +1060,10 @@ export default function App() {
     const activeUser = await getActiveUser()
     if (activeUser) {
       await saveQuestionnaire(activeUser.id, entries)
+    }
+    if (gateRevisit) {
+      go(gateRevisit)
+      return
     }
     setMbtiQuizReturnTo('onboarding')
     go('mbti-quiz')
@@ -1315,7 +1323,11 @@ export default function App() {
                 : undefined
             }
             returnGateLabel={
-              gateRevisit === 'membership-paywall' ? '返回開通會員' : '返回審核等待'
+              gateRevisit === 'membership-paywall'
+                ? '返回開通會員'
+                : gateRevisit === 'identity-verify'
+                  ? '返回驗證頁'
+                  : '返回審核等待'
             }
           />
         )}
@@ -1332,7 +1344,11 @@ export default function App() {
                 : undefined
             }
             returnGateLabel={
-              gateRevisit === 'membership-paywall' ? '返回開通會員' : '返回審核等待'
+              gateRevisit === 'membership-paywall'
+                ? '返回開通會員'
+                : gateRevisit === 'identity-verify'
+                  ? '返回驗證頁'
+                  : '返回審核等待'
             }
           />
         )}
