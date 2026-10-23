@@ -43,3 +43,13 @@ export function userMessageFromAutoRejectNote(reviewerNote: string | null | unde
   if (!presetId) return null
   return messageForAutoTextRejectPreset(presetId)
 }
+
+/** 推播／站內通知用：自動 preset 轉繁中文案，人工備註原樣（不含 AUTO_TEXT_REJECT 前綴）。 */
+export function userFacingRejectReasonFromReviewerNote(
+  reviewerNote: string | null | undefined,
+): string | null {
+  const auto = userMessageFromAutoRejectNote(reviewerNote)
+  if (auto) return auto
+  const trimmed = reviewerNote?.trim()
+  return trimmed || null
+}

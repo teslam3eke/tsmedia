@@ -167,12 +167,40 @@ export function verifyIdReasonFromBody(data: VerifyIdResponseBody): string {
 export const VERIFICATION_APPLICATION_REJECTION_FOOTER =
   '你的個人資料與生活照已保留，請修正證件後重新送審。'
 
+/** 與 api/_utils/verificationRejectPresetMessages 對齊（僅使用者可見文案） */
+const AUTO_TEXT_REJECT_PREFIX = 'AUTO_TEXT_REJECT:'
+const AUTO_TEXT_REJECT_USER_MESSAGES: Record<string, string> = {
+  bio_too_short:
+    '自傳或問卷內容過於簡短，無法協助其他會員認識您。請充實自我介紹與問卷回答後重新送審。',
+  text_repeat_stuffing:
+    '自傳或問卷有過多重複的字、數字或符號（如連續「～」「！」、同一字或數字重複多次）。請改寫成正常句子後再送審。',
+  text_off_platform:
+    '自傳或問卷不可留 IG、LINE、電話、Email、網址等站外聯絡或導流。請刪除後再送審。',
+  photos_insufficient:
+    '生活照數量或清晰度未達平台標準。請補充至少一張清晰、可辨識本人的生活照後重新送審。',
+  fit_age_group:
+    '依您目前的年齡與配對條件，平台現階段可提供的合適對象較少。為避免開通後配對體驗不如預期，本次暫不開放會員資格。',
+}
+
+function userFacingRejectReasonFromReviewerNote(reviewerNote: string | null | undefined): string | null {
+  const trimmed = reviewerNote?.trim() ?? ''
+  if (trimmed.startsWith(AUTO_TEXT_REJECT_PREFIX)) {
+    const id = trimmed.slice(AUTO_TEXT_REJECT_PREFIX.length).split(/[\s|]/)[0]?.trim()
+    if (id && id in AUTO_TEXT_REJECT_USER_MESSAGES) return AUTO_TEXT_REJECT_USER_MESSAGES[id]
+  }
+  return trimmed || null
+}
+
+function displayRejectReason(raw: string): string {
+  const fromNote = userFacingRejectReasonFromReviewerNote(raw)
+  const text = fromNote ?? raw
+  return sanitizeVerificationUserMessage(text)
+}
+
 export function formatVerificationApplicationRejectionAlertBody(
   reviewerNote?: string | null,
 ): string {
-  const reason = reviewerNote?.trim()
-    ? sanitizeVerificationUserMessage(reviewerNote.trim())
-    : null
+  const reason = reviewerNote?.trim() ? displayRejectReason(reviewerNote.trim()) : null
   if (reason) return `退件原因：${reason}。${VERIFICATION_APPLICATION_REJECTION_FOOTER}`
   return `審核未通過。${VERIFICATION_APPLICATION_REJECTION_FOOTER}`
 }
@@ -180,8 +208,8 @@ export function formatVerificationApplicationRejectionAlertBody(
 /** 從通知正文取出退件原因（相容舊版「原因：」前綴）。 */
 export function parseVerificationRejectionReasonFromBody(body: string): string | null {
   const modern = body.match(/^退件原因：(.+?)。/)
-  if (modern?.[1]?.trim()) return sanitizeVerificationUserMessage(modern[1].trim())
+  if (modern?.[1]?.trim()) return displayRejectReason(modern[1].trim())
   const legacy = body.match(/^原因：(.+?)。/)
-  if (legacy?.[1]?.trim()) return sanitizeVerificationUserMessage(legacy[1].trim())
+  if (legacy?.[1]?.trim()) return displayRejectReason(legacy[1].trim())
   return null
 }

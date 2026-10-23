@@ -1,12 +1,9 @@
 /**
- * 管理後台審核後的直接 Web Push 備援。
- * Database Webhook 仍保留；此端點確保手動通過／退件不會因 Webhook 延遲或漏送而沒有 OS 推播。
+ * 管理後台審核後建立 verification_* 站內通知。
+ * OS 推播由 `app_notifications` INSERT webhook 統一送出（避免與 API 重複推兩次）。
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
-import { sendWebPushToUser } from './_utils/pushSend.js'
-
-const PUSH_OPTIONS_HIGH = { TTL: 86_400, urgency: 'high' as const }
 
 function bearerToken(req: VercelRequest): string | null {
   const auth = req.headers.authorization?.trim()
@@ -80,29 +77,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       return
     }
 
-    const result = await sendWebPushToUser(
-      notification.user_id,
-      {
-        title: notification.title,
-        body: notification.body ?? '',
-        tag: `app-notif-${notification.kind}-${notification.id}`,
-        url: `/?tab=profile&notif=${encodeURIComponent(notification.id)}&fromPush=1&pushTs=${Date.now()}`,
-        kind: notification.kind,
-        notifId: notification.id,
-      },
-      PUSH_OPTIONS_HIGH,
-    )
-
-    console.info('[push-verification-review] delivered', {
+    console.info('[push-verification-review] notification created', {
       notificationId: notification.id,
-      sent: result.sent,
-      failed: result.failed,
-      skipped: result.skipped,
     })
     res.status(200).json({
-      ok: result.sent > 0,
+      ok: true,
       notificationId: notification.id,
-      ...result,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
     })
   } catch (error) {
     console.error('[push-verification-review]', error)

@@ -1,8 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { sendWebPushToUser } from './pushSend.js'
 
-const PUSH_OPTIONS_HIGH = { TTL: 86_400, urgency: 'high' as const }
-
+/** OS 推播由 Supabase `app_notifications` INSERT webhook 統一送出，避免與此處重複跳兩次。 */
 export async function sendVerificationReviewPush(
   admin: SupabaseClient,
   payload: {
@@ -35,23 +33,9 @@ export async function sendVerificationReviewPush(
     }
   }
 
-  const result = await sendWebPushToUser(
-    notification.user_id,
-    {
-      title: notification.title,
-      body: notification.body ?? '',
-      tag: `app-notif-${notification.kind}-${notification.id}`,
-      url: `/?tab=profile&notif=${encodeURIComponent(notification.id)}&fromPush=1&pushTs=${Date.now()}`,
-      kind: notification.kind,
-      notifId: notification.id,
-    },
-    PUSH_OPTIONS_HIGH,
-  )
-
   return {
     created: true,
-    sent: result.sent,
-    failed: result.failed,
-    error: result.sent > 0 ? undefined : 'push not delivered',
+    sent: 0,
+    failed: 0,
   }
 }

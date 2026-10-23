@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { deliverApprovalEmailIfNeeded } from './deliverApprovalEmailIfNeeded.js'
 import { sendVerificationReviewPush } from './verificationReviewPush.js'
+import { userFacingRejectReasonFromReviewerNote } from './verificationRejectPresetMessages.js'
 
 type VerificationDocRow = {
   id: string
@@ -186,7 +187,7 @@ export async function runApproveVerificationApplication(
     ok: true,
     pushSent: push.sent,
     pushFailed: push.failed,
-    ...(push.sent > 0 ? {} : { error: push.error ?? '推播未確認送達' }),
+    ...(push.created ? {} : { error: push.error ?? '站內通知建立失敗' }),
   }
 }
 
@@ -222,9 +223,9 @@ export async function runRejectVerificationApplication(
     .update({ is_verified: false, verification_status: 'rejected' })
     .eq('id', application.user_id)
 
-  const reason = note?.trim()
-  const rejectBody = reason
-    ? `退件原因：${reason}。你的個人資料與生活照已保留，請修正證件後重新送審。`
+  const reasonDisplay = userFacingRejectReasonFromReviewerNote(note)
+  const rejectBody = reasonDisplay
+    ? `退件原因：${reasonDisplay}。你的個人資料與生活照已保留，請修正證件後重新送審。`
     : '審核未通過。你的個人資料與生活照已保留，請修正證件後重新送審。'
 
   const push = await sendVerificationReviewPush(admin, {
@@ -238,6 +239,6 @@ export async function runRejectVerificationApplication(
     ok: true,
     pushSent: push.sent,
     pushFailed: push.failed,
-    ...(push.sent > 0 ? {} : { error: push.error }),
+    ...(push.created ? {} : { error: push.error ?? '站內通知建立失敗' }),
   }
 }
