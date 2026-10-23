@@ -552,11 +552,15 @@ export default function IdentityVerifyScreen({
     <div className="min-h-dvh max-w-md mx-auto flex flex-col bg-[#fafafa]">
       <div className="px-5 pt-safe pb-6">
         <div className="flex items-center gap-3 mb-6">
-          {step > 0 && (
+          {(step > 0 || onEditQuestionnaire) && (
             <button
               type="button"
-              onClick={() => setStep(step - 1)}
+              onClick={() => {
+                if (step > 0) setStep(step - 1)
+                else onEditQuestionnaire?.()
+              }}
               className="w-8 h-8 rounded-full bg-white ring-1 ring-slate-100 shadow-sm flex items-center justify-center"
+              aria-label={step > 0 ? '上一步' : '返回修改問卷與自傳'}
             >
               <ChevronLeft className="w-4 h-4 text-slate-600" />
             </button>
@@ -611,15 +615,6 @@ export default function IdentityVerifyScreen({
               </div>
             </div>
           </div>
-        )}
-
-        {verifyGate === 'rejected' && (
-          <VerifyWaitActions
-            onEditProfile={onEditProfile}
-            onEditQuestionnaire={onEditQuestionnaire}
-            onSignOut={onSignOut}
-            className="mb-4"
-          />
         )}
 
         <AnimatePresence mode="wait">

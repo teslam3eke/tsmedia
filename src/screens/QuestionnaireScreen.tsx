@@ -20,6 +20,8 @@ interface Props {
   onBackToProfile?: () => void
   onReturnToVerify?: () => void
   returnGateLabel?: string
+  /** 從送審頁回來修改：以 DB 問卷為準，勿讓空白 onboarding 草稿蓋掉已存答案 */
+  preferSavedProfileAnswers?: boolean
 }
 
 const CATEGORY_COLORS: Record<QuestionCategory, { bg: string; text: string; dot: string }> = {
@@ -38,6 +40,7 @@ export default function QuestionnaireScreen({
   onBackToProfile,
   onReturnToVerify,
   returnGateLabel = '返回審核等待',
+  preferSavedProfileAnswers = false,
 }: Props) {
   const questions = useMemo(() => getQuestionnaireQuestions(gender), [gender])
   const [current, setCurrent] = useState(0)
@@ -67,9 +70,21 @@ export default function QuestionnaireScreen({
           }
         }
       }
-      const mergedAnswers = draft?.answers ? { ...seeded, ...draft.answers } : seeded
+      let mergedAnswers: Record<number, string>
+      if (preferSavedProfileAnswers) {
+        mergedAnswers = seeded
+      } else {
+        mergedAnswers = { ...seeded }
+        if (draft?.answers) {
+          for (const [key, val] of Object.entries(draft.answers)) {
+            if (typeof val === 'string' && val.trim()) {
+              mergedAnswers[Number(key)] = val
+            }
+          }
+        }
+      }
       if (Object.keys(mergedAnswers).length > 0) setAnswers(mergedAnswers)
-      if (typeof draft?.current === 'number' && draft.current >= 0) {
+      if (typeof draft?.current === 'number' && draft.current >= 0 && !preferSavedProfileAnswers) {
         setCurrent(Math.min(draft.current, questions.length - 1))
       }
       setAnswersLoaded(true)
@@ -77,7 +92,7 @@ export default function QuestionnaireScreen({
     return () => {
       cancelled = true
     }
-  }, [userId, questions.length])
+  }, [userId, questions.length, preferSavedProfileAnswers])
 
   useEffect(() => {
     if (!answersLoaded) return

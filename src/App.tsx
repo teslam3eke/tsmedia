@@ -166,6 +166,8 @@ export default function App() {
   const [gateRevisit, setGateRevisit] = useState<'identity-verify' | 'membership-paywall' | null>(
     null,
   )
+  /** 同步旗標：避免 setState 與切頁同一 tick 時問卷未讀到 gateRevisit */
+  const questionnaireFromVerifyRef = useRef(false)
   /** MBTI 測驗完成後導向：入門流程 vs 探索分頁門檻 */
   const [mbtiQuizReturnTo, setMbtiQuizReturnTo] = useState<'onboarding' | 'main-discover'>('onboarding')
   /** iOS 非 Safari 開啟 PKCE 確認連結，或換券失敗 */
@@ -1062,6 +1064,7 @@ export default function App() {
       await saveQuestionnaire(activeUser.id, entries)
     }
     if (gateRevisit) {
+      questionnaireFromVerifyRef.current = false
       go(gateRevisit)
       return
     }
@@ -1337,10 +1340,16 @@ export default function App() {
             onComplete={handleQuestionnaireComplete}
             gender={userGender}
             userId={user?.id}
+            preferSavedProfileAnswers={
+              gateRevisit === 'identity-verify' || questionnaireFromVerifyRef.current
+            }
             onBack={() => go('profile-setup')}
             onReturnToVerify={
               gateRevisit
-                ? () => go(gateRevisit)
+                ? () => {
+                    questionnaireFromVerifyRef.current = false
+                    go(gateRevisit)
+                  }
                 : undefined
             }
             returnGateLabel={
@@ -1387,6 +1396,7 @@ export default function App() {
               go('profile-setup')
             }}
             onEditQuestionnaire={() => {
+              questionnaireFromVerifyRef.current = true
               setGateRevisit('identity-verify')
               go('questionnaire')
             }}
