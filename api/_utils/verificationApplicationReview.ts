@@ -63,7 +63,13 @@ export type ApproveApplicationResult = {
 export async function runApproveVerificationApplication(
   admin: SupabaseClient,
   applicationId: string,
-  opts?: { reviewerNote?: string | null; skipIncome?: boolean },
+  opts?: {
+    reviewerNote?: string | null
+    /** @deprecated 不再將收入 doc 標為 rejected；與未傳入相同（收入維持 pending） */
+    skipIncome?: boolean
+    /** true：一併核可收入皇冠（舊「整包通過」）；預設 false＝會員先過、收入 doc 維持 pending（方案 B） */
+    approveIncome?: boolean
+  },
 ): Promise<ApproveApplicationResult> {
   const application = await loadApplication(admin, applicationId)
   if (!application) return { ok: false, error: '找不到審核申請。' }
@@ -79,14 +85,15 @@ export async function runApproveVerificationApplication(
 
   const reviewedAt = new Date().toISOString()
   const reviewerNote = opts?.reviewerNote ?? null
-  const skipIncome = opts?.skipIncome === true
+  const approveIncomeWithMember = opts?.approveIncome === true
   const incomeDocs = application.docs.filter((d) => d.verification_kind === 'income')
   const incomeDoc = incomeDocs.find((d) => d.claimed_income_tier)
   const nonIncomeDocIds = application.docs
     .filter((d) => d.verification_kind !== 'income')
     .map((d) => d.id)
   const incomeDocIds = incomeDocs.map((d) => d.id)
-  const incomeSkipNote = '收入皇冠認證未通過；會員審核已通過。'
+  const hasPendingIncomeAfterMemberApprove =
+    incomeDocIds.length > 0 && !approveIncomeWithMember
 
   const { error: appError } = await admin
     .from('verification_applications')
@@ -94,8 +101,8 @@ export async function runApproveVerificationApplication(
       status: 'approved',
       reviewed_at: reviewedAt,
       reviewer_note:
-        skipIncome && incomeDocIds.length > 0
-          ? (reviewerNote ?? '會員審核通過；收入皇冠未核可')
+        hasPendingIncomeAfterMemberApprove
+          ? (reviewerNote ?? '會員審核通過；收入皇冠待審')
           : reviewerNote,
     })
     .eq('id', applicationId)
@@ -114,17 +121,7 @@ export async function runApproveVerificationApplication(
     if (docsError) return { ok: false, error: docsError.message }
   }
 
-  if (skipIncome && incomeDocIds.length > 0) {
-    const { error: incomeRejectError } = await admin
-      .from('verification_docs')
-      .update({
-        status: 'rejected',
-        reviewed_at: reviewedAt,
-        reviewer_note: incomeSkipNote,
-      })
-      .in('id', incomeDocIds)
-    if (incomeRejectError) return { ok: false, error: incomeRejectError.message }
-  } else if (incomeDocIds.length > 0) {
+  if (approveIncomeWithMember && incomeDocIds.length > 0) {
     const { error: incomeApproveError } = await admin
       .from('verification_docs')
       .update({ status: 'approved', reviewed_at: reviewedAt, reviewer_note: reviewerNote })
@@ -136,7 +133,7 @@ export async function runApproveVerificationApplication(
     is_verified: true,
     verification_status: 'approved',
   }
-  if (!skipIncome && incomeDoc?.claimed_income_tier) {
+  if (approveIncomeWithMember && incomeDoc?.claimed_income_tier) {
     profilePatch.income_tier = incomeDoc.claimed_income_tier
   }
 
@@ -146,16 +143,21 @@ export async function runApproveVerificationApplication(
     .eq('id', application.user_id)
   if (profileError) return { ok: false, error: profileError.message }
 
-  const paths = application.docs.map((d) => d.doc_url).filter(Boolean) as string[]
-  const deleted = await deleteProofDocsFromStorage(admin, paths)
-  if (paths.length > 0 && deleted) {
-    await admin.from('verification_docs').update({ doc_url: null }).eq('application_id', applicationId)
+  const pathsToClear = application.docs
+    .filter((d) => d.doc_url && (d.verification_kind !== 'income' || approveIncomeWithMember))
+    .map((d) => d.doc_url) as string[]
+  const deleted = await deleteProofDocsFromStorage(admin, pathsToClear)
+  if (pathsToClear.length > 0 && deleted) {
+    const idsToClear = application.docs
+      .filter((d) => d.doc_url && (d.verification_kind !== 'income' || approveIncomeWithMember))
+      .map((d) => d.id)
+    if (idsToClear.length > 0) {
+      await admin.from('verification_docs').update({ doc_url: null }).in('id', idsToClear)
+    }
   }
 
   const bodyParts = ['你的會員審核已通過。']
-  if (skipIncome && incomeDocIds.length > 0) {
-    bodyParts.push('收入皇冠認證未通過；若日後有合適文件，可重新申請皇冠。')
-  } else if (incomeDoc?.claimed_income_tier) {
+  if (approveIncomeWithMember && incomeDoc?.claimed_income_tier) {
     bodyParts.push('收入皇冠認證已一併通過，可到編輯個人資訊開啟皇冠顯示。')
   }
 

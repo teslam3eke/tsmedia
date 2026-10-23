@@ -65,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       : typeof rawBody.application_id === 'string'
         ? rawBody.application_id.trim()
         : ''
-  const skipIncome = rawBody.skipIncome === true || rawBody.skip_income === true
+  const approveIncome = rawBody.approveIncome === true || rawBody.approve_income === true
   const reviewerNote =
     typeof rawBody.reviewerNote === 'string'
       ? rawBody.reviewerNote
@@ -80,7 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   if (action === 'approve') {
     const result = await runApproveVerificationApplication(admin, applicationId, {
-      skipIncome,
+      approveIncome,
       reviewerNote,
     })
     res.status(result.ok ? 200 : 400).json(result)

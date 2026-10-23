@@ -10,7 +10,9 @@ import { userFeedbackCategoryLabel } from '@/lib/userFeedback'
 import { supabase } from '@/lib/supabase'
 import {
   getAllVerificationApplications, approveVerificationApplication,
-  rejectVerificationApplication, getDocSignedUrl, resolvePhotoUrls, getAdminProfileReports,
+  rejectVerificationApplication, getPendingVerifications,
+  approveVerificationDoc, rejectVerificationDoc,
+  getDocSignedUrl, resolvePhotoUrls, getAdminProfileReports,
   getAdminMessageReports, updateProfileReportStatus, updateMessageReportStatus,
   getAdminUserFeedback, updateUserFeedbackStatus, deleteUserFeedback,
   blockProfile,
@@ -18,7 +20,7 @@ import {
 import AdminPricingTab from '@/screens/AdminPricingTab'
 import type {
   MessageReportRow, ProfileReportRow, UserFeedbackWithProfile,
-  VerificationApplicationWithProfile, VerificationDocRow,
+  VerificationApplicationWithProfile, VerificationDocRow, VerificationDocWithProfile,
 } from '@/lib/types'
 import { INCOME_TIER_META, VERIFICATION_MANUAL_SLA_HOURS } from '@/lib/types'
 import {
@@ -112,6 +114,7 @@ export default function AdminScreen({ onBack }: Props) {
   const [tab, setTab]           = useState<AdminTab>('verifications')
   const [filter, setFilter]     = useState<Filter>('pending')
   const [applications, setApplications] = useState<VerificationApplicationWithProfile[]>([])
+  const [pendingIncomeDocs, setPendingIncomeDocs] = useState<VerificationDocWithProfile[]>([])
   const [photoPreviewMap, setPhotoPreviewMap] = useState<Record<string, string[]>>({})
   const [ageMap, setAgeMap] = useState<Record<string, number | null>>({})
   const [profileReports, setProfileReports] = useState<ProfileReportRow[]>([])
@@ -152,8 +155,12 @@ export default function AdminScreen({ onBack }: Props) {
   const load = useCallback(async () => {
     setLoading(true)
     if (tab === 'verifications') {
-      const data = await getAllVerificationApplications(filter === 'all' ? 'all' : filter)
+      const [data, pendingDocs] = await Promise.all([
+        getAllVerificationApplications(filter === 'all' ? 'all' : filter),
+        getPendingVerifications(),
+      ])
       setApplications(data)
+      setPendingIncomeDocs(pendingDocs.filter((d) => d.verification_kind === 'income'))
       const userIds = [...new Set(data.map((a) => a.user_id))]
       if (userIds.length > 0) {
         const { data: ageRows } = await supabase
@@ -218,11 +225,32 @@ export default function AdminScreen({ onBack }: Props) {
     load()
   }
 
-  const handleApproveWithoutIncome = async (app: VerificationApplicationWithProfile) => {
+  const handleApproveWithIncome = async (app: VerificationApplicationWithProfile) => {
     setActing(app.id)
-    const result = await approveVerificationApplication(app.id, app, { skipIncome: true })
+    const result = await approveVerificationApplication(app.id, app, { approveIncome: true })
     setActing(null)
     reportVerificationPushResult(result)
+    load()
+  }
+
+  const incomeRejectMessage =
+    ADMIN_VERIFICATION_REJECT_PRESETS.find((p) => p.id === 'income_unverified')?.message
+    ?? '收入相關文件無法確認所申請的等級，請重新上傳清晰的扣繳憑單、薪資單或銀行對帳等文件。'
+
+  const handleApproveIncomeDoc = async (doc: VerificationDocWithProfile) => {
+    setActing(doc.id)
+    const result = await approveVerificationDoc(doc.id, doc)
+    setActing(null)
+    if (!result.ok) window.alert(result.error ?? '更新失敗')
+    load()
+  }
+
+  const handleRejectIncomeDoc = async (doc: VerificationDocWithProfile) => {
+    if (!window.confirm('確定退件此收入皇冠申請？會員身分不受影響。')) return
+    setActing(doc.id)
+    const result = await rejectVerificationDoc(doc.id, doc, incomeRejectMessage)
+    setActing(null)
+    if (!result.ok) window.alert(result.error ?? '更新失敗')
     load()
   }
 
@@ -351,7 +379,7 @@ export default function AdminScreen({ onBack }: Props) {
               <RefreshCw className={cn('w-6 h-6 text-slate-400', loading && 'animate-spin')} />
             </motion.div>
           </div>
-        ) : tab === 'verifications' && applications.length === 0 ? (
+        ) : tab === 'verifications' && applications.length === 0 && pendingIncomeDocs.length === 0 ? (
           <div className="text-center py-16">
             <CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto mb-3" />
             <p className="text-sm text-slate-400">
@@ -366,6 +394,23 @@ export default function AdminScreen({ onBack }: Props) {
                 <p className="text-xs text-amber-700 font-medium">{pendingCount} 件待審核</p>
               </div>
             )}
+            {(filter === 'pending' || filter === 'all') && pendingIncomeDocs.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-500 px-1">
+                  待審收入皇冠（{pendingIncomeDocs.length}）
+                </p>
+                {pendingIncomeDocs.map((doc) => (
+                  <PendingIncomeDocCard
+                    key={doc.id}
+                    doc={doc}
+                    acting={acting === doc.id}
+                    onApprove={() => void handleApproveIncomeDoc(doc)}
+                    onReject={() => void handleRejectIncomeDoc(doc)}
+                    onViewDoc={() => void handleViewDoc(doc)}
+                  />
+                ))}
+              </div>
+            )}
             {applications.map((app) => (
               <ApplicationCard
                 key={app.id}
@@ -374,7 +419,7 @@ export default function AdminScreen({ onBack }: Props) {
                 photoUrls={photoPreviewMap[app.user_id] ?? []}
                 acting={acting === app.id}
                 onApprove={() => handleApprove(app)}
-                onApproveWithoutIncome={() => handleApproveWithoutIncome(app)}
+                onApproveWithIncome={() => handleApproveWithIncome(app)}
                 onReject={() => setRejectTarget(app)}
                 onViewDoc={(doc) => void handleViewDoc(doc)}
                 onViewPhoto={handleViewPhoto}
@@ -614,13 +659,86 @@ interface ApplicationCardProps {
   photoUrls: string[]
   acting: boolean
   onApprove: () => void
-  onApproveWithoutIncome: () => void
+  onApproveWithIncome: () => void
   onReject: () => void
   onViewDoc: (doc: VerificationDocRow) => void
   onViewPhoto: (url: string) => void
 }
 
-function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWithoutIncome, onReject, onViewDoc, onViewPhoto }: ApplicationCardProps) {
+function docStatusLabel(status: VerificationDocRow['status']) {
+  if (status === 'pending') return '待審'
+  if (status === 'approved') return '已通過'
+  return '已退件'
+}
+
+function PendingIncomeDocCard({
+  doc,
+  acting,
+  onApprove,
+  onReject,
+  onViewDoc,
+}: {
+  doc: VerificationDocWithProfile
+  acting: boolean
+  onApprove: () => void
+  onReject: () => void
+  onViewDoc: () => void
+}) {
+  const name = doc.profiles?.name ?? '未知用戶'
+  const tierLabel = doc.claimed_income_tier
+    ? (INCOME_TIER_META[doc.claimed_income_tier]?.label ?? doc.claimed_income_tier)
+    : '收入'
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-2xl p-4 shadow-sm ring-1 ring-amber-100 space-y-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-900">{name}</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {tierLabel}
+            {doc.doc_type ? ` · ${DOC_TYPE_LABEL[doc.doc_type] ?? doc.doc_type}` : ''}
+          </p>
+          <p className="text-[10px] text-slate-400 mt-1">
+            送出 {new Date(doc.submitted_at).toLocaleString('zh-TW', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </p>
+        </div>
+        {doc.doc_url ? (
+          <button
+            type="button"
+            onClick={onViewDoc}
+            className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0"
+          >
+            <Eye className="w-4 h-4 text-slate-500" />
+          </button>
+        ) : null}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onReject}
+          disabled={acting}
+          className="py-2.5 rounded-xl bg-red-50 text-red-500 text-xs font-bold disabled:opacity-60"
+        >
+          退件皇冠
+        </button>
+        <button
+          type="button"
+          onClick={onApprove}
+          disabled={acting}
+          className="py-2.5 rounded-xl bg-emerald-500 text-white text-xs font-bold disabled:opacity-60"
+        >
+          通過皇冠
+        </button>
+      </div>
+    </motion.div>
+  )
+}
+
+function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWithIncome, onReject, onViewDoc, onViewPhoto }: ApplicationCardProps) {
   const p = app.profiles
   const name = p?.name ?? '未知用戶'
   const isPending = app.status === 'pending'
@@ -715,6 +833,11 @@ function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWith
                   {INCOME_TIER_META[doc.claimed_income_tier]?.label ?? doc.claimed_income_tier}
                 </p>
               )}
+              {doc.verification_kind === 'income' && (
+                <p className="text-[10px] font-semibold text-amber-600 mt-0.5">
+                  {docStatusLabel(doc.status)}
+                </p>
+              )}
             </div>
             {doc.doc_url ? (
               <button
@@ -762,18 +885,18 @@ function ApplicationCard({ app, age, photoUrls, acting, onApprove, onApproveWith
               ) : (
                 <ShieldCheck className="w-3.5 h-3.5" />
               )}
-              整包通過
+              {hasIncomeDoc ? '通過會員' : '整包通過'}
             </button>
           </div>
           {hasIncomeDoc ? (
             <button
               type="button"
-              onClick={onApproveWithoutIncome}
+              onClick={onApproveWithIncome}
               disabled={acting}
               className="w-full py-2.5 rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-              通過（不含收入皇冠）
+              通過會員並核可皇冠
             </button>
           ) : null}
         </div>

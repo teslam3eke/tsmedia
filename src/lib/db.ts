@@ -949,7 +949,7 @@ export async function getAllVerificationApplications(
 async function requestAdminVerificationApplicationReview(body: {
   action: 'approve' | 'reject'
   applicationId: string
-  skipIncome?: boolean
+  approveIncome?: boolean
   reviewerNote?: string | null
 }): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
   const { data } = await supabase.auth.getSession()
@@ -992,12 +992,12 @@ async function requestAdminVerificationApplicationReview(body: {
 export async function approveVerificationApplication(
   applicationId: string,
   _application: VerificationApplicationWithProfile,
-  opts?: { reviewerNote?: string; skipIncome?: boolean },
+  opts?: { reviewerNote?: string; approveIncome?: boolean },
 ): Promise<{ ok: boolean; error?: string; pushSent?: number; pushFailed?: number }> {
   return requestAdminVerificationApplicationReview({
     action: 'approve',
     applicationId,
-    skipIncome: opts?.skipIncome,
+    approveIncome: opts?.approveIncome,
     reviewerNote: opts?.reviewerNote ?? null,
   })
 }
