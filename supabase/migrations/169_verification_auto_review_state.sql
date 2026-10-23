@@ -1,10 +1,10 @@
--- 169：Onboarding 自動審核狀態（文字兩次退件／race-safe claim；不動 168 收入 B）
+-- 169：Onboarding 自動審核狀態（共用 auto reject strike／race-safe claim；不動 168 收入 B）
 
 alter table public.profiles
   add column if not exists verification_text_auto_strikes smallint not null default 0;
 
 comment on column public.profiles.verification_text_auto_strikes is
-  '文字自動審退件次數；會員審核通過後清零；僅 service_role（server）可寫入。';
+  '自動審退件共用次數（含年齡／生活照／文字等）；第 3 次仍不符轉人工；通過後清零；僅 service_role 可寫。';
 
 -- 阻擋 authenticated / admin client 自行改 strikes；service_role 與未變更該欄的 UPDATE 不受限
 create or replace function public._profiles_guard_verification_text_auto_strikes()

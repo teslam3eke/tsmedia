@@ -127,7 +127,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
     expect(approveMock).not.toHaveBeenCalled()
   })
 
-  it('second text fail escalates to manual_queue (no third auto reject)', async () => {
+  it('second text fail still auto rejects (strike becomes 2)', async () => {
     const admin = makeAdmin({
       app: { id: 'app-2', user_id: 'u1', status: 'pending', auto_review_outcome: null, auto_review_claimed_at: null },
       profile: {
@@ -145,9 +145,31 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
     })
 
     const r = await runVerificationAutoReviewAfterSubmit(admin, 'app-2')
+    expect(r.outcome).toBe('text_rejected')
+    expect(rejectMock).toHaveBeenCalled()
+    expect(approveMock).not.toHaveBeenCalled()
+  })
+
+  it('third auto reject path escalates to manual_queue (shared strikes)', async () => {
+    const admin = makeAdmin({
+      app: { id: 'app-2b', user_id: 'u1', status: 'pending', auto_review_outcome: null, auto_review_claimed_at: null },
+      profile: {
+        id: 'u1',
+        verification_status: 'submitted',
+        verification_text_auto_strikes: 2,
+        name: 'Test',
+        gender: 'male',
+        company: 'ACME',
+        age: 28,
+        bio: '',
+        questionnaire: [{ id: 1, answer: '!!!!!' }],
+        photo_urls: ['p.jpg'],
+      },
+    })
+
+    const r = await runVerificationAutoReviewAfterSubmit(admin, 'app-2b')
     expect(r.outcome).toBe('manual_queue')
     expect(rejectMock).not.toHaveBeenCalled()
-    expect(approveMock).not.toHaveBeenCalled()
   })
 
   it('already approved profile skips auto review', async () => {
@@ -216,7 +238,29 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
     expect(approveMock).toHaveBeenCalled()
   })
 
-  it('age outside 23–40 auto rejects with fit_age_group (no text strike path)', async () => {
+  it('third age fail escalates to manual_queue (shared strikes)', async () => {
+    const admin = makeAdmin({
+      app: { id: 'app-age-3', user_id: 'u1', status: 'pending', auto_review_outcome: null, auto_review_claimed_at: null },
+      profile: {
+        id: 'u1',
+        verification_status: 'submitted',
+        verification_text_auto_strikes: 2,
+        name: 'Test',
+        gender: 'male',
+        company: 'ACME',
+        age: 19,
+        bio: '',
+        questionnaire: [{ id: 1, answer: '週末愛看電影與登山' }],
+        photo_urls: ['p.jpg'],
+      },
+    })
+
+    const r = await runVerificationAutoReviewAfterSubmit(admin, 'app-age-3')
+    expect(r.outcome).toBe('manual_queue')
+    expect(rejectMock).not.toHaveBeenCalled()
+  })
+
+  it('age outside 23–40 auto rejects with fit_age_group and increments shared strike', async () => {
     const admin = makeAdmin({
       app: { id: 'app-age', user_id: 'u1', status: 'pending', auto_review_outcome: null, auto_review_claimed_at: null },
       profile: {

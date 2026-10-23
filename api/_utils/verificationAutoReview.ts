@@ -13,8 +13,6 @@ import {
   runApproveVerificationApplication,
   runRejectVerificationApplication,
 } from './verificationApplicationReview.js'
-import { sendVerificationReviewPush } from './verificationReviewPush.js'
-
 export type AutoReviewPublicOutcome =
   | 'approved'
   | 'text_rejected'
@@ -46,6 +44,9 @@ type ProfileRow = {
 }
 
 const MANUAL_QUEUE_NOTE = '自動審核：內容仍不符合規範，已轉人工審核。'
+
+/** 共用 strike：已有 2 次自動退件後，第 3 次仍不符 → 轉人工（不再自動退）。 */
+export const AUTO_REVIEW_STRIKES_MANUAL_THRESHOLD = 2
 
 async function loadProfile(admin: SupabaseClient, userId: string): Promise<ProfileRow | null> {
   const { data, error } = await admin
@@ -161,6 +162,35 @@ async function escalateToManualQueue(
   }
 }
 
+async function autoRejectWithSharedStrikes(
+  admin: SupabaseClient,
+  appId: string,
+  userId: string,
+  profile: ProfileRow,
+  presetId: AutoTextRejectPresetId,
+  fields?: ('bio' | 'questionnaire')[],
+): Promise<AutoReviewPublicPayload> {
+  const strikes = await resolveTextAutoStrikes(admin, profile)
+  if (strikes >= AUTO_REVIEW_STRIKES_MANUAL_THRESHOLD) {
+    return escalateToManualQueue(admin, appId, userId)
+  }
+
+  const note = buildAutoTextRejectReviewerNote(presetId)
+  const reject = await runRejectVerificationApplication(admin, appId, note)
+  if (!reject.ok) {
+    return escalateUncertainToManual(admin, appId, userId, reject.error ?? 'reject_failed')
+  }
+  await incrementTextAutoStrikes(admin, userId)
+  await finishAutoReviewRecord(admin, appId, 'text_rejected')
+  return {
+    outcome: 'text_rejected',
+    presetId,
+    message: messageForAutoTextRejectPreset(presetId),
+    fields,
+    applicationId: appId,
+  }
+}
+
 async function escalateUncertainToManual(
   admin: SupabaseClient,
   applicationId: string,
@@ -259,39 +289,12 @@ export async function runVerificationAutoReviewAfterSubmit(
     if (member.uncertain) {
       return escalateUncertainToManual(admin, appId, userId, member.detail)
     }
-    const note = buildAutoTextRejectReviewerNote(member.presetId)
-    await runRejectVerificationApplication(admin, appId, note)
-    await finishAutoReviewRecord(admin, appId, 'text_rejected')
-    return {
-      outcome: 'text_rejected',
-      presetId: member.presetId,
-      message: messageForAutoTextRejectPreset(member.presetId),
-      applicationId: appId,
-    }
+    return autoRejectWithSharedStrikes(admin, appId, userId, profile, member.presetId)
   }
 
   const text = reviewTextProfile(profile.bio, profile.questionnaire)
   if (text.verdict === 'NEEDS_EDIT' && text.presetId) {
-    const strikes = await resolveTextAutoStrikes(admin, profile)
-    if (strikes >= 1) {
-      await finishAutoReviewRecord(admin, appId, 'manual_queue')
-      return escalateToManualQueue(admin, appId, userId)
-    }
-
-    const note = buildAutoTextRejectReviewerNote(text.presetId)
-    const reject = await runRejectVerificationApplication(admin, appId, note)
-    if (!reject.ok) {
-      return escalateUncertainToManual(admin, appId, userId, reject.error ?? 'reject_failed')
-    }
-    await incrementTextAutoStrikes(admin, userId)
-    await finishAutoReviewRecord(admin, appId, 'text_rejected')
-    return {
-      outcome: 'text_rejected',
-      presetId: text.presetId,
-      message: messageForAutoTextRejectPreset(text.presetId),
-      fields: text.fields,
-      applicationId: appId,
-    }
+    return autoRejectWithSharedStrikes(admin, appId, userId, profile, text.presetId, text.fields)
   }
 
   const approve = await runApproveVerificationApplication(admin, appId, { approveIncome: false })
