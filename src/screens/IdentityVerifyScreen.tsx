@@ -615,6 +615,13 @@ export default function IdentityVerifyScreen({
                         {autoRejectFieldHints.includes('questionnaire') ? '問卷回答' : ''}
                       </p>
                     )}
+                    {(verificationRejectionReasonForDisplay(rejectionNote) ?? rejectionNote)?.includes(
+                      '年齡',
+                    ) && (
+                      <p className="mt-2 text-xs text-red-700 leading-relaxed">
+                        若已修改生日，請在基本資料按「返回驗證頁」或「下一步」儲存後再送審。
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-1 text-xs text-red-700 leading-relaxed">

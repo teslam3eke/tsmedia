@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { ChevronRight, ChevronLeft } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
 import { cn } from '@/lib/utils'
-import { getProfile } from '@/lib/db'
+import { getProfile, upsertProfile } from '@/lib/db'
 import { REGION_LABELS, type Region } from '@/lib/types'
 import {
   loadOnboardingJsonDraft,
@@ -115,6 +115,33 @@ export default function ProfileSetupScreen({
   const set = <K extends keyof ProfileSetupData>(key: K, val: ProfileSetupData[K]) =>
     setForm((f) => ({ ...f, [key]: val }))
 
+  const persistProfileFromForm = async () => {
+    if (!userId) return
+    const data = formRef.current
+    await upsertProfile({
+      userId,
+      name: data.name,
+      nickname: data.nickname,
+      gender: data.gender,
+      company: data.company.trim(),
+      jobTitle: data.jobTitle.trim() || undefined,
+      interests: data.interests,
+      bio: data.bio,
+      age: data.birthYear ? new Date().getFullYear() - Number(data.birthYear) : undefined,
+      workRegion: data.workRegion || null,
+      homeRegion: data.homeRegion || null,
+      preferredRegion: data.preferredRegion || null,
+    })
+  }
+
+  const handleReturnToVerify = () => {
+    if (!onReturnToVerify) return
+    void (async () => {
+      await persistProfileFromForm()
+      onReturnToVerify()
+    })()
+  }
+
   const toggleInterest = (tag: string) =>
     set(
       'interests',
@@ -188,7 +215,7 @@ export default function ProfileSetupScreen({
             {onReturnToVerify ? (
               <button
                 type="button"
-                onClick={onReturnToVerify}
+                onClick={handleReturnToVerify}
                 className="ml-auto text-xs font-semibold text-slate-500 active:text-slate-800"
               >
                 {returnGateLabel}
