@@ -42,6 +42,7 @@ type ProfileRow = {
   bio: string | null
   questionnaire: unknown
   photo_urls: string[] | null
+  age: number | null
 }
 
 const MANUAL_QUEUE_NOTE = '自動審核：內容仍不符合規範，已轉人工審核。'
@@ -50,7 +51,7 @@ async function loadProfile(admin: SupabaseClient, userId: string): Promise<Profi
   const { data, error } = await admin
     .from('profiles')
     .select(
-      'id, verification_status, verification_text_auto_strikes, name, gender, company, bio, questionnaire, photo_urls',
+      'id, verification_status, verification_text_auto_strikes, name, gender, company, age, bio, questionnaire, photo_urls',
     )
     .eq('id', userId)
     .maybeSingle()

@@ -7,6 +7,7 @@ export type AutoTextRejectPresetId =
   | 'text_repeat_stuffing'
   | 'text_off_platform'
   | 'photos_insufficient'
+  | 'fit_age_group'
 
 const PRESET_MESSAGES: Record<AutoTextRejectPresetId, string> = {
   bio_too_short:
@@ -17,6 +18,8 @@ const PRESET_MESSAGES: Record<AutoTextRejectPresetId, string> = {
     '自傳或問卷不可留 IG、LINE、電話、Email、網址等站外聯絡或導流。請刪除後再送審。',
   photos_insufficient:
     '生活照數量或清晰度未達平台標準。請補充至少一張清晰、可辨識本人的生活照後重新送審。',
+  fit_age_group:
+    '依您目前的年齡與配對條件，平台現階段可提供的合適對象較少。為避免開通後配對體驗不如預期，本次暫不開放會員資格。',
 }
 
 export function messageForAutoTextRejectPreset(presetId: AutoTextRejectPresetId): string {

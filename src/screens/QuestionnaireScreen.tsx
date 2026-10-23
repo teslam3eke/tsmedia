@@ -9,7 +9,8 @@ import {
   type QuestionCategory,
   type Gender,
 } from '@/utils/questions'
-import { getProfile } from '@/lib/db'
+import { getProfile, saveQuestionnaire } from '@/lib/db'
+import type { QuestionnaireEntry } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import {
   loadOnboardingJsonDraft,
@@ -133,6 +134,25 @@ export default function QuestionnaireScreen({
     if (current > 0) setCurrent((c) => c - 1)
   }
 
+  const persistAnswersToProfile = async () => {
+    if (!userId) return
+    const entries: QuestionnaireEntry[] = questions.map((question) => ({
+      id: question.id,
+      category: question.category,
+      text: question.text,
+      answer: answers[question.id] ?? '',
+    }))
+    await saveQuestionnaire(userId, entries)
+  }
+
+  const handleReturnToVerify = () => {
+    if (!onReturnToVerify) return
+    void (async () => {
+      await persistAnswersToProfile()
+      onReturnToVerify()
+    })()
+  }
+
   const colors = CATEGORY_COLORS[q.category]
   const progress = ((current + 1) / questions.length) * 100
 
@@ -159,7 +179,7 @@ export default function QuestionnaireScreen({
             {onReturnToVerify ? (
               <button
                 type="button"
-                onClick={onReturnToVerify}
+                onClick={handleReturnToVerify}
                 className="ml-auto text-xs font-semibold text-slate-500 active:text-slate-800"
               >
                 {returnGateLabel}

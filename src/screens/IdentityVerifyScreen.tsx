@@ -202,6 +202,8 @@ export default function IdentityVerifyScreen({
   const [rejectionNote, setRejectionNote] = useState<string | null>(null)
   const [autoRejectFieldHints, setAutoRejectFieldHints] = useState<('bio' | 'questionnaire')[]>([])
   const [reviewNotificationCutoff, setReviewNotificationCutoff] = useState<string | null>(null)
+  /** 同步 auto review 結果時，15 秒揭曉前不彈審核通過／退件視窗 */
+  const [suppressReviewResultAlerts, setSuppressReviewResultAlerts] = useState(false)
   const reviewRevealTimerRef = useRef<number | null>(null)
 
   const bonusInputRef = useRef<HTMLInputElement>(null)
@@ -226,7 +228,7 @@ export default function IdentityVerifyScreen({
 
   const { alertPortal, notifyReviewResult } = useVerificationReviewNotifications({
     userId,
-    enabled: Boolean(userId) && waitingForReview,
+    enabled: Boolean(userId) && waitingForReview && !suppressReviewResultAlerts,
     notBefore: reviewNotificationCutoff,
     onApproved: onReviewApproved,
     onRejected: onReviewRejected,
@@ -274,7 +276,7 @@ export default function IdentityVerifyScreen({
   }, [verifyGate, onComplete])
 
   useEffect(() => {
-    if (!userId || !waitingForReview) return
+    if (!userId || !waitingForReview || suppressReviewResultAlerts) return
     const poll = window.setInterval(async () => {
       const p = await getProfile(userId)
       if (p?.verification_status === 'approved') {
@@ -286,7 +288,7 @@ export default function IdentityVerifyScreen({
       }
     }, 4000)
     return () => window.clearInterval(poll)
-  }, [userId, waitingForReview, notifyReviewResult])
+  }, [userId, waitingForReview, suppressReviewResultAlerts, notifyReviewResult])
 
   useEffect(() => {
     if (!userId || !draftHydrated) return
@@ -427,8 +429,18 @@ export default function IdentityVerifyScreen({
     }
 
     const reviewStartedAt = Date.now()
+    const gateBeforeSubmit = verifyGate === 'rejected' ? 'rejected' : 'pending'
+
+    setReviewNotificationCutoff(new Date().toISOString())
+    setVerifyGate('submitted')
+    setReviewPendingHold(true)
+    setSuppressReviewResultAlerts(true)
+
     const result = await submitVerificationApplication(userId, declaredCompany, built)
     if (!result.ok) {
+      setVerifyGate(gateBeforeSubmit)
+      setReviewPendingHold(false)
+      setSuppressReviewResultAlerts(false)
       setSubmitError(result.error ?? '送審失敗，請稍後再試。')
       setSubmitting(false)
       return
@@ -443,9 +455,6 @@ export default function IdentityVerifyScreen({
     await markVerificationReviewNotificationsRead(userId)
     setRejectionNote(null)
     setAutoRejectFieldHints([])
-    setReviewNotificationCutoff(new Date().toISOString())
-    setVerifyGate('submitted')
-    setReviewPendingHold(true)
     setSubmitting(false)
     void getTodayVerificationApplicationCount(userId).then(setDailyCount)
 
@@ -465,12 +474,15 @@ export default function IdentityVerifyScreen({
         setAutoRejectFieldHints(result.autoReview?.fields ?? [])
         setVerifyGate('rejected')
         setReviewPendingHold(false)
+        setSuppressReviewResultAlerts(false)
       })
     } else if (outcome === 'approved' || outcome === 'already_approved') {
       scheduleReveal(() => {
         setVerifyGate('approved')
         setReviewPendingHold(false)
       })
+    } else {
+      setSuppressReviewResultAlerts(false)
     }
     /* manual_queue / manual_required / skipped：維持 submitted 等待（Admin 或輪詢） */
   }

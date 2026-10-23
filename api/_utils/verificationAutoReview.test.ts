@@ -92,6 +92,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
         name: 'Test',
         gender: 'male',
         company: 'ACME',
+        age: 28,
         bio: '',
         questionnaire: [{ id: 1, answer: '喜歡爬山跟攝影' }],
         photo_urls: ['photos/a.jpg'],
@@ -113,6 +114,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
         name: 'Test',
         gender: 'female',
         company: 'ACME',
+        age: 28,
         bio: '',
         questionnaire: [{ id: 1, answer: '不知道' }],
         photo_urls: ['p.jpg'],
@@ -135,6 +137,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
         name: 'Test',
         gender: 'male',
         company: 'ACME',
+        age: 28,
         bio: '',
         questionnaire: [{ id: 1, answer: '!!!!!' }],
         photo_urls: ['p.jpg'],
@@ -156,6 +159,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
         name: 'Test',
         gender: 'male',
         company: 'ACME',
+        age: 28,
         bio: '',
         questionnaire: [],
         photo_urls: ['p.jpg'],
@@ -177,6 +181,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
         name: 'Test',
         gender: 'male',
         company: 'ACME',
+        age: 28,
         bio: '',
         questionnaire: [{ id: 1, answer: '喜歡爬山跟攝影' }],
         photo_urls: ['p.jpg'],
@@ -199,6 +204,7 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
         name: 'Test',
         gender: 'male',
         company: 'ACME',
+        age: 28,
         bio: '',
         questionnaire: [{ id: 1, answer: '週末愛看電影' }],
         photo_urls: ['p.jpg'],
@@ -208,5 +214,33 @@ describe('runVerificationAutoReviewAfterSubmit', () => {
     const r = await runVerificationAutoReviewAfterSubmit(admin, 'app-4')
     expect(r.outcome).toBe('manual_required')
     expect(approveMock).toHaveBeenCalled()
+  })
+
+  it('age outside 23–40 auto rejects with fit_age_group (no text strike path)', async () => {
+    const admin = makeAdmin({
+      app: { id: 'app-age', user_id: 'u1', status: 'pending', auto_review_outcome: null, auto_review_claimed_at: null },
+      profile: {
+        id: 'u1',
+        verification_status: 'submitted',
+        verification_text_auto_strikes: 0,
+        name: 'Test',
+        gender: 'male',
+        company: 'ACME',
+        age: 19,
+        bio: '',
+        questionnaire: [{ id: 1, answer: '週末愛看電影與登山' }],
+        photo_urls: ['p.jpg'],
+      },
+    })
+
+    const r = await runVerificationAutoReviewAfterSubmit(admin, 'app-age')
+    expect(r.outcome).toBe('text_rejected')
+    expect(r.presetId).toBe('fit_age_group')
+    expect(rejectMock).toHaveBeenCalledWith(
+      admin,
+      'app-age',
+      expect.stringContaining('AUTO_TEXT_REJECT:fit_age_group'),
+    )
+    expect(approveMock).not.toHaveBeenCalled()
   })
 })
