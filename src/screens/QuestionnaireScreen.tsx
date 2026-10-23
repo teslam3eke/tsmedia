@@ -1,8 +1,14 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronRight, ChevronLeft, MessageSquare } from 'lucide-react'
 import { BrandMark } from '@/components/BrandMark'
-import { getQuestionnaireQuestions, type Question, type QuestionCategory, type Gender } from '@/utils/questions'
+import {
+  getQuestionnaireQuestions,
+  getQuestionnaireQuestionsFromProfile,
+  type Question,
+  type QuestionCategory,
+  type Gender,
+} from '@/utils/questions'
 import { getProfile } from '@/lib/db'
 import { cn } from '@/lib/utils'
 import {
@@ -42,7 +48,7 @@ export default function QuestionnaireScreen({
   returnGateLabel = '返回審核等待',
   preferSavedProfileAnswers = false,
 }: Props) {
-  const questions = useMemo(() => getQuestionnaireQuestions(gender), [gender])
+  const [questions, setQuestions] = useState<Question[]>(() => getQuestionnaireQuestions(gender))
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<number, string>>({})
   const [answersLoaded, setAnswersLoaded] = useState(!userId)
@@ -61,6 +67,8 @@ export default function QuestionnaireScreen({
       )
       const p = await getProfile(userId)
       if (cancelled) return
+      const resolvedQuestions = getQuestionnaireQuestionsFromProfile(gender, p?.questionnaire)
+      setQuestions(resolvedQuestions)
       const seeded: Record<number, string> = {}
       const entries = p?.questionnaire
       if (Array.isArray(entries) && entries.length > 0) {
@@ -85,14 +93,14 @@ export default function QuestionnaireScreen({
       }
       if (Object.keys(mergedAnswers).length > 0) setAnswers(mergedAnswers)
       if (typeof draft?.current === 'number' && draft.current >= 0 && !preferSavedProfileAnswers) {
-        setCurrent(Math.min(draft.current, questions.length - 1))
+        setCurrent(Math.min(draft.current, resolvedQuestions.length - 1))
       }
       setAnswersLoaded(true)
     })()
     return () => {
       cancelled = true
     }
-  }, [userId, questions.length, preferSavedProfileAnswers])
+  }, [userId, gender, preferSavedProfileAnswers])
 
   useEffect(() => {
     if (!answersLoaded) return

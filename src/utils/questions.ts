@@ -20,6 +20,38 @@ export function getQuestionnaireQuestions(gender: Gender = 'male'): Question[] {
   return [...getRandomQuestions(5, gender), getFixedTurningPointQuestion()]
 }
 
+const QUESTION_CATEGORIES: QuestionCategory[] = ['金錢觀', '工作與生活平衡', '未來規劃與自尊']
+
+function isQuestionCategory(value: string): value is QuestionCategory {
+  return (QUESTION_CATEGORIES as string[]).includes(value)
+}
+
+/**
+ * 再次進入問卷時沿用 DB 已存題目（含 id／題幹），避免 getRandomQuestions 換題導致答案對不上。
+ */
+export function getQuestionnaireQuestionsFromProfile(
+  gender: Gender,
+  saved: QuestionnaireEntry[] | null | undefined,
+): Question[] {
+  if (!Array.isArray(saved) || saved.length === 0) {
+    return getQuestionnaireQuestions(gender)
+  }
+  const fromSaved: Question[] = []
+  for (const e of saved) {
+    if (typeof e.id !== 'number' || typeof e.text !== 'string' || !e.text.trim()) continue
+    if (typeof e.category !== 'string' || !isQuestionCategory(e.category)) continue
+    fromSaved.push({ id: e.id, category: e.category, text: e.text })
+  }
+  if (fromSaved.length < 5) {
+    return getQuestionnaireQuestions(gender)
+  }
+  const hasFixed = fromSaved.some((q) => q.id === FIXED_TURNING_POINT_QUESTION_ID)
+  if (!hasFixed) {
+    return [...fromSaved.slice(0, 5), getFixedTurningPointQuestion()]
+  }
+  return fromSaved
+}
+
 /** 編輯個資／舊資料：補上固定第 6 題（答案留空供填寫） */
 export function ensureQuestionnaireHasFixedSixth(entries: QuestionnaireEntry[]): QuestionnaireEntry[] {
   const fixed = getFixedTurningPointQuestion()
