@@ -830,11 +830,31 @@ export async function getLatestVerificationApplication(
   }
 }
 
+export type VerificationAutoReviewClientOutcome =
+  | 'approved'
+  | 'text_rejected'
+  | 'manual_queue'
+  | 'manual_required'
+  | 'already_approved'
+  | 'skipped'
+
+export type SubmitVerificationApplicationResult = {
+  ok: boolean
+  applicationId?: string
+  error?: string
+  autoReview?: {
+    outcome: VerificationAutoReviewClientOutcome
+    message?: string
+    presetId?: string
+    fields?: ('bio' | 'questionnaire')[]
+  }
+}
+
 export async function submitVerificationApplication(
   _userId: string,
   declaredCompany: string,
   docs: VerificationApplicationDocInput[],
-): Promise<{ ok: boolean; applicationId?: string; error?: string }> {
+): Promise<SubmitVerificationApplicationResult> {
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -865,9 +885,9 @@ export async function submitVerificationApplication(
     return { ok: false, error: '網路連線異常，請稍後再試。' }
   }
 
-  let body: { ok?: boolean; applicationId?: string; error?: string } = {}
+  let body: SubmitVerificationApplicationResult = { ok: false }
   try {
-    body = (await res.json()) as { ok?: boolean; applicationId?: string; error?: string }
+    body = (await res.json()) as SubmitVerificationApplicationResult
   } catch {
     /* ignore */
   }
@@ -876,7 +896,7 @@ export async function submitVerificationApplication(
     return { ok: false, error: body.error ?? '送審失敗，請稍後再試。' }
   }
 
-  return { ok: true, applicationId: body.applicationId }
+  return { ok: true, applicationId: body.applicationId, autoReview: body.autoReview }
 }
 
 async function attachProfilesToApplications(

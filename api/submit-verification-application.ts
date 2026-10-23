@@ -16,6 +16,7 @@ import {
   runVerificationSubmitApplication,
   type VerificationSubmitDocInput,
 } from './_utils/verificationSubmitApplication.js'
+import { runVerificationAutoReviewAfterSubmit } from './_utils/verificationAutoReview.js'
 
 function parseDocs(body: unknown): VerificationSubmitDocInput[] {
   if (!body || typeof body !== 'object') return []
@@ -99,5 +100,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   await deliverMetaSubmitApplicationCapiIfNeeded(admin, result.applicationId, capiCtx)
 
-  return res.status(200).json({ ok: true, applicationId: result.applicationId })
+  let autoReview
+  try {
+    autoReview = await runVerificationAutoReviewAfterSubmit(admin, result.applicationId)
+  } catch (e) {
+    console.error('[verification-submit] auto review failed', {
+      applicationId: result.applicationId,
+      message: e instanceof Error ? e.message : 'unknown',
+    })
+    autoReview = {
+      outcome: 'manual_required' as const,
+      message: '自動審核暫時無法完成，已保留待審，請稍候或聯絡客服。',
+      applicationId: result.applicationId,
+    }
+  }
+
+  return res.status(200).json({
+    ok: true,
+    applicationId: result.applicationId,
+    autoReview,
+  })
 }

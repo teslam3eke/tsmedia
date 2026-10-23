@@ -132,15 +132,20 @@ export async function runApproveVerificationApplication(
   const profilePatch: Record<string, unknown> = {
     is_verified: true,
     verification_status: 'approved',
+    verification_text_auto_strikes: 0,
   }
   if (approveIncomeWithMember && incomeDoc?.claimed_income_tier) {
     profilePatch.income_tier = incomeDoc.claimed_income_tier
   }
 
-  const { error: profileError } = await admin
+  let { error: profileError } = await admin
     .from('profiles')
     .update(profilePatch)
     .eq('id', application.user_id)
+  if (profileError?.message?.includes('verification_text_auto_strikes')) {
+    const { verification_text_auto_strikes: _s, ...rest } = profilePatch
+    ;({ error: profileError } = await admin.from('profiles').update(rest).eq('id', application.user_id))
+  }
   if (profileError) return { ok: false, error: profileError.message }
 
   const pathsToClear = application.docs

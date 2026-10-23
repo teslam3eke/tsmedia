@@ -18,6 +18,7 @@ import {
   type VerificationApplicationDocInput,
 } from '@/lib/db'
 import { trackMetaSubmitApplication } from '@/lib/metaPixel'
+import { VERIFICATION_ONBOARDING_REVIEW_MIN_SECONDS } from '@/lib/aiReviewConstants'
 import {
   PROFILE_PHOTO_MIN,
   PROFILE_PHOTO_MAX,
@@ -199,7 +200,9 @@ export default function IdentityVerifyScreen({
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [dailyCount, setDailyCount] = useState<number | null>(null)
   const [rejectionNote, setRejectionNote] = useState<string | null>(null)
+  const [autoRejectFieldHints, setAutoRejectFieldHints] = useState<('bio' | 'questionnaire')[]>([])
   const [reviewNotificationCutoff, setReviewNotificationCutoff] = useState<string | null>(null)
+  const reviewRevealTimerRef = useRef<number | null>(null)
 
   const bonusInputRef = useRef<HTMLInputElement>(null)
   const taxInputRef = useRef<HTMLInputElement>(null)
@@ -423,6 +426,7 @@ export default function IdentityVerifyScreen({
       return
     }
 
+    const reviewStartedAt = Date.now()
     const result = await submitVerificationApplication(userId, declaredCompany, built)
     if (!result.ok) {
       setSubmitError(result.error ?? '送審失敗，請稍後再試。')
@@ -438,12 +442,44 @@ export default function IdentityVerifyScreen({
     // 否則舊退件會被誤判成本輪剛退件，使用者會立刻被送回表單。
     await markVerificationReviewNotificationsRead(userId)
     setRejectionNote(null)
+    setAutoRejectFieldHints([])
     setReviewNotificationCutoff(new Date().toISOString())
     setVerifyGate('submitted')
     setReviewPendingHold(true)
     setSubmitting(false)
     void getTodayVerificationApplicationCount(userId).then(setDailyCount)
+
+    const outcome = result.autoReview?.outcome
+    const minMs = VERIFICATION_ONBOARDING_REVIEW_MIN_SECONDS * 1000
+    const scheduleReveal = (fn: () => void) => {
+      if (reviewRevealTimerRef.current != null) {
+        window.clearTimeout(reviewRevealTimerRef.current)
+      }
+      const delay = Math.max(0, minMs - (Date.now() - reviewStartedAt))
+      reviewRevealTimerRef.current = window.setTimeout(fn, delay)
+    }
+
+    if (outcome === 'text_rejected') {
+      scheduleReveal(() => {
+        setRejectionNote(result.autoReview?.message ?? null)
+        setAutoRejectFieldHints(result.autoReview?.fields ?? [])
+        setVerifyGate('rejected')
+        setReviewPendingHold(false)
+      })
+    } else if (outcome === 'approved' || outcome === 'already_approved') {
+      scheduleReveal(() => {
+        setVerifyGate('approved')
+        setReviewPendingHold(false)
+      })
+    }
+    /* manual_queue / manual_required / skipped：維持 submitted 等待（Admin 或輪詢） */
   }
+
+  useEffect(() => () => {
+    if (reviewRevealTimerRef.current != null) {
+      window.clearTimeout(reviewRevealTimerRef.current)
+    }
+  }, [])
 
   if (verifyGate === 'loading') {
     return (
@@ -553,6 +589,16 @@ export default function IdentityVerifyScreen({
                     <p className="mt-1 text-sm leading-relaxed text-red-800">
                       {sanitizeVerificationUserMessage(rejectionNote)}
                     </p>
+                    {autoRejectFieldHints.length > 0 && (
+                      <p className="mt-2 text-xs text-red-700">
+                        請優先修改：
+                        {autoRejectFieldHints.includes('bio') ? '自傳' : ''}
+                        {autoRejectFieldHints.includes('bio') && autoRejectFieldHints.includes('questionnaire')
+                          ? '、'
+                          : ''}
+                        {autoRejectFieldHints.includes('questionnaire') ? '問卷回答' : ''}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-1 text-xs text-red-700 leading-relaxed">
@@ -768,7 +814,7 @@ export default function IdentityVerifyScreen({
               >
                 <h2 className="text-base font-bold text-slate-900">確定要送出嗎？</h2>
                 <p className="text-sm text-slate-500 leading-relaxed">
-                  目前採<strong className="text-slate-700">全人工審核</strong>，最長等待約 {VERIFICATION_MANUAL_SLA_HOURS} 小時。
+                  若送審失敗，最長等待約 {VERIFICATION_MANUAL_SLA_HOURS} 小時。
                   <br />
                   如有上傳選填文件，審核通過後即刪除。
                 </p>
