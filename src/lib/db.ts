@@ -17,6 +17,7 @@ import type { CreditPackKey } from './membershipProducts'
 import { peekSignedPhotoUrlCache, putSignedPhotoUrlCache } from './signedPhotoUrlCache'
 import { getClientMetaEventSourceUrl, getMetaAttributionPayload } from './metaAttribution'
 import { isClientMockPaymentEnabled, PAYMENT_UNAVAILABLE_USER_MESSAGE } from './paymentProvider'
+import { verificationRejectionReasonForDisplay } from './verificationAiUtils'
 
 export const TERMS_VERSION = '2026-07-14'
 
@@ -771,7 +772,7 @@ export async function getTodayVerificationApplicationCount(userId: string): Prom
   return count ?? 0
 }
 
-/** 最近一次被退件的 reviewer_note（供重新送審畫面固定顯示，不只靠推播）。 */
+/** 最近一次被退件的使用者可見原因（繁中；自動審核 preset 不露出 AUTO_TEXT_REJECT）。 */
 export async function getLatestVerificationRejectionNote(userId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('verification_applications')
@@ -787,7 +788,8 @@ export async function getLatestVerificationRejectionNote(userId: string): Promis
     return null
   }
   const note = data?.reviewer_note?.trim()
-  return note || null
+  if (!note) return null
+  return verificationRejectionReasonForDisplay(note) ?? note
 }
 
 export async function getLatestVerificationApplication(

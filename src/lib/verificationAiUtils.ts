@@ -197,6 +197,14 @@ function displayRejectReason(raw: string): string {
   return sanitizeVerificationUserMessage(text)
 }
 
+/** 驗證頁紅框等：reviewer_note（含 AUTO_TEXT_REJECT preset）→ 使用者可見繁中 */
+export function verificationRejectionReasonForDisplay(
+  reviewerNote: string | null | undefined,
+): string | null {
+  if (!reviewerNote?.trim()) return null
+  return displayRejectReason(reviewerNote.trim())
+}
+
 export function formatVerificationApplicationRejectionAlertBody(
   reviewerNote?: string | null,
 ): string {

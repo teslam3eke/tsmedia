@@ -40,8 +40,8 @@ import { VerifyWaitNotificationCard } from '@/components/VerifyWaitNotificationC
 import {
   VERIFICATION_DAILY_SUBMIT_LIMIT,
   VERIFICATION_APPLICATION_REJECTION_FOOTER,
+  verificationRejectionReasonForDisplay,
 } from '@/lib/verificationAiUtils'
-import { sanitizeVerificationUserMessage } from '@/lib/companyDisplay'
 import { useVerificationReviewNotifications } from '@/hooks/useVerificationReviewNotifications'
 import { useWebPushSubscriptionSync } from '@/hooks/useWebPushSubscriptionSync'
 
@@ -603,7 +603,7 @@ export default function IdentityVerifyScreen({
                   <div className="mt-2">
                     <p className="text-[11px] font-bold uppercase tracking-wide text-red-600">退件原因</p>
                     <p className="mt-1 text-sm leading-relaxed text-red-800">
-                      {sanitizeVerificationUserMessage(rejectionNote)}
+                      {verificationRejectionReasonForDisplay(rejectionNote) ?? rejectionNote}
                     </p>
                     {autoRejectFieldHints.length > 0 && (
                       <p className="mt-2 text-xs text-red-700">
