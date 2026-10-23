@@ -74,8 +74,8 @@ function isOnlyNoise(s: string): boolean {
 function hasRepeatStuffing(s: string): boolean {
   const t = s.trim()
   if (!t) return false
-  /** 同一字連續 4 字以上（含 哈哈哈哈） */
-  return /([^\s\n\r\d])\1{3,}/u.test(t)
+  /** 同一字元（含數字、符號、中文）連續 4 個以上；不含空白／換行 */
+  return /([^\s\n\r])\1{3,}/u.test(t)
 }
 
 function isPerfunctoryWhole(s: string): boolean {

@@ -13,7 +13,7 @@ const PRESET_MESSAGES: Record<AutoTextRejectPresetId, string> = {
   bio_too_short:
     '自傳或問卷內容過於簡短，無法協助其他會員認識您。請充實自我介紹與問卷回答後重新送審。',
   text_repeat_stuffing:
-    '自傳或問卷有過多重複的字或符號（如連續「～」「！」、同一字重複多次）。請改寫成正常句子後再送審。',
+    '自傳或問卷有過多重複的字、數字或符號（如連續「～」「！」、同一字或數字重複多次）。請改寫成正常句子後再送審。',
   text_off_platform:
     '自傳或問卷不可留 IG、LINE、電話、Email、網址等站外聯絡或導流。請刪除後再送審。',
   photos_insufficient:

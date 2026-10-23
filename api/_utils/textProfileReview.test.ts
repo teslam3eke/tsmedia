@@ -35,6 +35,12 @@ describe('reviewTextProfile', () => {
     expect(r.presetId).toBe('text_repeat_stuffing')
   })
 
+  it('four repeated digits fails repeat stuffing', () => {
+    const r = reviewTextProfile(null, [{ id: 5, answer: '我喜歡7777' }])
+    expect(r.verdict).toBe('NEEDS_EDIT')
+    expect(r.presetId).toBe('text_repeat_stuffing')
+  })
+
   it('IG contact fails off_platform', () => {
     const r = reviewTextProfile(null, [{ id: 6, answer: '我的 IG：abc_test' }])
     expect(r.verdict).toBe('NEEDS_EDIT')

@@ -95,9 +95,9 @@ export const ADMIN_VERIFICATION_REJECT_PRESETS: AdminVerificationRejectPreset[] 
   {
     id: 'text_repeat_stuffing',
     category: '自傳／問卷',
-    label: '重複字元或符號',
+    label: '重複字元、數字或符號',
     message:
-      '自傳或問卷有過多重複的字或符號（如連續「～」「！」、同一字重複多次）。請改寫成正常句子後再送審。',
+      '自傳或問卷有過多重複的字、數字或符號（如連續「～」「！」、同一字或數字重複多次）。請改寫成正常句子後再送審。',
   },
   {
     id: 'text_off_platform',
