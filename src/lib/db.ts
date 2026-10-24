@@ -632,22 +632,22 @@ async function attachProfilesToDocs(docs: VerificationDocWithProfile[]): Promise
   const userIds = [...new Set(docs.map((doc) => doc.user_id).filter(Boolean))]
   if (userIds.length === 0) return docs
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, name, gender, photo_urls')
-    .in('id', userIds)
+  const { rows, error } = await selectProfilesByIdsInChunks(userIds, 'id, name, gender, photo_urls')
 
   if (error) {
-    console.error('[db] attachProfilesToDocs error:', error.message)
+    console.error('[db] attachProfilesToDocs error:', error)
     return docs.map((doc) => ({ ...doc, profiles: null }))
   }
 
   const profileMap = new Map(
-    (data ?? []).map((profile) => [profile.id, {
-      name:       profile.name,
-      gender:     profile.gender,
-      photo_urls: profile.photo_urls,
-    }]),
+    rows.map((profile) => [
+      profile.id as string,
+      {
+        name: profile.name as string | null,
+        gender: profile.gender as string | null,
+        photo_urls: profile.photo_urls as string[] | null,
+      },
+    ]),
   )
 
   return docs.map((doc) => ({
@@ -901,39 +901,69 @@ export async function submitVerificationApplication(
   return { ok: true, applicationId: body.applicationId, autoReview: body.autoReview }
 }
 
+/** 單次 `.in()` 過多 UUID 會導致 PostgREST fetch failed（後台「已通過」動輒數百筆） */
+const ADMIN_LIST_IN_FILTER_CHUNK = 80
+
+async function selectProfilesByIdsInChunks(
+  userIds: string[],
+  select: string,
+): Promise<{ rows: Record<string, unknown>[]; error: string | null }> {
+  const rows: Record<string, unknown>[] = []
+  for (let i = 0; i < userIds.length; i += ADMIN_LIST_IN_FILTER_CHUNK) {
+    const chunk = userIds.slice(i, i + ADMIN_LIST_IN_FILTER_CHUNK)
+    const { data, error } = await supabase.from('profiles').select(select).in('id', chunk)
+    if (error) return { rows, error: error.message }
+    if (data?.length) rows.push(...(data as Record<string, unknown>[]))
+  }
+  return { rows, error: null }
+}
+
+async function selectVerificationDocsByAppIdsInChunks(
+  appIds: string[],
+): Promise<{ docs: VerificationDocRow[]; error: string | null }> {
+  const docs: VerificationDocRow[] = []
+  for (let i = 0; i < appIds.length; i += ADMIN_LIST_IN_FILTER_CHUNK) {
+    const chunk = appIds.slice(i, i + ADMIN_LIST_IN_FILTER_CHUNK)
+    const { data, error } = await supabase
+      .from('verification_docs')
+      .select('*')
+      .in('application_id', chunk)
+      .order('submitted_at', { ascending: true })
+    if (error) return { docs, error: error.message }
+    if (data?.length) docs.push(...(data as VerificationDocRow[]))
+  }
+  return { docs, error: null }
+}
+
 async function attachProfilesToApplications(
   apps: VerificationApplicationWithProfile[],
 ): Promise<VerificationApplicationWithProfile[]> {
   const userIds = [...new Set(apps.map((a) => a.user_id).filter(Boolean))]
   if (userIds.length === 0) return apps
 
-  const { data: profiles, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, name, gender, photo_urls, bio, company, job_title, questionnaire')
-    .in('id', userIds)
+  const { rows: profileRows, error: profileError } = await selectProfilesByIdsInChunks(
+    userIds,
+    'id, name, gender, photo_urls, bio, company, job_title, questionnaire',
+  )
 
   if (profileError) {
-    console.error('[db] attachProfilesToApplications profiles error:', profileError.message)
+    console.error('[db] attachProfilesToApplications profiles error:', profileError)
     return apps.map((a) => ({ ...a, profiles: null, docs: a.docs ?? [] }))
   }
 
   const profileMap = new Map(
-    (profiles ?? []).map((p) => [p.id, p as VerificationApplicationWithProfile['profiles']]),
+    profileRows.map((p) => [p.id as string, p as VerificationApplicationWithProfile['profiles']]),
   )
 
   const appIds = apps.map((a) => a.id)
-  const { data: docs, error: docsError } = await supabase
-    .from('verification_docs')
-    .select('*')
-    .in('application_id', appIds)
-    .order('submitted_at', { ascending: true })
+  const { docs: docRows, error: docsError } = await selectVerificationDocsByAppIdsInChunks(appIds)
 
   if (docsError) {
-    console.error('[db] attachProfilesToApplications docs error:', docsError.message)
+    console.error('[db] attachProfilesToApplications docs error:', docsError)
   }
 
   const docsByApp = new Map<string, VerificationDocRow[]>()
-  for (const doc of (docs ?? []) as VerificationDocRow[]) {
+  for (const doc of docRows) {
     if (!doc.application_id) continue
     const list = docsByApp.get(doc.application_id) ?? []
     list.push(doc)
