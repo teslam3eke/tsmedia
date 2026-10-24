@@ -977,16 +977,28 @@ async function attachProfilesToApplications(
   }))
 }
 
+/** 後台「全部／已通過／已拒絕」僅載入最近 N 筆，避免單次 .in() 過大 */
+export const ADMIN_VERIFICATION_RECENT_LIST_LIMIT = 100
+
 export async function getAllVerificationApplications(
   statusFilter?: VerificationApplicationStatus | 'all',
 ): Promise<VerificationApplicationWithProfile[]> {
-  let query = supabase
-    .from('verification_applications')
-    .select('*')
-    .order('submitted_at', { ascending: statusFilter === 'pending' })
+  let query = supabase.from('verification_applications').select('*')
 
   if (statusFilter && statusFilter !== 'all') {
     query = query.eq('status', statusFilter)
+  }
+
+  if (statusFilter === 'pending') {
+    query = query.order('submitted_at', { ascending: true })
+  } else if (statusFilter === 'approved' || statusFilter === 'rejected') {
+    query = query
+      .order('reviewed_at', { ascending: false, nullsFirst: false })
+      .limit(ADMIN_VERIFICATION_RECENT_LIST_LIMIT)
+  } else {
+    query = query
+      .order('submitted_at', { ascending: false })
+      .limit(ADMIN_VERIFICATION_RECENT_LIST_LIMIT)
   }
 
   const { data, error } = await query

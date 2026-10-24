@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { userFeedbackCategoryLabel } from '@/lib/userFeedback'
 import { supabase } from '@/lib/supabase'
 import {
+  ADMIN_VERIFICATION_RECENT_LIST_LIMIT,
   getAllVerificationApplications, approveVerificationApplication,
   rejectVerificationApplication, getPendingVerifications,
   approveVerificationDoc, rejectVerificationDoc,
@@ -361,6 +362,12 @@ export default function AdminScreen({ onBack }: Props) {
               {f === 'pending' ? '待審核' : f === 'all' ? '全部' : f === 'approved' ? '已通過' : '已拒絕'}
             </button>
           ))}
+          {(filter === 'all' || filter === 'approved' || filter === 'rejected') && (
+            <p className="col-span-4 text-[11px] text-slate-400 leading-relaxed px-0.5">
+              僅顯示最近 {ADMIN_VERIFICATION_RECENT_LIST_LIMIT} 筆
+              {filter === 'approved' || filter === 'rejected' ? '（依審核完成時間新到舊）' : '（依送審時間新到舊）'}
+            </p>
+          )}
         </div>
         )}
       </div>
