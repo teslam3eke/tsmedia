@@ -6,7 +6,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import type {
   QuestionnaireEntry, Company, DocType, ProfileRow, Region, IncomeTier,
   AiConfidence, VerificationDocWithProfile, VerificationDocRow,
-  VerificationApplicationWithProfile, VerificationApplicationStatus,
+  VerificationApplicationWithProfile, VerificationApplicationProfile, VerificationApplicationStatus,
   AppNotificationKind, AppNotificationRow,
   ProfileInteractionAction, MatchRow, MessageRow, ReportReason, ProfileReportRow,
   MessageReportReason, MessageReportRow, CreditBalance, CreditTransactionRow,
@@ -632,7 +632,10 @@ async function attachProfilesToDocs(docs: VerificationDocWithProfile[]): Promise
   const userIds = [...new Set(docs.map((doc) => doc.user_id).filter(Boolean))]
   if (userIds.length === 0) return docs
 
-  const { rows, error } = await selectProfilesByIdsInChunks(userIds, 'id, name, gender, photo_urls')
+  const { rows, error } = await selectProfilesByIdsInChunks<AdminDocProfileRow>(
+    userIds,
+    'id, name, gender, photo_urls',
+  )
 
   if (error) {
     console.error('[db] attachProfilesToDocs error:', error)
@@ -641,11 +644,11 @@ async function attachProfilesToDocs(docs: VerificationDocWithProfile[]): Promise
 
   const profileMap = new Map(
     rows.map((profile) => [
-      profile.id as string,
+      profile.id,
       {
-        name: profile.name as string | null,
-        gender: profile.gender as string | null,
-        photo_urls: profile.photo_urls as string[] | null,
+        name: profile.name,
+        gender: profileGenderFromDb(profile.gender),
+        photo_urls: profile.photo_urls,
       },
     ]),
   )
@@ -904,16 +907,29 @@ export async function submitVerificationApplication(
 /** 單次 `.in()` 過多 UUID 會導致 PostgREST fetch failed（後台「已通過」動輒數百筆） */
 const ADMIN_LIST_IN_FILTER_CHUNK = 80
 
-async function selectProfilesByIdsInChunks(
+type AdminDocProfileRow = {
+  id: string
+  name: string | null
+  gender: 'male' | 'female' | null
+  photo_urls: string[] | null
+}
+
+type AdminAppProfileRow = { id: string } & VerificationApplicationProfile
+
+function profileGenderFromDb(value: unknown): 'male' | 'female' | null {
+  return value === 'male' || value === 'female' ? value : null
+}
+
+async function selectProfilesByIdsInChunks<T extends { id: string }>(
   userIds: string[],
   select: string,
-): Promise<{ rows: Record<string, unknown>[]; error: string | null }> {
-  const rows: Record<string, unknown>[] = []
+): Promise<{ rows: T[]; error: string | null }> {
+  const rows: T[] = []
   for (let i = 0; i < userIds.length; i += ADMIN_LIST_IN_FILTER_CHUNK) {
     const chunk = userIds.slice(i, i + ADMIN_LIST_IN_FILTER_CHUNK)
     const { data, error } = await supabase.from('profiles').select(select).in('id', chunk)
     if (error) return { rows, error: error.message }
-    if (data?.length) rows.push(...(data as Record<string, unknown>[]))
+    if (data?.length) rows.push(...(data as unknown as T[]))
   }
   return { rows, error: null }
 }
@@ -941,7 +957,7 @@ async function attachProfilesToApplications(
   const userIds = [...new Set(apps.map((a) => a.user_id).filter(Boolean))]
   if (userIds.length === 0) return apps
 
-  const { rows: profileRows, error: profileError } = await selectProfilesByIdsInChunks(
+  const { rows: profileRows, error: profileError } = await selectProfilesByIdsInChunks<AdminAppProfileRow>(
     userIds,
     'id, name, gender, photo_urls, bio, company, job_title, questionnaire',
   )
@@ -951,8 +967,17 @@ async function attachProfilesToApplications(
     return apps.map((a) => ({ ...a, profiles: null, docs: a.docs ?? [] }))
   }
 
-  const profileMap = new Map(
-    profileRows.map((p) => [p.id as string, p as VerificationApplicationWithProfile['profiles']]),
+  const profileMap = new Map<string, VerificationApplicationProfile>(
+    profileRows.map((p) => {
+      const { id, gender, ...rest } = p
+      return [
+        id,
+        {
+          ...rest,
+          gender: profileGenderFromDb(gender),
+        },
+      ]
+    }),
   )
 
   const appIds = apps.map((a) => a.id)
